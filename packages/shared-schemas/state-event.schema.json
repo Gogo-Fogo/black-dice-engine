@@ -16,9 +16,12 @@
       "type": "string",
       "enum": [
         "roll_recorded",
+        "hp_changed",
         "resource_changed",
         "condition_added",
         "condition_removed",
+        "character_claimed",
+        "character_released",
         "scene_started",
         "scene_ended",
         "faction_standing_changed",
@@ -36,6 +39,9 @@
         "kind": {
           "type": "string",
           "enum": ["gm", "player", "system", "ai_assistant"]
+        },
+        "label": {
+          "type": "string"
         }
       }
     },

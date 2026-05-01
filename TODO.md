@@ -78,6 +78,7 @@ Goal: let the GM and three players use the system together on the same network.
 - [x] Add phone-friendly character sheet view.
 - [x] Add player roll submission.
 - [x] Add GM roll log view.
+- [x] Add recent table event history view.
 - [ ] Add state event approval view.
 - [x] Add GM controls for HP, conditions, and resources.
 - [x] Add HP, AC, inventory, conditions, notes, and resource tracking.
@@ -139,7 +140,6 @@ Goal: make failures visible and recoverable before adding heavier integrations.
 - [ ] Add runtime status object.
 - [ ] Add service health checks for game server, dice, state, memory, media, audio, and model adapters.
 - [ ] Add GM dashboard status strip.
-- [ ] Add player client heartbeat.
 - [x] Add player client heartbeat.
 - [x] Add reconnect/resume flow.
 - [ ] Add local table PIN/session token strategy for QR join.

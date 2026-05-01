@@ -61,6 +61,28 @@ type RollRecord = {
   timestamp: string;
 };
 
+type TableEventRecord = {
+  id: string;
+  category: "roll" | "state" | "claim";
+  type:
+    | "roll_recorded"
+    | "hp_changed"
+    | "resource_changed"
+    | "condition_added"
+    | "condition_removed"
+    | "character_claimed"
+    | "character_released";
+  actor: {
+    id: string;
+    kind: "gm" | "player" | "system" | "ai_assistant";
+    label: string;
+  };
+  visibility: "gm_only" | "player_visible" | "public_demo";
+  timestamp: string;
+  summary: string;
+  payload: Record<string, unknown>;
+};
+
 type SessionSnapshot = {
   campaignId: string;
   campaignTitle: string;
@@ -69,6 +91,7 @@ type SessionSnapshot = {
   joinUrl: string;
   party: Character[];
   rollLog: RollRecord[];
+  eventLog: TableEventRecord[];
 };
 
 type SocketEnvelope =
@@ -147,6 +170,17 @@ function formatTime(value: string) {
     hour: "numeric",
     minute: "2-digit"
   });
+}
+
+function formatVisibilityLabel(value: TableEventRecord["visibility"]) {
+  switch (value) {
+    case "gm_only":
+      return "GM only";
+    case "public_demo":
+      return "Public demo";
+    default:
+      return "Table visible";
+  }
 }
 
 function createRequestId() {
@@ -715,6 +749,29 @@ export default function App() {
                 </div>
               </div>
             )) ?? <p>Waiting for the first roll.</p>}
+          </div>
+        </article>
+
+        <article className="panel panel-wide">
+          <div className="panel-header">
+            <h2>Table Event History</h2>
+            <span>{snapshot?.eventLog.length ?? 0} recent events</span>
+          </div>
+          <div className="event-log">
+            {snapshot?.eventLog.map((entry) => (
+              <div key={entry.id} className="event-row">
+                <div>
+                  <strong>{entry.summary}</strong>
+                  <p>
+                    {entry.actor.label} · {formatVisibilityLabel(entry.visibility)}
+                  </p>
+                </div>
+                <div className="event-meta">
+                  <span className={`event-pill event-${entry.category}`}>{entry.category}</span>
+                  <small>{formatTime(entry.timestamp)}</small>
+                </div>
+              </div>
+            )) ?? <p>Waiting for the first state change.</p>}
           </div>
         </article>
       </section>

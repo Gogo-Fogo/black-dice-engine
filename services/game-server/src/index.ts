@@ -69,6 +69,28 @@ type RollRecord = {
   timestamp: string;
 };
 
+type TableEventRecord = {
+  id: string;
+  category: "roll" | "state" | "claim";
+  type:
+    | "roll_recorded"
+    | "hp_changed"
+    | "resource_changed"
+    | "condition_added"
+    | "condition_removed"
+    | "character_claimed"
+    | "character_released";
+  actor: {
+    id: string;
+    kind: "gm" | "player" | "system" | "ai_assistant";
+    label: string;
+  };
+  visibility: "gm_only" | "player_visible" | "public_demo";
+  timestamp: string;
+  summary: string;
+  payload: Record<string, unknown>;
+};
+
 type SessionSnapshot = {
   campaignId: string;
   campaignTitle: string;
@@ -77,6 +99,7 @@ type SessionSnapshot = {
   joinUrl: string;
   party: Character[];
   rollLog: RollRecord[];
+  eventLog: TableEventRecord[];
 };
 
 type StateEventRequest =
@@ -211,6 +234,7 @@ const rollLog: RollRecord[] = [
     timestamp: new Date().toISOString()
   }
 ];
+const eventLog: TableEventRecord[] = [];
 
 app.use(cors());
 app.use(express.json());
@@ -308,7 +332,8 @@ function getSessionSnapshot(): SessionSnapshot {
     tablePin: "BD20",
     joinUrl: `http://${joinHost}:${gameServerPort}/player/?pin=BD20`,
     party,
-    rollLog
+    rollLog,
+    eventLog
   };
 }
 
@@ -318,6 +343,19 @@ function clamp(value: number, min: number, max: number) {
 
 function resolveCharacter(characterId: string) {
   return party.find((entry) => entry.id === characterId) ?? null;
+}
+
+function recordTableEvent(event: Omit<TableEventRecord, "id" | "timestamp">) {
+  const record: TableEventRecord = {
+    id: randomUUID(),
+    timestamp: new Date().toISOString(),
+    ...event
+  };
+
+  eventLog.unshift(record);
+  eventLog.splice(20);
+
+  return record;
 }
 
 function publishSessionState() {
@@ -437,7 +475,26 @@ app.post("/api/state-events", (request, response) => {
       return;
     }
 
+    const previous = character.hp.current;
     character.hp.current = clamp(character.hp.current + body.amount, 0, character.hp.max);
+    recordTableEvent({
+      category: "state",
+      type: "hp_changed",
+      actor: {
+        id: "gm-dashboard",
+        kind: "gm",
+        label: "GM Dashboard"
+      },
+      visibility: "player_visible",
+      summary: `${character.name} HP ${previous} -> ${character.hp.current}`,
+      payload: {
+        characterId: character.id,
+        characterName: character.name,
+        previous,
+        current: character.hp.current,
+        delta: body.amount
+      }
+    });
     const result = {
       ok: true,
       sessionSnapshot: publishSessionState()
@@ -461,6 +518,22 @@ app.post("/api/state-events", (request, response) => {
 
     if (!character.conditions.includes(condition)) {
       character.conditions.push(condition);
+      recordTableEvent({
+        category: "state",
+        type: "condition_added",
+        actor: {
+          id: "gm-dashboard",
+          kind: "gm",
+          label: "GM Dashboard"
+        },
+        visibility: "player_visible",
+        summary: `${character.name} gained condition: ${condition}`,
+        payload: {
+          characterId: character.id,
+          characterName: character.name,
+          condition
+        }
+      });
     }
 
     const result = {
@@ -484,7 +557,26 @@ app.post("/api/state-events", (request, response) => {
       return;
     }
 
+    const hadCondition = character.conditions.includes(condition);
     character.conditions = character.conditions.filter((entry) => entry !== condition);
+    if (hadCondition) {
+      recordTableEvent({
+        category: "state",
+        type: "condition_removed",
+        actor: {
+          id: "gm-dashboard",
+          kind: "gm",
+          label: "GM Dashboard"
+        },
+        visibility: "player_visible",
+        summary: `${character.name} cleared condition: ${condition}`,
+        payload: {
+          characterId: character.id,
+          characterName: character.name,
+          condition
+        }
+      });
+    }
     const result = {
       ok: true,
       sessionSnapshot: publishSessionState()
@@ -513,7 +605,28 @@ app.post("/api/state-events", (request, response) => {
       return;
     }
 
+    const previous = resource.current;
     resource.current = clamp(body.value, 0, resource.max);
+    recordTableEvent({
+      category: "state",
+      type: "resource_changed",
+      actor: {
+        id: "gm-dashboard",
+        kind: "gm",
+        label: "GM Dashboard"
+      },
+      visibility: "player_visible",
+      summary: `${character.name} ${resource.label} ${previous}/${resource.max} -> ${resource.current}/${resource.max}`,
+      payload: {
+        characterId: character.id,
+        characterName: character.name,
+        resourceId: resource.id,
+        resourceLabel: resource.label,
+        previous,
+        current: resource.current,
+        max: resource.max
+      }
+    });
     const result = {
       ok: true,
       sessionSnapshot: publishSessionState()
@@ -579,6 +692,23 @@ app.post("/api/claim-character", (request, response) => {
 
   character.claimedByClientId = clientId;
   character.claimedByLabel = playerLabel;
+  recordTableEvent({
+    category: "claim",
+    type: "character_claimed",
+    actor: {
+      id: clientId,
+      kind: "player",
+      label: playerLabel
+    },
+    visibility: "player_visible",
+    summary: `${playerLabel} claimed ${character.name}`,
+    payload: {
+      clientId,
+      characterId: character.id,
+      characterName: character.name,
+      playerLabel
+    }
+  });
 
   const sessionSnapshot = publishSessionState();
   const result = {
@@ -613,8 +743,26 @@ app.post("/api/release-character", (request, response) => {
 
   for (const character of party) {
     if (character.claimedByClientId === clientId) {
+      const previousLabel = character.claimedByLabel ?? "Player";
       character.claimedByClientId = null;
       character.claimedByLabel = null;
+      recordTableEvent({
+        category: "claim",
+        type: "character_released",
+        actor: {
+          id: clientId,
+          kind: "player",
+          label: previousLabel
+        },
+        visibility: "player_visible",
+        summary: `${previousLabel} released ${character.name}`,
+        payload: {
+          clientId,
+          characterId: character.id,
+          characterName: character.name,
+          playerLabel: previousLabel
+        }
+      });
     }
   }
 
@@ -668,6 +816,27 @@ app.post("/api/rolls", (request, response) => {
 
   rollLog.unshift(record);
   rollLog.splice(12);
+  recordTableEvent({
+    category: "roll",
+    type: "roll_recorded",
+    actor: {
+      id: actorId,
+      kind: "player",
+      label: actorName
+    },
+    visibility: "player_visible",
+    summary: `${actorName} rolled ${record.total} on ${note}`,
+    payload: {
+      rollId: record.id,
+      actorId,
+      actorName,
+      dice: record.dice,
+      modifier: record.modifier,
+      rolled: record.rolled,
+      total: record.total,
+      note
+    }
+  });
 
   broadcast("roll_recorded", record);
   broadcast("session_snapshot", getSessionSnapshot());
