@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-dice-engine.local/schemas/permission-policy.schema.json",
+  "title": "Permission Policy",
+  "type": "object",
+  "required": ["id", "campaignId", "role", "permissions"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "campaignId": {
+      "type": "string"
+    },
+    "role": {
+      "type": "string",
+      "enum": ["gm", "player", "spectator", "ai", "admin"]
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "view_public_scene",
+          "view_own_sheet",
+          "view_party_summary",
+          "view_gm_notes",
+          "submit_action",
+          "submit_roll",
+          "edit_own_notes",
+          "edit_character_state",
+          "approve_state_event",
+          "apply_state_event",
+          "manage_scene",
+          "manage_media_jobs",
+          "manage_audio",
+          "manage_memory",
+          "manage_imports",
+          "manage_backups",
+          "manage_runtime",
+          "export_session",
+          "administer_users"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "visibilityAllowed": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["gm_only", "player_visible", "public_demo"]
+      },
+      "default": ["player_visible", "public_demo"]
+    }
+  }
+}

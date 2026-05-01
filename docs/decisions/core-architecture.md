@@ -19,6 +19,7 @@ GM dashboard / player phones
 - `GM Dashboard`: main screen for narration, scene control, party state, image/video/audio queues, hidden notes, and GM approvals.
 - `Player Companion`: phone-first sheet/controller for HP, stats, inventory, rolls, current scene, handouts, and submitted actions.
 - `Game Server`: session coordinator and single API boundary for clients.
+- `Runtime Service`: health checks, resource status, reconnect state, backups, and recoverable error reporting.
 - `Dice Service`: deterministic roll parsing and roll history.
 - `State Service`: authoritative state-event validation and application.
 - `Memory Service`: campaign bible, scene summaries, lore retrieval, and canon updates.
@@ -56,6 +57,13 @@ The game server validates and applies:
 - faction standing
 - visibility rules
 
+The runtime layer validates operational safety:
+
+- whether a subsystem is available
+- whether a heavy media job should run now or queue
+- whether a client is connected, reconnecting, or stale
+- whether a failure should degrade gracefully or block an action
+
 ## Local-First Default
 
 Default development should assume:
@@ -66,6 +74,7 @@ Default development should assume:
 - Local assets.
 - Local ComfyUI.
 - Local model endpoints where configured.
+- Local backup/export path.
 - Optional cloud/director calls only when explicitly enabled.
 
 ## Cloud Later

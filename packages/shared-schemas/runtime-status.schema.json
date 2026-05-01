@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-dice-engine.local/schemas/runtime-status.schema.json",
+  "title": "Runtime Status",
+  "type": "object",
+  "required": ["id", "status", "mode", "updatedAt", "services"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ok", "degraded", "offline", "maintenance"]
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["fast", "scene", "cinematic", "prep", "offline"]
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "services": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "status"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["ok", "degraded", "offline", "unknown"]
+          },
+          "latencyMs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "activeModel": {
+          "type": "string"
+        },
+        "contextTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mediaJobsQueued": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mediaJobsRunning": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "diskFreeGb": {
+          "type": "number",
+          "minimum": 0
+        },
+        "vramFreeMb": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "vramTotalMb": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    }
+  }
+}

@@ -36,6 +36,9 @@ SQLite should store exact game state:
 - scene packets
 - asset jobs
 - memory entries
+- client sessions
+- error events
+- backup manifests
 
 The most important table is `state_events`. Current state can be derived, audited, rolled back, or replayed from state changes.
 
@@ -85,6 +88,21 @@ Generated files should live outside the repo. The database stores metadata:
 - retention status
 
 This keeps continuity possible without storing binary assets in Git.
+
+## Backups And Replay
+
+Backups should live outside the repo and be tracked with manifests.
+
+The system should support:
+
+- backup at session start
+- backup at session end
+- manual backup before risky changes
+- pre-migration backup
+- restore notes with source and target paths
+- session export to Markdown
+
+State events should remain replayable so the system can reconstruct or audit hard-truth state after a crash, bad AI suggestion, or mistaken GM action.
 
 ## Future Upgrades
 

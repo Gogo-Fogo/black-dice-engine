@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-dice-engine.local/schemas/client-session.schema.json",
+  "title": "Client Session",
+  "type": "object",
+  "required": ["id", "campaignId", "role", "status", "connectedAt", "lastSeenAt"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "campaignId": {
+      "type": "string"
+    },
+    "playerId": {
+      "type": "string"
+    },
+    "characterId": {
+      "type": "string"
+    },
+    "role": {
+      "type": "string",
+      "enum": ["gm", "player", "spectator", "ai", "admin"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["connected", "reconnecting", "disconnected", "revoked"]
+    },
+    "connectedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "lastSeenAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "lastHeartbeatAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "resumeTokenId": {
+      "type": "string",
+      "description": "Identifier for a local resume token. Do not expose the raw token in logs or exports."
+    },
+    "userAgent": {
+      "type": "string"
+    },
+    "ipHint": {
+      "type": "string",
+      "description": "Optional local-network hint for debugging. Do not rely on this for authorization."
+    }
+  }
+}

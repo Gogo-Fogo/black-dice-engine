@@ -49,6 +49,7 @@ Planned capabilities include:
 - Deterministic dice and rules event service.
 - Structured game-state service with auditable state events.
 - Campaign memory service for canon, summaries, locations, factions, NPCs, and unresolved threads.
+- Runtime health, reconnect, backup, and graceful-degradation design.
 - ComfyUI routing layer for local image and video generation.
 - Local audio cues for music moods, ambience loops, and one-shot stingers.
 - Import service for user-owned notes and campaign material, with strict privacy boundaries.
@@ -110,6 +111,7 @@ The working product decisions live in `docs/decisions/`. Start with:
 - `mvp-scope.md`
 - `database-and-memory-design.md`
 - `latency-and-performance-policy.md`
+- `runtime-reliability.md`
 - `campaign-design.md`
 - `character-creation.md`
 

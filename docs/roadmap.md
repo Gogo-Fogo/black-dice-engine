@@ -15,6 +15,7 @@ Black Dice Engine is currently an early scaffold. This roadmap is directional an
 - Add dice service prototype.
 - Add state event validation.
 - Add basic WebSocket session updates.
+- Add runtime health, reconnect, and error-event contracts.
 - Add local development scripts.
 
 ## Phase 2: GM Dashboard Prototype
@@ -53,3 +54,4 @@ Black Dice Engine is currently an early scaffold. This roadmap is directional an
 - Add tests around schemas and state events.
 - Add backup/export guidance.
 - Review security posture for local network usage.
+- Add graceful failure behavior for unavailable AI/media/audio services.

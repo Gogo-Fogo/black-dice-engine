@@ -24,6 +24,10 @@ The player companion is a phone/tablet interface for character sheets, status, d
 
 The game server coordinates sessions, WebSocket connections, permissions, and service calls.
 
+### Runtime Service
+
+The runtime service tracks health, resource pressure, reconnect state, backup status, and recoverable errors so the table can keep playing when optional subsystems fail.
+
 ### Dice Service
 
 The dice service owns roll parsing, randomization, roll history, and roll visibility.
@@ -58,6 +62,7 @@ The import service will handle user-owned notes and campaign material. It must p
 6. Player-visible updates are broadcast to companion clients.
 7. Optional image/video requests are routed through ComfyUI after GM approval.
 8. Optional audio cues start loops, crossfade moods, or play one-shot stingers from the local audio library.
+9. Runtime status, reconnect state, and recoverable errors are broadcast to the GM dashboard.
 
 ## Repository Boundary
 

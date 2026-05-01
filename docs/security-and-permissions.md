@@ -22,6 +22,16 @@ Data should be labeled by audience:
 
 Before sending data to a player client, generated prompt, media workflow, or export, services should check visibility and source labels.
 
+## Roles
+
+- `gm`: full session control, private notes, reveals, approvals, backup/export.
+- `player`: own sheet, own private notes, public scene, submitted actions, allowed rolls.
+- `spectator`: read-only public scene and public rolls.
+- `ai`: proposed narration, state events, media jobs, memories, and audio cues only.
+- `admin`: local runtime setup, dangerous maintenance, user/session management.
+
+AI output should never bypass role and visibility checks.
+
 ## Dangerous Data
 
 Never commit or expose:
@@ -41,3 +51,5 @@ Never commit or expose:
 - Read-only demo mode.
 - Redaction tools for logs and exports.
 - Local backup and restore workflows.
+- Connection heartbeat and reconnect tokens for player clients.
+- Player-safe error messages with private details kept in local logs.

@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-dice-engine.local/schemas/backup-manifest.schema.json",
+  "title": "Backup Manifest",
+  "type": "object",
+  "required": ["id", "campaignId", "kind", "status", "createdAt", "sourcePath", "backupPath"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "campaignId": {
+      "type": "string"
+    },
+    "sessionId": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["manual", "session_start", "session_end", "pre_migration", "scheduled"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["created", "verified", "failed", "restored", "archived"]
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sourcePath": {
+      "type": "string"
+    },
+    "backupPath": {
+      "type": "string"
+    },
+    "sha256": {
+      "type": "string"
+    },
+    "appVersion": {
+      "type": "string"
+    },
+    "databaseVersion": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string"
+    }
+  }
+}

@@ -9,11 +9,16 @@ Current schemas:
 - `character-intake.schema.json`
 - `campaign-bible.schema.json`
 - `campaign-design.schema.json`
+- `backup-manifest.schema.json`
+- `client-session.schema.json`
 - `content-rating.schema.json`
+- `error-event.schema.json`
+- `permission-policy.schema.json`
 - `state-event.schema.json`
 - `asset.schema.json`
 - `audio-cue.schema.json`
 - `media-job.schema.json`
 - `memory-entry.schema.json`
+- `runtime-status.schema.json`
 
 These are early contracts and should evolve as prototypes land.

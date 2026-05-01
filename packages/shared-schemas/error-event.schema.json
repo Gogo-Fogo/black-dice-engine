@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-dice-engine.local/schemas/error-event.schema.json",
+  "title": "Error Event",
+  "type": "object",
+  "required": ["id", "campaignId", "severity", "source", "message", "createdAt", "visibility"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "campaignId": {
+      "type": "string"
+    },
+    "sessionId": {
+      "type": "string"
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["info", "warning", "error", "critical"]
+    },
+    "source": {
+      "type": "string",
+      "enum": ["game_server", "dice_service", "state_service", "memory_service", "llm_adapter", "comfy_router", "audio_service", "import_service", "runtime_service", "client"]
+    },
+    "message": {
+      "type": "string"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "visibility": {
+      "type": "string",
+      "enum": ["gm_only", "player_visible", "public_demo"]
+    },
+    "recoverable": {
+      "type": "boolean",
+      "default": true
+    },
+    "suggestedAction": {
+      "type": "string"
+    },
+    "correlationId": {
+      "type": "string"
+    },
+    "redactedDetails": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Debug details with secrets, private source text, and raw tokens removed."
+    }
+  }
+}

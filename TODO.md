@@ -14,6 +14,7 @@ Get the private GitHub repository published, keep the scaffold clean, and turn t
 - [ ] Set `docs/assets/branding/black-dice-engine-d20-lowres.png` as the GitHub social preview after publishing.
 - [ ] Decide the first app stack: likely TypeScript with either Vite or Next.js.
 - [ ] Decide the first service stack: likely Node.js/TypeScript first, Python only where it clearly helps.
+- [ ] Review runtime reliability contracts before the first server implementation.
 - [ ] Convert these TODO items into GitHub issues after publishing.
 - [ ] Create GitHub milestones for repo foundation, runtime spike, playable LAN MVP, and media integration.
 
@@ -41,6 +42,7 @@ Goal: define the structured language the apps, services, AI prompts, and databas
 - [ ] Draft the first SQLite schema proposal.
 - [ ] Define state-event validation rules for HP, resources, inventory, conditions, rolls, and visibility.
 - [ ] Define player-visible, GM-only, and public/demo-safe content boundaries.
+- [ ] Add examples for runtime status, client session, permission policy, backup manifest, and error events.
 - [ ] Add a sample character-creation intake packet.
 - [ ] Add a sample session packet for the sample campaign.
 
@@ -51,8 +53,10 @@ Goal: prove that a local game server can coordinate state and live updates.
 - [ ] Add minimal game server scaffold.
 - [ ] Add health check endpoint.
 - [ ] Add WebSocket broadcast prototype.
+- [ ] Add WebSocket heartbeat and reconnect status prototype.
 - [ ] Add dice roller endpoint/service.
 - [ ] Add state-event validation prototype.
+- [ ] Add runtime status and player-safe error event prototype.
 - [ ] Add in-memory session state before introducing persistent SQLite writes.
 - [ ] Add basic test coverage for schemas and state events.
 - [ ] Add local dev scripts after the stack is chosen.
@@ -68,6 +72,8 @@ Goal: let the GM and three players use the system together on the same network.
 - [ ] Add GM roll log and state event approval view.
 - [ ] Add HP, AC, inventory, conditions, notes, and resource tracking.
 - [ ] Add WebSocket updates between dashboard and player phones.
+- [ ] Add visible connected/reconnecting/disconnected status.
+- [ ] Prevent duplicate rolls/actions after reconnect.
 - [ ] Test over LAN using at least one phone.
 - [ ] Export a session summary to Markdown.
 
@@ -94,6 +100,7 @@ Goal: route scene images through local ComfyUI without blocking gameplay.
 - [ ] Store generated media metadata in state while keeping actual files outside Git.
 - [ ] Add async image job status updates to GM dashboard.
 - [ ] Add cleanup policy for drafts, temp frames, failed jobs, and final assets.
+- [ ] Add resource pressure checks before starting expensive media jobs.
 
 ### Milestone 0.7: Local Audio Pipeline
 
@@ -108,6 +115,24 @@ Goal: add music, ambience, and stingers without slowing live play.
 - [ ] Trigger one-shot stingers from reveals, traps, critical hits, and combat transitions.
 - [ ] Keep generated or licensed audio files outside Git.
 - [ ] Treat AI-generated audio as queued/prep-time content, not live per-turn generation.
+
+### Milestone 0.8: Runtime Reliability
+
+Goal: make failures visible and recoverable before adding heavier integrations.
+
+- [ ] Add runtime service scaffold.
+- [ ] Add `/health` endpoint.
+- [ ] Add runtime status object.
+- [ ] Add service health checks for game server, dice, state, memory, media, audio, and model adapters.
+- [ ] Add GM dashboard status strip.
+- [ ] Add player client heartbeat.
+- [ ] Add reconnect/resume flow.
+- [ ] Add idempotency keys for rolls and submitted actions.
+- [ ] Add error event log with visibility labels.
+- [ ] Add degraded-mode behavior for unavailable LLM, ComfyUI, audio, and import services.
+- [ ] Add manual backup placeholder.
+- [ ] Add session-start and session-end backup plan.
+- [ ] Add role/permission checks for GM, player, spectator, AI, and admin.
 
 ### Milestone 1.0: First Portfolio Demo
 
@@ -131,6 +156,7 @@ Goal: demonstrate a complete safe sample session without private or copyrighted 
 - [ ] Add Tailscale-friendly remote play guidance.
 - [ ] Add backup, restore, export, and archive tools.
 - [ ] Add stronger permissions for GM, player, spectator, and AI roles.
+- [ ] Add runtime resource governor for local model, media, audio, disk, and queue pressure.
 - [ ] Add campaign pacing, quest graph, reveal manager, and faction-state tooling.
 - [ ] Add GitHub Actions checks once there is real code to test.
 
