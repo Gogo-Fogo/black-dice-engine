@@ -24,7 +24,7 @@ Use this checklist before the first implementation pass. The goal is to start wi
 - Choose the first package manager: recommended `npm` unless there is a reason to use `pnpm`.
 - Decide whether the first server should be one app with modules or separate service packages. Recommended: one local server first, split later.
 - Decide whether to create GitHub issues/milestones manually or have Codex generate them from `TODO.md`.
-- Set the GitHub social preview image manually using `docs/assets/branding/black-dice-engine-d20-lowres.png`.
+- Set the GitHub social preview image manually using `docs/assets/branding/black-dice-engine-banner.png`.
 
 ## First Build Slice
 

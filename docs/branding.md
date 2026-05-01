@@ -10,14 +10,13 @@ docs/assets/branding/black-dice-engine-d20-lowres.png
 
 Use the low-resolution d20 asset for:
 
-- README hero art
-- GitHub social preview image
 - quick-loading docs pages
 - issue/project board visuals
 - dice roller visual reference
 - icon-style thumbnails where the detailed mark remains readable
+- places where a square-ish mark works better than a wide banner
 
-This is currently the best public-facing repository image because it stays legible at smaller sizes.
+This remains the default project mark, but it is no longer the main README hero.
 
 ## Presentation Banner
 
@@ -35,7 +34,17 @@ Use the banner for:
 - documentation landing pages
 - GM dashboard splash screen
 
-This is the cleaner title-led banner. Use it anywhere the project needs a readable cinematic brand image, but keep the d20 as the default README hero and GitHub social preview.
+This is the cleaner title-led banner. Use it for:
+
+- README hero art
+- GitHub social preview image
+- portfolio hero image
+- project showcase thumbnails
+- release headers
+- demo video title card
+- pitch deck title slide
+- documentation landing pages
+- GM dashboard splash screen
 
 ## Info-Pitch Banner
 
@@ -92,4 +101,4 @@ Do not place generated campaign art, private table art, player character referen
 
 ## GitHub Setup Note
 
-After publishing the repository, set the GitHub social preview manually in the repository settings using the low-resolution d20 asset for now. Git cannot configure that repository setting by itself. Replace it later only with a simplified banner that remains readable at social-preview sizes.
+After publishing the repository, set the GitHub social preview manually in the repository settings using `docs/assets/branding/black-dice-engine-banner.png`. Git cannot configure that repository setting by itself.
