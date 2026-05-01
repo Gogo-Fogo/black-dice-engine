@@ -2,6 +2,12 @@
 .env
 .env.*
 !.env.example
+local.env
+*.local.env
+secrets.json
+*.secrets.json
+credentials.json
+*.credentials.json
 *.pem
 *.key
 *.p12

@@ -11,12 +11,12 @@ Keep the private GitHub repository clean and turn the planning work into a small
 - [x] Publish the repository to GitHub as private.
 - [x] Rename the default branch from `master` to `main`.
 - [x] Confirm `_local-context/`, secrets, generated assets, model files, and real campaign data are ignored.
-- [ ] Set `docs/assets/branding/black-dice-engine-banner.png` as the GitHub social preview after publishing.
+- [ ] Set `docs/assets/branding/black-dice-engine-banner.png` as the GitHub social preview manually.
 - [ ] Decide the first app stack: likely TypeScript with either Vite or Next.js.
 - [ ] Decide the first service stack: likely Node.js/TypeScript first, Python only where it clearly helps.
 - [ ] Review runtime reliability contracts before the first server implementation.
 - [ ] Review mobile web companion and QR join strategy before the first dashboard implementation.
-- [ ] Convert these TODO items into GitHub issues after publishing.
+- [ ] Convert these TODO items into GitHub issues.
 - [ ] Create GitHub milestones for repo foundation, runtime spike, playable LAN MVP, and media integration.
 
 ## Large Milestones
