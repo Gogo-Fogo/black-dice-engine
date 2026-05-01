@@ -11,7 +11,7 @@ Keep the private GitHub repository clean and turn the planning work into a small
 - [x] Publish the repository to GitHub as private.
 - [x] Rename the default branch from `master` to `main`.
 - [x] Confirm `_local-context/`, secrets, generated assets, model files, and real campaign data are ignored.
-- [ ] Set `docs/assets/branding/black-dice-engine-banner.png` as the GitHub social preview manually.
+- [ ] Set `docs/assets/branding/black-dice-engine-d20-lowres.png` as the GitHub social preview manually.
 - [ ] Decide the first app stack: likely TypeScript with either Vite or Next.js.
 - [ ] Decide the first service stack: likely Node.js/TypeScript first, Python only where it clearly helps.
 - [ ] Review runtime reliability contracts before the first server implementation.
@@ -32,7 +32,7 @@ Goal: make the repo safe, understandable, and GitHub-ready.
 - [x] Publish private GitHub repository.
 - [x] Add GitHub repo description.
 - [x] Add GitHub repo topics.
-- [ ] Add GitHub social preview image from `docs/assets/branding/black-dice-engine-banner.png`.
+- [ ] Add GitHub social preview image from `docs/assets/branding/black-dice-engine-d20-lowres.png`.
 - [ ] Create first GitHub project board or issue list.
 
 ### Milestone 0.2: Data Contracts And Campaign Design
@@ -168,6 +168,7 @@ Goal: demonstrate a complete safe sample session without private or copyrighted 
 - [ ] Add Black Dice Engine custom dice theme after the MVP roll loop works.
 - [ ] Add campaign pacing, quest graph, reveal manager, and faction-state tooling.
 - [ ] Add GitHub Actions checks once there is real code to test.
+- [ ] Create a simplified high-legibility banner/social-preview image.
 
 ## Deferred For Later
 
