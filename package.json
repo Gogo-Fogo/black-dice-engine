@@ -1,0 +1,19 @@
+{
+  "name": "black-dice-engine",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "services/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev:gm": "npm --workspace apps/gm-dashboard run dev",
+    "dev:player": "npm --workspace apps/player-companion run dev",
+    "dev:server": "npm --workspace services/game-server run dev",
+    "lint": "npm run lint --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -1,15 +1,26 @@
 # Game Server
 
-Planned session coordinator for Black Dice Engine.
+Session coordinator for Black Dice Engine.
 
-Expected responsibilities:
+Current first-slice responsibilities:
 
-- Session lifecycle.
-- WebSocket connections.
-- Player permissions.
-- Calls into dice, state, memory, runtime, and media services.
-- Player-visible event broadcasts.
+- Health endpoint.
+- Runtime status endpoint.
+- Session snapshot endpoint.
+- In-memory dice roll endpoint/log.
+- WebSocket fanout for runtime and roll events.
+- Sample campaign/session state for local UI development.
+
+Near-term additions:
+
+- Session lifecycle and permission checks.
+- State-event validation.
 - Heartbeat/reconnect coordination.
 - Player-safe error propagation.
+- Calls into dice, state, memory, runtime, and media services.
 
-No service implementation exists yet.
+Run with:
+
+```text
+npm --workspace services/game-server run dev
+```

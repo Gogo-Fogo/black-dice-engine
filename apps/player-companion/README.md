@@ -1,17 +1,14 @@
 # Player Companion
 
-Planned phone/tablet companion app for players.
+Phone/tablet companion app for players.
 
-Expected responsibilities:
+Current first-slice responsibilities:
 
 - Character sheet view.
 - Player roll submission.
 - Status and resource tracking.
 - Player-visible scene updates.
-- Private player notes where appropriate.
-- QR-code LAN join flow from the GM dashboard.
-- Character claim/assignment.
-- Visible connection and reconnect status.
+- Visible connection status.
 
 MVP identity should be local:
 
@@ -21,4 +18,15 @@ MVP identity should be local:
 
 Discord and Google login are deferred until remote play or account-based identity becomes necessary.
 
-No app implementation exists yet.
+Near-term additions:
+
+- QR-code LAN join flow from the GM dashboard.
+- Character claim/assignment.
+- Reconnect-safe session restore.
+- Private player notes where appropriate.
+
+Run with:
+
+```text
+npm --workspace apps/player-companion run dev
+```

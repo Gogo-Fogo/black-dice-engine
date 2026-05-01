@@ -12,9 +12,11 @@ Keep the private GitHub repository clean and turn the planning work into a small
 - [x] Rename the default branch from `master` to `main`.
 - [x] Confirm `_local-context/`, secrets, generated assets, model files, and real campaign data are ignored.
 - [ ] Set `docs/assets/branding/black-dice-engine-banner.png` as the GitHub social preview manually.
-- [ ] Decide the first app stack: likely TypeScript with either Vite or Next.js.
-- [ ] Decide the first service stack: likely Node.js/TypeScript first, Python only where it clearly helps.
-- [ ] Review runtime reliability contracts before the first server implementation.
+- [x] Decide the first app stack: `Vite + React + TypeScript`.
+- [x] Decide the first service stack: `Node.js + TypeScript` first.
+- [x] Decide the first package manager: `npm`.
+- [x] Decide to start with one local server and split later if needed.
+- [x] Review runtime reliability contracts before the first server implementation.
 - [ ] Review mobile web companion and QR join strategy before the first dashboard implementation.
 - [ ] Convert these TODO items into GitHub issues.
 - [ ] Create GitHub milestones for repo foundation, runtime spike, playable LAN MVP, and media integration.
@@ -54,32 +56,34 @@ Goal: define the structured language the apps, services, AI prompts, and databas
 
 Goal: prove that a local game server can coordinate state and live updates.
 
-- [ ] Add minimal game server scaffold.
-- [ ] Add health check endpoint.
-- [ ] Add WebSocket broadcast prototype.
+- [x] Add minimal game server scaffold.
+- [x] Add health check endpoint.
+- [x] Add WebSocket broadcast prototype.
 - [ ] Add WebSocket heartbeat and reconnect status prototype.
-- [ ] Add dice roller endpoint/service.
+- [x] Add dice roller endpoint/service.
 - [ ] Add dddice presentation adapter placeholder using free/default dice.
 - [ ] Add state-event validation prototype.
-- [ ] Add runtime status and player-safe error event prototype.
-- [ ] Add in-memory session state before introducing persistent SQLite writes.
+- [x] Add runtime status prototype.
+- [ ] Add player-safe error event prototype.
+- [x] Add in-memory session state before introducing persistent SQLite writes.
 - [ ] Add basic test coverage for schemas and state events.
-- [ ] Add local dev scripts after the stack is chosen.
+- [x] Add local dev scripts after the stack is chosen.
 
 ### Milestone 0.4: Playable LAN MVP
 
 Goal: let the GM and three players use the system together on the same network.
 
-- [ ] Create GM dashboard shell.
-- [ ] Create player companion shell.
-- [ ] Add phone-friendly character sheet view.
-- [ ] Add player roll submission.
-- [ ] Add GM roll log and state event approval view.
+- [x] Create GM dashboard shell.
+- [x] Create player companion shell.
+- [x] Add phone-friendly character sheet view.
+- [x] Add player roll submission.
+- [x] Add GM roll log view.
+- [ ] Add state event approval view.
 - [ ] Add HP, AC, inventory, conditions, notes, and resource tracking.
 - [ ] Add WebSocket updates between dashboard and player phones.
 - [ ] Add QR-code join panel to the GM dashboard.
 - [ ] Add local table PIN/session token strategy for player join.
-- [ ] Add visible connected/reconnecting/disconnected status.
+- [x] Add visible connected/reconnecting/disconnected status.
 - [ ] Prevent duplicate rolls/actions after reconnect.
 - [ ] Test over LAN using at least one phone.
 - [ ] Export a session summary to Markdown.

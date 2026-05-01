@@ -76,7 +76,7 @@ The stack is intentionally not locked yet. Current likely direction:
 - Local tagged audio library for cached music, ambience, and stingers.
 - JSON Schema for structured AI output contracts.
 
-No dependencies are installed in this scaffold.
+The initial workspace and first local prototype are now scaffolded. Dependency install is required before running the apps locally.
 
 ## What Is Intentionally Not Included
 
@@ -103,9 +103,15 @@ Sample content in this repo should remain original, generic, and SRD-safe/demo-s
 
 ## Project Status
 
-Early scaffold / experimental.
+Early prototype / experimental.
 
-This repository currently defines the project shape, documentation, schemas, prompt templates, and safe sample content. It does not include production apps, installed dependencies, model integrations, or a complete runtime.
+This repository now includes a first local prototype:
+
+- a Node/TypeScript game server with health, runtime-status, session-snapshot, and dice-roll endpoints
+- a small GM dashboard shell
+- a small player companion shell
+
+It is still far from a full runtime. AI integrations, persistence, media pipelines, auth, imports, and hardened permissions are still ahead.
 
 GitHub repository: `https://github.com/Gogo-Fogo/black-dice-engine`
 
