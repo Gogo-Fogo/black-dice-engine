@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-dice-engine.local/schemas/media-job.schema.json",
+  "title": "Media Job",
+  "type": "object",
+  "required": ["id", "campaignId", "type", "status", "priority", "visibility", "createdAt"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "campaignId": {
+      "type": "string"
+    },
+    "sceneId": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string",
+      "enum": ["image", "video", "upscale", "interpolation"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "queued", "running", "generated", "failed", "rejected", "archived"]
+    },
+    "priority": {
+      "type": "string",
+      "enum": ["low", "normal", "high", "session_break"]
+    },
+    "visibility": {
+      "type": "string",
+      "enum": ["gm_only", "player_visible", "public_demo"]
+    },
+    "prompt": {
+      "type": "string"
+    },
+    "negativePrompt": {
+      "type": "string"
+    },
+    "workflowId": {
+      "type": "string"
+    },
+    "linkedAssetId": {
+      "type": "string",
+      "description": "Optional source asset for image-to-video, upscale, or variants."
+    },
+    "runWhen": {
+      "type": "string",
+      "enum": ["now", "background", "session_break", "manual"],
+      "default": "background"
+    },
+    "outputPath": {
+      "type": "string"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "startedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "error": {
+      "type": "string"
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    }
+  }
+}

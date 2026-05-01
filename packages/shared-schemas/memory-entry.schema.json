@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-dice-engine.local/schemas/memory-entry.schema.json",
+  "title": "Memory Entry",
+  "type": "object",
+  "required": ["id", "campaignId", "kind", "visibility", "status", "summary", "source", "createdAt"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "campaignId": {
+      "type": "string"
+    },
+    "sceneId": {
+      "type": "string"
+    },
+    "sessionId": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["campaign_fact", "scene_summary", "session_summary", "npc_fact", "location_fact", "faction_change", "character_development", "open_thread", "resolved_thread", "rules_note"]
+    },
+    "visibility": {
+      "type": "string",
+      "enum": ["gm_only", "player_visible", "public_demo"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["proposed", "confirmed", "rejected", "superseded"]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "stateEventIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "assetIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "source": {
+      "type": "object",
+      "required": ["kind", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["session", "scene", "campaign_bible", "import", "manual", "ai_summary"]
+        },
+        "label": {
+          "type": "string"
+        },
+        "sourcePath": {
+          "type": "string"
+        },
+        "license": {
+          "type": "string"
+        },
+        "pageOrLocation": {
+          "type": "string"
+        }
+      }
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

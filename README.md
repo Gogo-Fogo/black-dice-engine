@@ -95,6 +95,18 @@ Early scaffold / experimental.
 
 This repository currently defines the project shape, documentation, schemas, prompt templates, and safe sample content. It does not include production apps, installed dependencies, model integrations, or a complete runtime.
 
+## Decision Docs
+
+The working product decisions live in `docs/decisions/`. Start with:
+
+- `project-vision.md`
+- `core-architecture.md`
+- `mvp-scope.md`
+- `database-and-memory-design.md`
+- `latency-and-performance-policy.md`
+- `campaign-design.md`
+- `character-creation.md`
+
 ## Roadmap Summary
 
 Near-term:

@@ -1,0 +1,71 @@
+# Core Architecture
+
+Black Dice Engine should be a local-first web system coordinated by one game server.
+
+Phones, the GM dashboard, AI services, databases, and media engines should not talk to each other in a tangled mesh. The dashboard and phones talk to the local game server; the game server coordinates everything else.
+
+## Primary Flow
+
+```text
+GM dashboard / player phones
+-> local game server
+-> dice/state/memory/AI/media services
+-> database and asset folders
+-> WebSocket updates back to clients
+```
+
+## Runtime Roles
+
+- `GM Dashboard`: main screen for narration, scene control, party state, image/video queue, hidden notes, and GM approvals.
+- `Player Companion`: phone-first sheet/controller for HP, stats, inventory, rolls, current scene, handouts, and submitted actions.
+- `Game Server`: session coordinator and single API boundary for clients.
+- `Dice Service`: deterministic roll parsing and roll history.
+- `State Service`: authoritative state-event validation and application.
+- `Memory Service`: campaign bible, scene summaries, lore retrieval, and canon updates.
+- `Comfy Router`: asynchronous image/video job routing to local ComfyUI workflows.
+- `Import Service`: private/local ingestion of open material, user notes, and user-owned documents.
+
+## AI Roles
+
+- `ChatGPT / GPT Director Mode`: optional high-intelligence director for prep, hard rulings, major scene planning, memory canonization, and complex narrative choices.
+- `Local LLM`: fast live narrator, offline fallback, style pass, lore consistency helper, and lower-cost summarizer.
+- `Deterministic Validator`: rules/state/permissions checker. This is not an LLM-first responsibility.
+- `Human GM`: final authority over major reveals, irreversible state changes, table tone, and private content.
+
+## Tool Boundary
+
+The LLM can propose:
+
+- narration
+- dice calls
+- state changes
+- memory updates
+- image/video prompts
+- reveal suggestions
+
+The game server validates and applies:
+
+- HP/resource changes
+- inventory
+- gold
+- conditions
+- initiative
+- quest flags
+- faction standing
+- visibility rules
+
+## Local-First Default
+
+Default development should assume:
+
+- Windows host PC.
+- Local database.
+- Local WebSocket server.
+- Local assets.
+- Local ComfyUI.
+- Local model endpoints where configured.
+- Optional cloud/director calls only when explicitly enabled.
+
+## Cloud Later
+
+Vercel and Supabase may be useful later for portfolio demos, remote companion experiments, hosted auth, or sync. They are not core runtime requirements for the first build because the GPU, database, media pipeline, and private assets live on the local PC.

@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-dice-engine.local/schemas/character-intake.schema.json",
+  "title": "Character Intake",
+  "type": "object",
+  "required": ["id", "campaignId", "playerId", "basicIdentity", "visualDesign", "personality", "references"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "campaignId": {
+      "type": "string"
+    },
+    "playerId": {
+      "type": "string"
+    },
+    "basicIdentity": {
+      "type": "object",
+      "required": ["name", "species", "className"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "species": {
+          "type": "string"
+        },
+        "className": {
+          "type": "string"
+        },
+        "subclass": {
+          "type": "string"
+        },
+        "genderPresentation": {
+          "type": "string"
+        },
+        "ageRange": {
+          "type": "string"
+        },
+        "bodyType": {
+          "type": "string"
+        },
+        "heightBuild": {
+          "type": "string"
+        },
+        "partyRole": {
+          "type": "string"
+        }
+      }
+    },
+    "visualDesign": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "faceVibe": {
+          "type": "string"
+        },
+        "hair": {
+          "type": "string"
+        },
+        "eyes": {
+          "type": "string"
+        },
+        "skinMarkings": {
+          "type": "string"
+        },
+        "clothingArmor": {
+          "type": "string"
+        },
+        "weaponsItems": {
+          "type": "string"
+        },
+        "magicEffects": {
+          "type": "string"
+        },
+        "favoriteObject": {
+          "type": "string"
+        },
+        "symbolMotif": {
+          "type": "string"
+        },
+        "colorPalette": {
+          "type": "string"
+        },
+        "pose": {
+          "type": "string"
+        },
+        "mustInclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "avoid": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      }
+    },
+    "personality": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "quirks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "habitsMannerisms": {
+          "type": "string"
+        },
+        "voiceSpeechStyle": {
+          "type": "string"
+        },
+        "flaw": {
+          "type": "string"
+        },
+        "fear": {
+          "type": "string"
+        },
+        "goal": {
+          "type": "string"
+        },
+        "secret": {
+          "type": "string"
+        },
+        "relationshipToParty": {
+          "type": "string"
+        },
+        "backstoryOneSentence": {
+          "type": "string"
+        }
+      }
+    },
+    "references": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "path", "appliesTo"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["exact", "loose", "do_not_copy", "sketch", "weapon_item", "mood"]
+          },
+          "path": {
+            "type": "string"
+          },
+          "appliesTo": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["face", "armor", "weapon", "pose", "color", "mood", "symbol", "body_type", "outfit", "other"]
+            }
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      },
+      "default": []
+    },
+    "generated": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "visualCanon": {
+          "type": "string"
+        },
+        "personalityCanon": {
+          "type": "string"
+        },
+        "portraitPrompt": {
+          "type": "string"
+        },
+        "negativePrompt": {
+          "type": "string"
+        },
+        "finalPortraitPath": {
+          "type": "string"
+        }
+      },
+      "default": {}
+    }
+  }
+}

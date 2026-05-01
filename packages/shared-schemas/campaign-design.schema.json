@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-dice-engine.local/schemas/campaign-design.schema.json",
+  "title": "Campaign Design",
+  "type": "object",
+  "required": ["id", "title", "visibility", "gameIdentity", "campaignStructure", "corePillars", "phases"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "visibility": {
+      "type": "string",
+      "enum": ["gm_only", "player_visible", "public_demo"]
+    },
+    "gameIdentity": {
+      "type": "object",
+      "required": ["genre", "tone"],
+      "additionalProperties": false,
+      "properties": {
+        "genre": {
+          "type": "string"
+        },
+        "tone": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "inspirations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "preset": {
+          "type": "string"
+        }
+      }
+    },
+    "campaignStructure": {
+      "type": "object",
+      "required": ["intendedLength", "playerCount", "startingLevel", "endingLevel", "progressionType"],
+      "additionalProperties": false,
+      "properties": {
+        "intendedLength": {
+          "type": "string"
+        },
+        "playerCount": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "startingLevel": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "endingLevel": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "progressionType": {
+          "type": "string",
+          "enum": ["milestone", "xp", "story", "table_defined"]
+        },
+        "sessionLengthHours": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "corePillars": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "phases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "purpose", "levelRange"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "levelRange": {
+            "type": "string"
+          },
+          "mainQuestions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "expectedContent": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "lockedReveals": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          }
+        }
+      }
+    }
+  }
+}

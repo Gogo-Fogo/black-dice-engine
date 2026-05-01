@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-dice-engine.local/schemas/content-rating.schema.json",
+  "title": "Content Rating",
+  "type": "object",
+  "required": ["id", "visibility", "rating", "intensity", "boundaries", "tableTools"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "visibility": {
+      "type": "string",
+      "enum": ["gm_only", "player_visible", "public_demo"]
+    },
+    "rating": {
+      "type": "string"
+    },
+    "tone": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "intensity": {
+      "type": "object",
+      "required": ["violence", "horror", "gore", "profanity", "romance", "sexualContent", "hopelessness", "comedyRelief"],
+      "additionalProperties": false,
+      "properties": {
+        "violence": {
+          "$ref": "#/$defs/intensity"
+        },
+        "horror": {
+          "$ref": "#/$defs/intensity"
+        },
+        "gore": {
+          "$ref": "#/$defs/intensity"
+        },
+        "profanity": {
+          "$ref": "#/$defs/intensity"
+        },
+        "romance": {
+          "$ref": "#/$defs/intensity"
+        },
+        "sexualContent": {
+          "$ref": "#/$defs/intensity"
+        },
+        "explicitSexualDetail": {
+          "$ref": "#/$defs/intensity"
+        },
+        "hopelessness": {
+          "$ref": "#/$defs/intensity"
+        },
+        "comedyRelief": {
+          "$ref": "#/$defs/intensity"
+        }
+      }
+    },
+    "sexualContentPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowed": {
+          "type": "boolean",
+          "default": false
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["off", "suggestive", "mature", "explicit_with_confirmation"],
+          "default": "off"
+        },
+        "defaultStyle": {
+          "type": "string"
+        },
+        "fadeToBlackAvailable": {
+          "type": "boolean",
+          "default": true
+        },
+        "avoidConstantSexualization": {
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "default": {}
+    },
+    "boundaries": {
+      "type": "object",
+      "required": ["noSexualMinors", "noEroticizedCoercion", "noSexualViolenceAsEntertainment", "noInabilityToConsentSexualContent"],
+      "additionalProperties": false,
+      "properties": {
+        "noSexualMinors": {
+          "type": "boolean",
+          "const": true
+        },
+        "noEroticizedCoercion": {
+          "type": "boolean",
+          "const": true
+        },
+        "noSexualViolenceAsEntertainment": {
+          "type": "boolean",
+          "const": true
+        },
+        "noInabilityToConsentSexualContent": {
+          "type": "boolean",
+          "const": true
+        },
+        "noRealWorldHatePropaganda": {
+          "type": "boolean",
+          "default": true
+        },
+        "customLines": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "customVeils": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      }
+    },
+    "tableTools": {
+      "type": "object",
+      "required": ["pauseWord", "rewindAllowed", "fadeToBlackAllowed"],
+      "additionalProperties": false,
+      "properties": {
+        "pauseWord": {
+          "type": "string"
+        },
+        "rewindAllowed": {
+          "type": "boolean"
+        },
+        "fadeToBlackAllowed": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "intensity": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5
+    }
+  }
+}
