@@ -124,6 +124,11 @@ type ScenePacket = {
   audioCues: Array<Record<string, unknown>>;
 };
 
+type ScenePacketValidation = {
+  ok: boolean;
+  errors: string[];
+};
+
 type SessionSnapshot = {
   campaignId: string;
   campaignTitle: string;
@@ -282,6 +287,7 @@ export default function App() {
   const [exportPath, setExportPath] = useState("");
   const [scenePacket, setScenePacket] = useState<ScenePacket | null>(null);
   const [scenePacketStatus, setScenePacketStatus] = useState("");
+  const [scenePacketValidation, setScenePacketValidation] = useState<ScenePacketValidation | null>(null);
 
   async function exportSessionSummary() {
     setExportStatus("exporting");
@@ -325,8 +331,12 @@ export default function App() {
         return;
       }
 
-      const json = (await response.json()) as ScenePacket;
-      setScenePacket(json);
+      const json = (await response.json()) as {
+        packet: ScenePacket;
+        validation: ScenePacketValidation;
+      };
+      setScenePacket(json.packet);
+      setScenePacketValidation(json.validation);
       setScenePacketStatus("ready");
     } catch {
       setScenePacketStatus("failed");
@@ -353,8 +363,13 @@ export default function App() {
         return;
       }
 
-      const json = (await response.json()) as { sessionSnapshot: SessionSnapshot; queuedCount: number };
+      const json = (await response.json()) as {
+        sessionSnapshot: SessionSnapshot;
+        queuedCount: number;
+        validation: ScenePacketValidation;
+      };
       setSnapshot(json.sessionSnapshot);
+      setScenePacketValidation(json.validation);
       setScenePacketStatus(`queued:${json.queuedCount}`);
     } finally {
       setPendingActionKey("");
@@ -984,7 +999,18 @@ export default function App() {
                   <span>Audio</span>
                   <strong>{scenePacket.audioCues.length}</strong>
                 </div>
+                <div>
+                  <span>Validation</span>
+                  <strong>{scenePacketValidation?.ok ? "Valid" : "Needs fixes"}</strong>
+                </div>
               </div>
+              {scenePacketValidation && !scenePacketValidation.ok ? (
+                <div className="validation-list">
+                  {scenePacketValidation.errors.map((error) => (
+                    <p key={error}>{error}</p>
+                  ))}
+                </div>
+              ) : null}
               <div className="packet-beat-list">
                 {scenePacket.beats.map((beat, index) => (
                   <div className="packet-beat" key={`${scenePacket.id}-${index}`}>
@@ -1005,7 +1031,11 @@ export default function App() {
               ) : null}
               <button
                 className="export-button"
-                disabled={pendingActionKey !== "" || !scenePacket.proposedStateEvents.length}
+                disabled={
+                  pendingActionKey !== "" ||
+                  !scenePacket.proposedStateEvents.length ||
+                  scenePacketValidation?.ok === false
+                }
                 onClick={() => void queueScenePacketProposals()}
                 type="button"
               >

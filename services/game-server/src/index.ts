@@ -133,6 +133,11 @@ type ScenePacket = {
   audioCues: Array<Record<string, unknown>>;
 };
 
+type ScenePacketValidation = {
+  ok: boolean;
+  errors: string[];
+};
+
 type SessionSnapshot = {
   campaignId: string;
   campaignTitle: string;
@@ -847,6 +852,63 @@ function buildScenePacket(): ScenePacket {
   };
 }
 
+function validateScenePacket(packet: ScenePacket): ScenePacketValidation {
+  const errors: string[] = [];
+
+  if (!packet.id || !/^[a-zA-Z0-9_-]+$/.test(packet.id)) {
+    errors.push("Scene packet id is required and must match the schema pattern.");
+  }
+
+  if (!packet.campaignId) {
+    errors.push("Scene packet campaignId is required.");
+  }
+
+  if (!packet.sceneTitle) {
+    errors.push("Scene packet sceneTitle is required.");
+  }
+
+  if (!["gm_only", "player_visible", "public_demo"].includes(packet.visibility)) {
+    errors.push("Scene packet visibility is invalid.");
+  }
+
+  if (!Array.isArray(packet.beats) || packet.beats.length === 0) {
+    errors.push("Scene packet must include at least one beat.");
+  } else {
+    packet.beats.forEach((beat, index) => {
+      if (!["description", "choice", "threat", "clue", "consequence"].includes(beat.kind)) {
+        errors.push(`Beat ${index + 1} has an invalid kind.`);
+      }
+
+      if (!beat.text) {
+        errors.push(`Beat ${index + 1} is missing text.`);
+      }
+    });
+  }
+
+  packet.proposedStateEvents.forEach((event, index) => {
+    if (!event.id) {
+      errors.push(`Proposed state event ${index + 1} is missing an id.`);
+    }
+
+    if (!["hp_changed", "resource_changed", "condition_added", "condition_removed"].includes(event.type)) {
+      errors.push(`Proposed state event ${index + 1} has an invalid type.`);
+    }
+
+    if (!event.actor?.id || !event.actor?.kind || !event.actor?.label) {
+      errors.push(`Proposed state event ${index + 1} is missing actor metadata.`);
+    }
+
+    if (!["gm_only", "player_visible", "public_demo"].includes(event.visibility)) {
+      errors.push(`Proposed state event ${index + 1} has invalid visibility.`);
+    }
+  });
+
+  return {
+    ok: errors.length === 0,
+    errors
+  };
+}
+
 function convertScenePacketEventToStateEvent(
   event: ScenePacket["proposedStateEvents"][number]
 ): StateEventRequest | null {
@@ -1010,7 +1072,11 @@ app.get("/api/session-summary.md", (_request, response) => {
 });
 
 app.get("/api/scene-packet", (_request, response) => {
-  response.json(buildScenePacket());
+  const packet = buildScenePacket();
+  response.json({
+    packet,
+    validation: validateScenePacket(packet)
+  });
 });
 
 app.post("/api/scene-packet/queue-proposals", (request, response) => {
@@ -1023,9 +1089,20 @@ app.post("/api/scene-packet/queue-proposals", (request, response) => {
     return;
   }
 
+  const packet = body as ScenePacket;
+  const validation = validateScenePacket(packet);
+
+  if (!validation.ok) {
+    response.status(400).json({
+      error: "Scene packet failed validation",
+      validation
+    });
+    return;
+  }
+
   const queued: StateEventProposal[] = [];
 
-  for (const rawEvent of body.proposedStateEvents as ScenePacket["proposedStateEvents"]) {
+  for (const rawEvent of packet.proposedStateEvents) {
     const stateEvent = convertScenePacketEventToStateEvent(rawEvent);
 
     if (!stateEvent) {
@@ -1053,6 +1130,7 @@ app.post("/api/scene-packet/queue-proposals", (request, response) => {
   response.json({
     ok: true,
     queuedCount: queued.length,
+    validation,
     sessionSnapshot: publishSessionState()
   });
 });

@@ -157,6 +157,19 @@ body {
   gap: 10px;
 }
 
+.validation-list {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid rgba(176, 93, 57, 0.28);
+  background: rgba(61, 28, 20, 0.46);
+}
+
+.validation-list p {
+  margin: 0;
+  color: #f2c6b1;
+}
+
 .packet-beat {
   display: grid;
   gap: 8px;
