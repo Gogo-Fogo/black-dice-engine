@@ -17,7 +17,7 @@ Keep the private GitHub repository clean and turn the planning work into a small
 - [x] Decide the first package manager: `npm`.
 - [x] Decide to start with one local server and split later if needed.
 - [x] Review runtime reliability contracts before the first server implementation.
-- [ ] Review mobile web companion and QR join strategy before the first dashboard implementation.
+- [x] Review mobile web companion and QR join strategy before the first dashboard implementation.
 - [ ] Convert these TODO items into GitHub issues.
 - [ ] Create GitHub milestones for repo foundation, runtime spike, playable LAN MVP, and media integration.
 
@@ -81,8 +81,8 @@ Goal: let the GM and three players use the system together on the same network.
 - [ ] Add state event approval view.
 - [ ] Add HP, AC, inventory, conditions, notes, and resource tracking.
 - [ ] Add WebSocket updates between dashboard and player phones.
-- [ ] Add QR-code join panel to the GM dashboard.
-- [ ] Add local table PIN/session token strategy for player join.
+- [x] Add QR-code join panel to the GM dashboard.
+- [x] Add local table PIN/session token strategy for player join.
 - [x] Add visible connected/reconnecting/disconnected status.
 - [ ] Prevent duplicate rolls/actions after reconnect.
 - [ ] Test over LAN using at least one phone.

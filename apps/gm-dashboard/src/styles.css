@@ -100,6 +100,16 @@ body {
   color: #d8c9aa;
 }
 
+.qr-preview {
+  display: block;
+  width: 168px;
+  height: 168px;
+  margin-top: 16px;
+  border: 1px solid rgba(219, 187, 124, 0.16);
+  background: #0d0b09;
+  padding: 10px;
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -214,6 +224,14 @@ body {
 
 .party-note {
   font-size: 0.95rem;
+}
+
+.claim-note {
+  margin: 0;
+  color: #bca06d;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 .roll-row p {

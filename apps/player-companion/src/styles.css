@@ -93,10 +93,15 @@ body {
 .label {
   display: block;
   margin-bottom: 8px;
+  margin-top: 14px;
   color: #c9a45f;
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.12em;
+}
+
+.panel .label:first-of-type {
+  margin-top: 0;
 }
 
 select,
@@ -114,6 +119,12 @@ button {
   background: linear-gradient(135deg, #c49b53 0%, #8d6d38 100%);
   color: #140f07;
   font-weight: 700;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.7;
 }
 
 .character-card,
@@ -129,6 +140,28 @@ button {
   gap: 12px;
   margin-top: 10px;
   color: #f0dcaf;
+}
+
+.claim-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.secondary-button {
+  width: auto;
+  min-width: 98px;
+  background: rgba(20, 15, 10, 0.86);
+  color: #f8ecd5;
+}
+
+.claim-status {
+  margin-bottom: 0;
+  color: #bca06d;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 .roll-form {
@@ -154,5 +187,16 @@ button {
 }
 
 .roll-values {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
   text-align: right;
+  flex-shrink: 0;
+}
+
+.roll-values strong,
+.roll-values small {
+  display: block;
+  line-height: 1;
 }

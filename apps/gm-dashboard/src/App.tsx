@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import QRCode from "qrcode";
 
 type RuntimeStatus = {
   id: string;
@@ -21,6 +22,8 @@ type Character = {
   hp: { current: number; max: number };
   armorClass: number;
   notes: string[];
+  claimedByClientId: string | null;
+  claimedByLabel: string | null;
 };
 
 type RollRecord = {
@@ -62,6 +65,7 @@ export default function App() {
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
   const [snapshot, setSnapshot] = useState<SessionSnapshot | null>(null);
   const [connectionLabel, setConnectionLabel] = useState("connecting");
+  const [qrCodeUrl, setQrCodeUrl] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -89,6 +93,36 @@ export default function App() {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function buildQrCode() {
+      if (!snapshot?.joinUrl) {
+        setQrCodeUrl("");
+        return;
+      }
+
+      const dataUrl = await QRCode.toDataURL(snapshot.joinUrl, {
+        margin: 1,
+        width: 220,
+        color: {
+          dark: "#f6e8c8",
+          light: "#0d0b09"
+        }
+      });
+
+      if (mounted) {
+        setQrCodeUrl(dataUrl);
+      }
+    }
+
+    void buildQrCode();
+
+    return () => {
+      mounted = false;
+    };
+  }, [snapshot?.joinUrl]);
 
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -167,6 +201,7 @@ export default function App() {
           <span>Join path</span>
           <strong>{snapshot?.joinUrl ?? "Waiting for server..."}</strong>
           <p>Table PIN: {snapshot?.tablePin ?? "----"}</p>
+          {qrCodeUrl ? <img className="qr-preview" src={qrCodeUrl} alt="Player join QR code" /> : null}
         </div>
       </section>
 
@@ -211,6 +246,9 @@ export default function App() {
                   <span>AC {character.armorClass}</span>
                 </div>
                 <p className="party-note">{character.notes[0]}</p>
+                <p className="claim-note">
+                  {character.claimedByLabel ? `Claimed by ${character.claimedByLabel}` : "Unclaimed"}
+                </p>
               </div>
             )) ?? <p>No party state yet.</p>}
           </div>

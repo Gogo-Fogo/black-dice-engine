@@ -2,6 +2,7 @@ import cors from "cors";
 import express from "express";
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
+import { networkInterfaces } from "node:os";
 import { WebSocketServer } from "ws";
 
 type ServiceState = {
@@ -27,6 +28,8 @@ type Character = {
   hp: { current: number; max: number };
   armorClass: number;
   notes: string[];
+  claimedByClientId: string | null;
+  claimedByLabel: string | null;
 };
 
 type RollRecord = {
@@ -54,13 +57,14 @@ type SessionSnapshot = {
 type ClientSession = {
   id: string;
   role: "gm" | "player" | "spectator" | "ai" | "admin";
+  clientId: string;
   connectedAt: string;
   lastSeenAt: string;
 };
 
-const host = process.env.BDE_HOST ?? "127.0.0.1";
+const host = process.env.BDE_HOST ?? "0.0.0.0";
 const gameServerPort = Number(process.env.BDE_GAME_SERVER_PORT ?? 4310);
-const playerCompanionPort = Number(process.env.BDE_PLAYER_COMPANION_PORT ?? 5174);
+const playerCompanionPort = Number(process.env.BDE_PLAYER_COMPANION_PORT ?? 4311);
 
 const app = express();
 const server = createServer(app);
@@ -74,7 +78,9 @@ const party: Character[] = [
     classLabel: "Rogue 3",
     hp: { current: 22, max: 30 },
     armorClass: 15,
-    notes: ["Watching every door and every lie."]
+    notes: ["Watching every door and every lie."],
+    claimedByClientId: null,
+    claimedByLabel: null
   },
   {
     id: "character-sera",
@@ -82,7 +88,9 @@ const party: Character[] = [
     classLabel: "Cleric 3",
     hp: { current: 27, max: 27 },
     armorClass: 18,
-    notes: ["Low patience for cultists and false saints."]
+    notes: ["Low patience for cultists and false saints."],
+    claimedByClientId: null,
+    claimedByLabel: null
   },
   {
     id: "character-ivar",
@@ -90,7 +98,9 @@ const party: Character[] = [
     classLabel: "Wizard 3",
     hp: { current: 14, max: 18 },
     armorClass: 12,
-    notes: ["Tracking a pattern in the black sand pulses."]
+    notes: ["Tracking a pattern in the black sand pulses."],
+    claimedByClientId: null,
+    claimedByLabel: null
   }
 ];
 
@@ -143,15 +153,40 @@ function getRuntimeStatus(): RuntimeStatus {
   };
 }
 
+function getLanJoinHost() {
+  const interfaces = networkInterfaces();
+  let linkLocalFallback: string | null = null;
+
+  for (const entries of Object.values(interfaces)) {
+    for (const entry of entries ?? []) {
+      if (entry.family === "IPv4" && !entry.internal) {
+        if (
+          entry.address.startsWith("192.168.") ||
+          entry.address.startsWith("10.") ||
+          /^172\.(1[6-9]|2\d|3[0-1])\./.test(entry.address)
+        ) {
+          return entry.address;
+        }
+
+        if (entry.address.startsWith("169.254.")) {
+          linkLocalFallback = entry.address;
+        }
+      }
+    }
+  }
+
+  return linkLocalFallback ?? "localhost";
+}
+
 function getSessionSnapshot(): SessionSnapshot {
-  const joinHost = host === "127.0.0.1" ? "localhost" : host;
+  const joinHost = host === "0.0.0.0" ? getLanJoinHost() : host;
 
   return {
     campaignId: "sample-campaign",
     campaignTitle: "The Shattered Oath",
     currentScene: "Lantern Gate, just before the watchtower ascent",
     tablePin: "BD20",
-    joinUrl: `http://${joinHost}:${playerCompanionPort}`,
+    joinUrl: `http://${joinHost}:${playerCompanionPort}/?pin=BD20`,
     party,
     rollLog
   };
@@ -185,6 +220,79 @@ app.get("/api/session-snapshot", (_request, response) => {
 
 app.get("/api/rolls", (_request, response) => {
   response.json(rollLog);
+});
+
+app.post("/api/claim-character", (request, response) => {
+  const clientId = typeof request.body.clientId === "string" ? request.body.clientId.trim() : "";
+  const characterId = typeof request.body.characterId === "string" ? request.body.characterId.trim() : "";
+  const playerLabelRaw =
+    typeof request.body.playerLabel === "string" ? request.body.playerLabel.trim() : "";
+  const playerLabel = playerLabelRaw || "Player";
+
+  if (!clientId || !characterId) {
+    response.status(400).json({
+      error: "clientId and characterId are required"
+    });
+    return;
+  }
+
+  const character = party.find((entry) => entry.id === characterId);
+
+  if (!character) {
+    response.status(404).json({
+      error: "Character not found"
+    });
+    return;
+  }
+
+  if (character.claimedByClientId && character.claimedByClientId !== clientId) {
+    response.status(409).json({
+      error: "Character already claimed"
+    });
+    return;
+  }
+
+  for (const entry of party) {
+    if (entry.claimedByClientId === clientId && entry.id !== characterId) {
+      entry.claimedByClientId = null;
+      entry.claimedByLabel = null;
+    }
+  }
+
+  character.claimedByClientId = clientId;
+  character.claimedByLabel = playerLabel;
+
+  const sessionSnapshot = getSessionSnapshot();
+  broadcast("session_snapshot", sessionSnapshot);
+  response.json({
+    ok: true,
+    sessionSnapshot
+  });
+});
+
+app.post("/api/release-character", (request, response) => {
+  const clientId = typeof request.body.clientId === "string" ? request.body.clientId.trim() : "";
+
+  if (!clientId) {
+    response.status(400).json({
+      error: "clientId is required"
+    });
+    return;
+  }
+
+  for (const character of party) {
+    if (character.claimedByClientId === clientId) {
+      character.claimedByClientId = null;
+      character.claimedByLabel = null;
+    }
+  }
+
+  const sessionSnapshot = getSessionSnapshot();
+  broadcast("session_snapshot", sessionSnapshot);
+  response.json({
+    ok: true,
+    sessionSnapshot
+  });
 });
 
 app.post("/api/rolls", (request, response) => {
@@ -226,14 +334,17 @@ app.post("/api/rolls", (request, response) => {
 wss.on("connection", (socket, request) => {
   const url = new URL(request.url ?? "/ws", `http://${request.headers.host ?? "localhost"}`);
   const roleValue = url.searchParams.get("role");
+  const clientIdValue = url.searchParams.get("clientId");
   const role: ClientSession["role"] =
     roleValue === "gm" || roleValue === "player" || roleValue === "spectator" || roleValue === "ai" || roleValue === "admin"
       ? roleValue
       : "spectator";
+  const clientId = clientIdValue && clientIdValue.trim() ? clientIdValue : randomUUID();
 
   const session: ClientSession = {
     id: randomUUID(),
     role,
+    clientId,
     connectedAt: new Date().toISOString(),
     lastSeenAt: new Date().toISOString()
   };
@@ -272,7 +383,7 @@ setInterval(() => {
 
 server.listen(gameServerPort, host, () => {
   const gmUrl = "http://127.0.0.1:5173";
-  const playerUrl = `http://127.0.0.1:${playerCompanionPort}`;
+  const playerUrl = `http://${getLanJoinHost()}:${playerCompanionPort}`;
 
   console.log(`Black Dice Engine game server listening on http://${host}:${gameServerPort}`);
   console.log(`GM dashboard expected at ${gmUrl}`);
