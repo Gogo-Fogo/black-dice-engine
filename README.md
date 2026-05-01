@@ -109,6 +109,8 @@ The working product decisions live in `docs/decisions/`. Start with:
 
 ## Roadmap Summary
 
+The detailed working build plan lives in `TODO.md`; the phase-level roadmap lives in `docs/roadmap.md`.
+
 Near-term:
 
 - Finalize architecture boundaries and data contracts.
