@@ -252,6 +252,7 @@ export default function App() {
   const [conditionDrafts, setConditionDrafts] = useState<Record<string, string>>({});
   const [queueApprovalMode, setQueueApprovalMode] = useState(false);
   const [exportStatus, setExportStatus] = useState("");
+  const [exportPath, setExportPath] = useState("");
 
   async function exportSessionSummary() {
     setExportStatus("exporting");
@@ -264,6 +265,7 @@ export default function App() {
         return;
       }
 
+      setExportPath(response.headers.get("X-Export-Path") ?? "");
       const markdown = await response.text();
       const disposition = response.headers.get("Content-Disposition") ?? "";
       const fileNameMatch = disposition.match(/filename="([^"]+)"/);
@@ -532,7 +534,9 @@ export default function App() {
               {exportStatus === "exporting"
                 ? "Preparing Markdown export..."
                 : exportStatus === "ready"
-                  ? "Session summary downloaded."
+                  ? exportPath
+                    ? `Session summary saved to ${exportPath}`
+                    : "Session summary downloaded."
                   : "Export failed."}
             </p>
           ) : null}

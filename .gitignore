@@ -106,6 +106,7 @@ logs/
 tmp/
 temp/
 .cache/
+_exports/
 
 # OS and editor noise
 .DS_Store

@@ -2,6 +2,7 @@ import cors from "cors";
 import express from "express";
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -163,6 +164,7 @@ const gameServerPort = Number(process.env.BDE_GAME_SERVER_PORT ?? 4310);
 const playerCompanionPort = Number(process.env.BDE_PLAYER_COMPANION_PORT ?? 4311);
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const playerCompanionDistDir = join(currentDir, "../../../apps/player-companion/dist");
+const sessionSummaryExportDir = join(currentDir, "../../../_exports/session-summaries");
 
 const app = express();
 const server = createServer(app);
@@ -810,10 +812,15 @@ app.get("/api/session-summary.md", (_request, response) => {
   const filename = `${sanitizeFilePart(snapshot.campaignTitle)}-session-summary-${new Date()
     .toISOString()
     .slice(0, 10)}.md`;
+  const markdown = buildSessionSummaryMarkdown();
+  mkdirSync(sessionSummaryExportDir, { recursive: true });
+  const exportPath = join(sessionSummaryExportDir, filename);
+  writeFileSync(exportPath, markdown, "utf8");
 
   response.setHeader("Content-Type", "text/markdown; charset=utf-8");
   response.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-  response.send(buildSessionSummaryMarkdown());
+  response.setHeader("X-Export-Path", exportPath);
+  response.send(markdown);
 });
 
 app.get("/api/state-event-queue", (_request, response) => {
