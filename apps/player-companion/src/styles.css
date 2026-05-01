@@ -142,6 +142,68 @@ button:disabled {
   color: #f0dcaf;
 }
 
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 5px 10px;
+  border: 1px solid rgba(219, 187, 124, 0.16);
+  background: rgba(36, 27, 17, 0.72);
+  color: #ead7ae;
+  font-size: 0.78rem;
+}
+
+.muted-chip {
+  color: #c3ae85;
+}
+
+.detail-block {
+  margin-top: 14px;
+}
+
+.detail-label {
+  margin: 0 0 8px;
+  color: #bca06d;
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.resource-list,
+.inventory-list {
+  display: grid;
+  gap: 8px;
+}
+
+.resource-row,
+.inventory-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(219, 187, 124, 0.1);
+  background: rgba(24, 18, 11, 0.66);
+}
+
+.resource-row span,
+.inventory-row span {
+  color: #cfbe9a;
+}
+
+.resource-row strong,
+.inventory-row strong {
+  color: #f0dcaf;
+  flex-shrink: 0;
+}
+
 .claim-actions {
   display: grid;
   grid-template-columns: 1fr auto;

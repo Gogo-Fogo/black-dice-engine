@@ -29,6 +29,19 @@ type Character = {
   classLabel: string;
   hp: { current: number; max: number };
   armorClass: number;
+  conditions: string[];
+  resources: Array<{
+    id: string;
+    label: string;
+    current: number;
+    max: number;
+  }>;
+  inventory: Array<{
+    id: string;
+    name: string;
+    quantity: number;
+    detail?: string;
+  }>;
   notes: string[];
   claimedByClientId: string | null;
   claimedByLabel: string | null;
@@ -82,6 +95,16 @@ const party: Character[] = [
     classLabel: "Rogue 3",
     hp: { current: 22, max: 30 },
     armorClass: 15,
+    conditions: ["Alert", "Uninjured stride"],
+    resources: [
+      { id: "resource-hit-dice", label: "Hit Dice", current: 3, max: 3 },
+      { id: "resource-cunning-plan", label: "Trick Tokens", current: 2, max: 3 }
+    ],
+    inventory: [
+      { id: "item-lockpicks", name: "Lockpick Set", quantity: 1, detail: "well-oiled" },
+      { id: "item-dagger", name: "Curved Dagger", quantity: 2 },
+      { id: "item-vial", name: "Shadow Vial", quantity: 1, detail: "single-use escape smoke" }
+    ],
     notes: ["Watching every door and every lie."],
     claimedByClientId: null,
     claimedByLabel: null
@@ -92,6 +115,17 @@ const party: Character[] = [
     classLabel: "Cleric 3",
     hp: { current: 27, max: 27 },
     armorClass: 18,
+    conditions: ["Blessed ward"],
+    resources: [
+      { id: "resource-spell-slots-1", label: "Spell Slots I", current: 4, max: 4 },
+      { id: "resource-spell-slots-2", label: "Spell Slots II", current: 2, max: 2 },
+      { id: "resource-channel-divinity", label: "Channel Divinity", current: 1, max: 1 }
+    ],
+    inventory: [
+      { id: "item-mace", name: "Sanctified Mace", quantity: 1 },
+      { id: "item-bandages", name: "Field Bandages", quantity: 3 },
+      { id: "item-reliquary", name: "Ash Reliquary", quantity: 1, detail: "sealed" }
+    ],
     notes: ["Low patience for cultists and false saints."],
     claimedByClientId: null,
     claimedByLabel: null
@@ -102,6 +136,17 @@ const party: Character[] = [
     classLabel: "Wizard 3",
     hp: { current: 14, max: 18 },
     armorClass: 12,
+    conditions: ["Fatigued"],
+    resources: [
+      { id: "resource-spell-slots-1", label: "Spell Slots I", current: 2, max: 4 },
+      { id: "resource-spell-slots-2", label: "Spell Slots II", current: 1, max: 2 },
+      { id: "resource-focus-charge", label: "Focus Charges", current: 1, max: 3 }
+    ],
+    inventory: [
+      { id: "item-spellbook", name: "Spellbook", quantity: 1, detail: "salt-stained" },
+      { id: "item-lens", name: "Aether Lens", quantity: 1 },
+      { id: "item-chalk", name: "Ward Chalk", quantity: 4 }
+    ],
     notes: ["Tracking a pattern in the black sand pulses."],
     claimedByClientId: null,
     claimedByLabel: null

@@ -21,6 +21,19 @@ type Character = {
   classLabel: string;
   hp: { current: number; max: number };
   armorClass: number;
+  conditions: string[];
+  resources: Array<{
+    id: string;
+    label: string;
+    current: number;
+    max: number;
+  }>;
+  inventory: Array<{
+    id: string;
+    name: string;
+    quantity: number;
+    detail?: string;
+  }>;
   notes: string[];
   claimedByClientId: string | null;
   claimedByLabel: string | null;
@@ -244,6 +257,43 @@ export default function App() {
                     HP {character.hp.current}/{character.hp.max}
                   </span>
                   <span>AC {character.armorClass}</span>
+                </div>
+                <div className="tag-row">
+                  {character.conditions.length > 0 ? (
+                    character.conditions.map((condition) => (
+                      <span key={condition} className="tag-chip">
+                        {condition}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="tag-chip muted-chip">No conditions</span>
+                  )}
+                </div>
+                <div className="party-detail-grid">
+                  <div>
+                    <p className="detail-label">Resources</p>
+                    <ul className="detail-list">
+                      {character.resources.map((resource) => (
+                        <li key={resource.id}>
+                          <span>{resource.label}</span>
+                          <strong>
+                            {resource.current}/{resource.max}
+                          </strong>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div>
+                    <p className="detail-label">Inventory</p>
+                    <ul className="detail-list">
+                      {character.inventory.map((item) => (
+                        <li key={item.id}>
+                          <span>{item.name}</span>
+                          <strong>x{item.quantity}</strong>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 </div>
                 <p className="party-note">{character.notes[0]}</p>
                 <p className="claim-note">

@@ -6,6 +6,19 @@ type Character = {
   classLabel: string;
   hp: { current: number; max: number };
   armorClass: number;
+  conditions: string[];
+  resources: Array<{
+    id: string;
+    label: string;
+    current: number;
+    max: number;
+  }>;
+  inventory: Array<{
+    id: string;
+    name: string;
+    quantity: number;
+    detail?: string;
+  }>;
   notes: string[];
   claimedByClientId: string | null;
   claimedByLabel: string | null;
@@ -42,6 +55,11 @@ type RollRequest = {
 
 const storageKey = "black-dice-engine-player-client-id";
 
+function createClientId() {
+  const randomPart = Math.random().toString(36).slice(2, 10);
+  return `client-${Date.now().toString(36)}-${randomPart}`;
+}
+
 function getOrCreateClientId() {
   const existing = window.localStorage.getItem(storageKey);
 
@@ -49,7 +67,7 @@ function getOrCreateClientId() {
     return existing;
   }
 
-  const created = `client-${crypto.randomUUID()}`;
+  const created = createClientId();
   window.localStorage.setItem(storageKey, created);
   return created;
 }
@@ -312,6 +330,44 @@ export default function App() {
                   HP {selectedCharacter.hp.current}/{selectedCharacter.hp.max}
                 </span>
                 <span>AC {selectedCharacter.armorClass}</span>
+              </div>
+              <div className="tag-row">
+                {selectedCharacter.conditions.length > 0 ? (
+                  selectedCharacter.conditions.map((condition) => (
+                    <span key={condition} className="tag-chip">
+                      {condition}
+                    </span>
+                  ))
+                ) : (
+                  <span className="tag-chip muted-chip">No conditions</span>
+                )}
+              </div>
+              <div className="detail-block">
+                <p className="detail-label">Resources</p>
+                <div className="resource-list">
+                  {selectedCharacter.resources.map((resource) => (
+                    <div className="resource-row" key={resource.id}>
+                      <span>{resource.label}</span>
+                      <strong>
+                        {resource.current}/{resource.max}
+                      </strong>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="detail-block">
+                <p className="detail-label">Inventory</p>
+                <div className="inventory-list">
+                  {selectedCharacter.inventory.map((item) => (
+                    <div className="inventory-row" key={item.id}>
+                      <span>
+                        {item.name}
+                        {item.detail ? ` - ${item.detail}` : ""}
+                      </span>
+                      <strong>x{item.quantity}</strong>
+                    </div>
+                  ))}
+                </div>
               </div>
               <p className="note">{selectedCharacter.notes[0]}</p>
               <p className="claim-status">

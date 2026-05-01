@@ -79,13 +79,13 @@ Goal: let the GM and three players use the system together on the same network.
 - [x] Add player roll submission.
 - [x] Add GM roll log view.
 - [ ] Add state event approval view.
-- [ ] Add HP, AC, inventory, conditions, notes, and resource tracking.
-- [ ] Add WebSocket updates between dashboard and player phones.
+- [x] Add HP, AC, inventory, conditions, notes, and resource tracking.
+- [x] Add WebSocket updates between dashboard and player phones.
 - [x] Add QR-code join panel to the GM dashboard.
 - [x] Add local table PIN/session token strategy for player join.
 - [x] Add visible connected/reconnecting/disconnected status.
 - [ ] Prevent duplicate rolls/actions after reconnect.
-- [ ] Test over LAN using at least one phone.
+- [x] Test over LAN using at least one phone.
 - [ ] Export a session summary to Markdown.
 
 ### Milestone 0.5: AI Narration And Memory Loop
