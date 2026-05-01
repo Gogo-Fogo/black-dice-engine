@@ -2,6 +2,12 @@
 
 This project is Windows/local-first. The scaffold does not install dependencies or create a full app yet.
 
+Published GitHub repository:
+
+```text
+https://github.com/Gogo-Fogo/black-dice-engine
+```
+
 ## Recommended Folder Layout
 
 Current repository location:
@@ -28,13 +34,11 @@ These external paths are configurable. The important rule is that model files, r
 
 ## Initial Git Setup
 
-This repo is already initialized. For a fresh clone or rebuild, use the actual repo path:
+This repo is already initialized, published privately, and uses `main` as the default branch. For a fresh clone or rebuild:
 
 ```powershell
-cd "G:\Workspace\MyTools\Black Dice Engine"
-git init
-git add .
-git commit -m "Initial Black Dice Engine scaffold"
+cd "G:\Workspace\MyTools"
+git clone https://github.com/Gogo-Fogo/black-dice-engine.git "Black Dice Engine"
 ```
 
 ## Environment File
@@ -43,12 +47,14 @@ Use `.env.example` as a reference when a local runtime exists. Real `.env` files
 
 ## GitHub Desktop
 
-After the initial commit:
+For this existing local repo:
 
 1. Open GitHub Desktop.
 2. Choose `File -> Add local repository`.
 3. Select `G:\Workspace\MyTools\Black Dice Engine`.
-4. Publish the repository as private.
+4. Confirm it tracks `origin/main`.
+
+For a fresh clone, use `File -> Clone repository` and choose `Gogo-Fogo/black-dice-engine`.
 
 ## Notes
 

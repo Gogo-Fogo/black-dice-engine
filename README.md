@@ -103,6 +103,8 @@ Early scaffold / experimental.
 
 This repository currently defines the project shape, documentation, schemas, prompt templates, and safe sample content. It does not include production apps, installed dependencies, model integrations, or a complete runtime.
 
+GitHub repository: `https://github.com/Gogo-Fogo/black-dice-engine`
+
 ## Decision Docs
 
 The working product decisions live in `docs/decisions/`. Start with:
@@ -114,6 +116,7 @@ The working product decisions live in `docs/decisions/`. Start with:
 - `latency-and-performance-policy.md`
 - `runtime-reliability.md`
 - `dice-rolling-and-presentation.md`
+- `build-start-checklist.md`
 - `campaign-design.md`
 - `character-creation.md`
 

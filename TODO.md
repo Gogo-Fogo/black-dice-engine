@@ -4,13 +4,13 @@ This file is the working build plan for Black Dice Engine. It should stay practi
 
 ## Current Focus
 
-Get the private GitHub repository published, keep the scaffold clean, and turn the planning work into a small first playable loop.
+Keep the private GitHub repository clean and turn the planning work into a small first playable loop.
 
 ## Immediate TODO
 
-- [ ] Publish the repository to GitHub as private.
-- [ ] Consider renaming the default branch from `master` to `main` before heavy collaboration starts.
-- [ ] Confirm `_local-context/`, secrets, generated assets, model files, and real campaign data are ignored.
+- [x] Publish the repository to GitHub as private.
+- [x] Rename the default branch from `master` to `main`.
+- [x] Confirm `_local-context/`, secrets, generated assets, model files, and real campaign data are ignored.
 - [ ] Set `docs/assets/branding/black-dice-engine-banner.png` as the GitHub social preview after publishing.
 - [ ] Decide the first app stack: likely TypeScript with either Vite or Next.js.
 - [ ] Decide the first service stack: likely Node.js/TypeScript first, Python only where it clearly helps.
@@ -28,8 +28,9 @@ Goal: make the repo safe, understandable, and GitHub-ready.
 - [x] Add README, license, ignore rules, Codex instructions, docs, schemas, prompts, and sample campaign content.
 - [x] Add private-context workflow and distilled project decisions.
 - [x] Add rule requiring thorough GitHub descriptions.
-- [ ] Publish private GitHub repository.
-- [ ] Add GitHub repo description and topics.
+- [x] Publish private GitHub repository.
+- [x] Add GitHub repo description.
+- [x] Add GitHub repo topics.
 - [ ] Add GitHub social preview image from `docs/assets/branding/black-dice-engine-banner.png`.
 - [ ] Create first GitHub project board or issue list.
 
