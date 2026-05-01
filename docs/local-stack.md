@@ -28,13 +28,21 @@ Default development should bind services to `127.0.0.1`. Player companion access
 
 ## Local Data Roots
 
-The repo should reference, but not contain, these data roots:
+The repo should reference, but not contain, large/private data roots. Suggested roots:
 
 ```text
 G:\AI-DM\02_models\
 G:\AI-DM\03_campaigns\
 G:\AI-DM\04_assets\
 ```
+
+This machine currently uses a separate Ollama model root:
+
+```text
+G:\AI_Tools\OllamaModels
+```
+
+The exact paths can change per machine. Keep them configurable through `.env` and never commit their contents.
 
 ## Integration Principle
 

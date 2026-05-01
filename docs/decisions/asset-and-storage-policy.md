@@ -33,6 +33,12 @@ G:\AI-DM\03_campaigns\
 G:\AI-DM\04_assets\
 ```
 
+Current known Ollama model root on this machine:
+
+```text
+G:\AI_Tools\OllamaModels
+```
+
 The current Git repo lives at:
 
 ```text
