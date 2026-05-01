@@ -167,6 +167,7 @@ body {
 }
 
 .service-list,
+.presence-list,
 .party-list,
 .roll-log {
   display: grid;
@@ -180,6 +181,7 @@ body {
 }
 
 .service-list li,
+.presence-row,
 .party-card,
 .roll-row {
   display: flex;
@@ -192,6 +194,7 @@ body {
 }
 
 .service-list strong,
+.presence-row strong,
 .party-card h3,
 .roll-row strong {
   display: block;
@@ -199,10 +202,38 @@ body {
 }
 
 .service-list span,
+.presence-row p,
 .party-card p,
 .roll-row p,
 .roll-row small {
   color: #cdbb96;
+}
+
+.presence-row p {
+  margin: 0;
+}
+
+.presence-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 78px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid rgba(219, 187, 124, 0.16);
+  font-size: 0.76rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.presence-active {
+  color: #f7ebd2;
+  background: rgba(59, 94, 53, 0.46);
+}
+
+.presence-stale {
+  color: #f7ebd2;
+  background: rgba(121, 80, 36, 0.46);
 }
 
 .party-card {

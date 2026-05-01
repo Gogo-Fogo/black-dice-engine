@@ -59,7 +59,7 @@ Goal: prove that a local game server can coordinate state and live updates.
 - [x] Add minimal game server scaffold.
 - [x] Add health check endpoint.
 - [x] Add WebSocket broadcast prototype.
-- [ ] Add WebSocket heartbeat and reconnect status prototype.
+- [x] Add WebSocket heartbeat and reconnect status prototype.
 - [x] Add dice roller endpoint/service.
 - [ ] Add dddice presentation adapter placeholder using free/default dice.
 - [x] Add state-event validation prototype.
@@ -85,6 +85,7 @@ Goal: let the GM and three players use the system together on the same network.
 - [x] Add QR-code join panel to the GM dashboard.
 - [x] Add local table PIN/session token strategy for player join.
 - [x] Add visible connected/reconnecting/disconnected status.
+- [x] Add stale-client presence view for GM.
 - [x] Prevent duplicate rolls/actions after reconnect.
 - [x] Test over LAN using at least one phone.
 - [ ] Export a session summary to Markdown.
@@ -139,7 +140,8 @@ Goal: make failures visible and recoverable before adding heavier integrations.
 - [ ] Add service health checks for game server, dice, state, memory, media, audio, and model adapters.
 - [ ] Add GM dashboard status strip.
 - [ ] Add player client heartbeat.
-- [ ] Add reconnect/resume flow.
+- [x] Add player client heartbeat.
+- [x] Add reconnect/resume flow.
 - [ ] Add local table PIN/session token strategy for QR join.
 - [x] Add idempotency keys for rolls and submitted actions.
 - [ ] Add error event log with visibility labels.

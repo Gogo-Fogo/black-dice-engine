@@ -46,6 +46,11 @@ type SessionSnapshot = {
   rollLog: RollRecord[];
 };
 
+type PlayerSocketEnvelope =
+  | { type: "connected"; payload: { sessionSnapshot: SessionSnapshot } }
+  | { type: "session_snapshot"; payload: SessionSnapshot }
+  | { type: "roll_recorded"; payload: RollRecord };
+
 type RollRequest = {
   actorId: string;
   actorName: string;
@@ -168,48 +173,85 @@ export default function App() {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
     const localClientId = getOrCreateClientId();
     setClientId(localClientId);
-    const socket = new WebSocket(
-      `${protocol}://${window.location.host}/ws?role=player&clientId=${encodeURIComponent(localClientId)}`
-    );
+    let active = true;
+    let socket: WebSocket | null = null;
+    let reconnectTimer: number | null = null;
+    let heartbeatTimer: number | null = null;
 
-    socket.addEventListener("open", () => {
-      setConnectionLabel("connected");
-    });
+    function clearTimers() {
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
 
-    socket.addEventListener("close", () => {
-      setConnectionLabel("disconnected");
-    });
+      if (heartbeatTimer !== null) {
+        window.clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
+    }
 
-    socket.addEventListener("message", (event) => {
-      const message = JSON.parse(event.data) as
-        | { type: "connected"; payload: { sessionSnapshot: SessionSnapshot } }
-        | { type: "session_snapshot"; payload: SessionSnapshot }
-        | { type: "roll_recorded"; payload: RollRecord };
-
-      if (message.type === "connected") {
-        setSnapshot(message.payload.sessionSnapshot);
+    function connect() {
+      if (!active) {
         return;
       }
 
-      if (message.type === "session_snapshot") {
-        setSnapshot(message.payload);
-        return;
-      }
+      setConnectionLabel((current) => (current === "connected" ? "reconnecting" : "connecting"));
+      socket = new WebSocket(
+        `${protocol}://${window.location.host}/ws?role=player&clientId=${encodeURIComponent(localClientId)}`
+      );
 
-      if (message.type === "roll_recorded") {
-        setSnapshot((current) =>
-          current
-            ? {
-                ...current,
-                rollLog: [message.payload, ...current.rollLog].slice(0, 8)
-              }
-            : current
-        );
-      }
-    });
+      socket.addEventListener("open", () => {
+        setConnectionLabel("connected");
+        heartbeatTimer = window.setInterval(() => {
+          if (socket?.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: "heartbeat" }));
+          }
+        }, 5000);
+      });
+
+      socket.addEventListener("close", () => {
+        clearTimers();
+        setConnectionLabel("reconnecting");
+
+        if (active) {
+          reconnectTimer = window.setTimeout(() => {
+            connect();
+          }, 1500);
+        }
+      });
+
+      socket.addEventListener("message", (event) => {
+        const message = JSON.parse(event.data) as PlayerSocketEnvelope;
+
+        if (message.type === "connected") {
+          setSnapshot(message.payload.sessionSnapshot);
+          return;
+        }
+
+        if (message.type === "session_snapshot") {
+          setSnapshot(message.payload);
+          return;
+        }
+
+        if (message.type === "roll_recorded") {
+          setSnapshot((current) =>
+            current
+              ? {
+                  ...current,
+                  rollLog: [message.payload, ...current.rollLog].slice(0, 8)
+                }
+              : current
+          );
+        }
+      });
+    }
+
+    connect();
 
     return () => {
-      socket.close();
+      active = false;
+      clearTimers();
+      socket?.close();
     };
   }, []);
 

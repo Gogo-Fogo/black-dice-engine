@@ -20,6 +20,16 @@ type RuntimeStatus = {
   mode: "fast" | "scene" | "cinematic" | "prep" | "offline";
   updatedAt: string;
   services: ServiceState[];
+  clients: Array<{
+    id: string;
+    role: ClientSession["role"];
+    clientId: string;
+    status: "active" | "stale";
+    connectedAt: string;
+    lastSeenAt: string;
+    playerLabel: string | null;
+    claimedCharacterName: string | null;
+  }>;
   warnings: string[];
 };
 
@@ -119,6 +129,7 @@ const playerCompanionDistDir = join(currentDir, "../../../apps/player-companion/
 const app = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ server, path: "/ws" });
+const staleClientThresholdMs = 15000;
 
 const clientSessions = new Map<string, ClientSession>();
 const recentMutationResponses = new Map<string, CachedMutationResponse>();
@@ -207,10 +218,31 @@ app.use("/player", express.static(playerCompanionDistDir));
 
 function getRuntimeStatus(): RuntimeStatus {
   const now = new Date().toISOString();
+  const nowMs = Date.now();
+  const clients = Array.from(clientSessions.values())
+    .map((session) => {
+      const claimedCharacter =
+        party.find((entry) => entry.claimedByClientId === session.clientId) ?? null;
+      const ageMs = nowMs - new Date(session.lastSeenAt).getTime();
+      const clientStatus: "active" | "stale" = ageMs > staleClientThresholdMs ? "stale" : "active";
+
+      return {
+        id: session.id,
+        role: session.role,
+        clientId: session.clientId,
+        status: clientStatus,
+        connectedAt: session.connectedAt,
+        lastSeenAt: session.lastSeenAt,
+        playerLabel: claimedCharacter?.claimedByLabel ?? null,
+        claimedCharacterName: claimedCharacter?.name ?? null
+      };
+    })
+    .sort((left, right) => left.role.localeCompare(right.role) || left.connectedAt.localeCompare(right.connectedAt));
+  const staleCount = clients.filter((client) => client.status === "stale").length;
 
   return {
     id: "runtime-main",
-    status: "ok",
+    status: staleCount > 0 ? "degraded" : "ok",
     mode: "fast",
     updatedAt: now,
     services: [
@@ -222,9 +254,12 @@ function getRuntimeStatus(): RuntimeStatus {
       },
       {
         name: "websocket",
-        status: "ok",
+        status: staleCount > 0 ? "degraded" : "ok",
         latencyMs: 5,
-        message: `${clientSessions.size} live session(s)`
+        message:
+          staleCount > 0
+            ? `${clientSessions.size} session(s), ${staleCount} stale`
+            : `${clientSessions.size} live session(s)`
       },
       {
         name: "dice-service",
@@ -233,6 +268,7 @@ function getRuntimeStatus(): RuntimeStatus {
         message: `${rollLog.length} roll(s) in memory`
       }
     ],
+    clients,
     warnings: []
   };
 }
@@ -676,11 +712,21 @@ wss.on("connection", (socket, request) => {
 
   broadcast("runtime_status", getRuntimeStatus());
 
-  socket.on("message", () => {
+  socket.on("message", (raw) => {
     const current = clientSessions.get(session.id);
 
     if (current) {
       current.lastSeenAt = new Date().toISOString();
+    }
+
+    try {
+      const message = JSON.parse(String(raw)) as { type?: string };
+
+      if (message.type === "heartbeat") {
+        broadcast("runtime_status", getRuntimeStatus());
+      }
+    } catch {
+      // Ignore unstructured payloads for now; timestamp refresh is enough.
     }
   });
 

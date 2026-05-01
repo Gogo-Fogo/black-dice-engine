@@ -12,6 +12,16 @@ type RuntimeStatus = {
     latencyMs?: number;
     message?: string;
   }>;
+  clients: Array<{
+    id: string;
+    role: "gm" | "player" | "spectator" | "ai" | "admin";
+    clientId: string;
+    status: "active" | "stale";
+    connectedAt: string;
+    lastSeenAt: string;
+    playerLabel: string | null;
+    claimedCharacterName: string | null;
+  }>;
   warnings?: string[];
 };
 
@@ -66,6 +76,19 @@ type SocketEnvelope =
   | { type: "runtime_status"; payload: RuntimeStatus }
   | { type: "roll_recorded"; payload: RollRecord }
   | { type: "session_snapshot"; payload: SessionSnapshot };
+
+function formatRelativeTime(value: string) {
+  const elapsedMs = Date.now() - new Date(value).getTime();
+  const elapsedSeconds = Math.max(0, Math.round(elapsedMs / 1000));
+
+  if (elapsedSeconds < 60) {
+    return `${elapsedSeconds}s ago`;
+  }
+
+  const elapsedMinutes = Math.round(elapsedSeconds / 60);
+
+  return `${elapsedMinutes}m ago`;
+}
 
 type StateEventRequest =
   | {
@@ -279,49 +302,89 @@ export default function App() {
 
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const socket = new WebSocket(`${protocol}://${window.location.host}/ws?role=gm`);
+    let active = true;
+    let socket: WebSocket | null = null;
+    let reconnectTimer: number | null = null;
+    let heartbeatTimer: number | null = null;
 
-    socket.addEventListener("open", () => {
-      setConnectionLabel("connected");
-    });
+    function clearTimers() {
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
 
-    socket.addEventListener("close", () => {
-      setConnectionLabel("disconnected");
-    });
+      if (heartbeatTimer !== null) {
+        window.clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
+    }
 
-    socket.addEventListener("message", (event) => {
-      const message = JSON.parse(event.data) as SocketEnvelope;
-
-      if (message.type === "connected") {
-        setRuntime(message.payload.runtimeStatus);
-        setSnapshot(message.payload.sessionSnapshot);
+    function connect() {
+      if (!active) {
         return;
       }
 
-      if (message.type === "runtime_status") {
-        setRuntime(message.payload);
-        return;
-      }
+      setConnectionLabel((current) => (current === "connected" ? "reconnecting" : "connecting"));
+      socket = new WebSocket(`${protocol}://${window.location.host}/ws?role=gm`);
 
-      if (message.type === "roll_recorded") {
-        setSnapshot((current) =>
-          current
-            ? {
-                ...current,
-                rollLog: [message.payload, ...current.rollLog].slice(0, 12)
-              }
-            : current
-        );
-        return;
-      }
+      socket.addEventListener("open", () => {
+        setConnectionLabel("connected");
+        heartbeatTimer = window.setInterval(() => {
+          if (socket?.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: "heartbeat" }));
+          }
+        }, 5000);
+      });
 
-      if (message.type === "session_snapshot") {
-        setSnapshot(message.payload);
-      }
-    });
+      socket.addEventListener("close", () => {
+        clearTimers();
+        setConnectionLabel("reconnecting");
+
+        if (active) {
+          reconnectTimer = window.setTimeout(() => {
+            connect();
+          }, 1500);
+        }
+      });
+
+      socket.addEventListener("message", (event) => {
+        const message = JSON.parse(event.data) as SocketEnvelope;
+
+        if (message.type === "connected") {
+          setRuntime(message.payload.runtimeStatus);
+          setSnapshot(message.payload.sessionSnapshot);
+          return;
+        }
+
+        if (message.type === "runtime_status") {
+          setRuntime(message.payload);
+          return;
+        }
+
+        if (message.type === "roll_recorded") {
+          setSnapshot((current) =>
+            current
+              ? {
+                  ...current,
+                  rollLog: [message.payload, ...current.rollLog].slice(0, 12)
+                }
+              : current
+          );
+          return;
+        }
+
+        if (message.type === "session_snapshot") {
+          setSnapshot(message.payload);
+        }
+      });
+    }
+
+    connect();
 
     return () => {
-      socket.close();
+      active = false;
+      clearTimers();
+      socket?.close();
     };
   }, []);
 
@@ -378,6 +441,29 @@ export default function App() {
               </li>
             )) ?? <li>Waiting for runtime service data.</li>}
           </ul>
+        </article>
+
+        <article className="panel">
+          <div className="panel-header">
+            <h2>Presence</h2>
+            <span>{runtime?.clients.length ?? 0} clients</span>
+          </div>
+          <div className="presence-list">
+            {runtime?.clients.map((client) => (
+              <div className="presence-row" key={client.id}>
+                <div>
+                  <strong>
+                    {client.playerLabel ?? client.role}
+                    {client.claimedCharacterName ? ` - ${client.claimedCharacterName}` : ""}
+                  </strong>
+                  <p>
+                    {client.role} · last seen {formatRelativeTime(client.lastSeenAt)}
+                  </p>
+                </div>
+                <span className={`presence-pill presence-${client.status}`}>{client.status}</span>
+              </div>
+            )) ?? <p>Waiting for connected clients.</p>}
+          </div>
         </article>
 
         <article className="panel">
