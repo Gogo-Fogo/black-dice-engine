@@ -84,6 +84,10 @@ comfy-workflows/private/
 private/
 imports/
 source-pdfs/
+_local-context/
+local-context/
+context/private/
+research/private/
 *.pdf
 *.epub
 

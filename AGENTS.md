@@ -26,6 +26,7 @@ Instructions for Codex and other coding agents working in this repository.
 - Do not add copyrighted campaign text, paid adventure excerpts, private campaign notes, rulebook dumps, or private PDFs.
 - Keep committed sample content original, generic, and SRD-safe/demo-safe.
 - Keep real campaign imports and private table material out of Git.
+- When source context files are provided, follow `docs/context-file-workflow.md`: summarize durable decisions instead of committing raw source documents.
 
 ## AI Output And Schemas
 
