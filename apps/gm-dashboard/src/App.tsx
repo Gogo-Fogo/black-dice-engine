@@ -118,6 +118,52 @@ type MemoryEntry = {
   createdAt: string;
 };
 
+type CampaignFact = {
+  id: string;
+  text: string;
+  source: string;
+};
+
+type CampaignBible = {
+  id: string;
+  title: string;
+  subtitle: string;
+  visibility: "gm_only" | "player_visible" | "public_demo";
+  tone: string[];
+  safety: {
+    rating: string;
+    lines: string[];
+    veils: string[];
+  };
+  facts: CampaignFact[];
+};
+
+type CampaignLocation = {
+  id: string;
+  name: string;
+  visibility: "gm_only" | "player_visible" | "public_demo";
+  summary: string;
+  features: string[];
+};
+
+type CampaignNpc = {
+  id: string;
+  name: string;
+  role: string;
+  visibility: "gm_only" | "player_visible" | "public_demo";
+  motive: string;
+  detail: string;
+};
+
+type ActiveSceneContext = {
+  title: string;
+  location: CampaignLocation | null;
+  npcs: CampaignNpc[];
+  facts: CampaignFact[];
+  tone: string[];
+  safety: CampaignBible["safety"];
+};
+
 type StateEventProposal = {
   id: string;
   createdAt: string;
@@ -168,6 +214,8 @@ type SessionSnapshot = {
   currentScene: string;
   tablePin: string;
   joinUrl: string;
+  campaignBible: CampaignBible;
+  activeSceneContext: ActiveSceneContext;
   party: Character[];
   rollLog: RollRecord[];
   eventLog: TableEventRecord[];
@@ -265,6 +313,10 @@ function formatVisibilityLabel(value: TableEventRecord["visibility"]) {
 }
 
 function formatMemoryKind(value: MemoryEntry["kind"]) {
+  return value.replace(/_/g, " ");
+}
+
+function formatSimpleLabel(value: string) {
   return value.replace(/_/g, " ");
 }
 
@@ -747,6 +799,80 @@ export default function App() {
               </div>
             )) ?? <p>Waiting for connected clients.</p>}
           </div>
+        </article>
+
+        <article className="panel">
+          <div className="panel-header">
+            <h2>Campaign Context</h2>
+            <span>{snapshot?.campaignBible.visibility ?? "loading"}</span>
+          </div>
+          {snapshot ? (
+            <div className="context-block">
+              <strong>{snapshot.campaignBible.subtitle}</strong>
+              <p>{snapshot.activeSceneContext.location?.summary ?? "No scene location summary resolved yet."}</p>
+              <div className="packet-meta-grid">
+                <div>
+                  <span>Scene Location</span>
+                  <strong>{snapshot.activeSceneContext.location?.name ?? "Unresolved"}</strong>
+                </div>
+                <div>
+                  <span>Safety Rating</span>
+                  <strong>{snapshot.activeSceneContext.safety.rating}</strong>
+                </div>
+              </div>
+              <div className="tag-row">
+                {snapshot.activeSceneContext.tone.map((tone) => (
+                  <span className="tag-chip" key={tone}>
+                    {tone}
+                  </span>
+                ))}
+              </div>
+              {snapshot.activeSceneContext.location?.features.length ? (
+                <div>
+                  <p className="detail-label">Location Features</p>
+                  <div className="tag-row">
+                    {snapshot.activeSceneContext.location.features.map((feature) => (
+                      <span className="tag-chip" key={feature}>
+                        {feature}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {snapshot.activeSceneContext.npcs.length ? (
+                <div>
+                  <p className="detail-label">Relevant NPCs</p>
+                  <div className="context-list">
+                    {snapshot.activeSceneContext.npcs.map((npc) => (
+                      <div className="context-row" key={npc.id}>
+                        <strong>{npc.name}</strong>
+                        <p>
+                          {npc.role} · {npc.motive}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {snapshot.activeSceneContext.facts.length ? (
+                <div>
+                  <p className="detail-label">Matched Facts</p>
+                  <div className="context-list">
+                    {snapshot.activeSceneContext.facts.map((fact) => (
+                      <div className="context-row" key={fact.id}>
+                        <strong>{formatSimpleLabel(fact.id)}</strong>
+                        <p>{fact.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <p>No campaign facts matched this scene yet.</p>
+              )}
+            </div>
+          ) : (
+            <p>Waiting for campaign context.</p>
+          )}
         </article>
 
         <article className="panel">

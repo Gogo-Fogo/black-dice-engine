@@ -125,6 +125,27 @@ body {
   background: rgba(19, 15, 9, 0.72);
 }
 
+.context-block,
+.context-list {
+  display: grid;
+  gap: 14px;
+}
+
+.context-list {
+  gap: 10px;
+}
+
+.context-row {
+  padding: 10px 12px;
+  border: 1px solid rgba(219, 187, 124, 0.1);
+  background: rgba(24, 18, 11, 0.66);
+}
+
+.context-row p {
+  margin: 0;
+  color: #d8c9aa;
+}
+
 .scene-packet-block p,
 .packet-beat p {
   margin: 0;

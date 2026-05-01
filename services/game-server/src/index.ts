@@ -2,7 +2,7 @@ import cors from "cors";
 import express from "express";
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -127,6 +127,52 @@ type MemoryEntry = {
   createdAt: string;
 };
 
+type CampaignFact = {
+  id: string;
+  text: string;
+  source: string;
+};
+
+type CampaignBible = {
+  id: string;
+  title: string;
+  subtitle: string;
+  visibility: "gm_only" | "player_visible" | "public_demo";
+  tone: string[];
+  safety: {
+    rating: string;
+    lines: string[];
+    veils: string[];
+  };
+  facts: CampaignFact[];
+};
+
+type CampaignLocation = {
+  id: string;
+  name: string;
+  visibility: "gm_only" | "player_visible" | "public_demo";
+  summary: string;
+  features: string[];
+};
+
+type CampaignNpc = {
+  id: string;
+  name: string;
+  role: string;
+  visibility: "gm_only" | "player_visible" | "public_demo";
+  motive: string;
+  detail: string;
+};
+
+type ActiveSceneContext = {
+  title: string;
+  location: CampaignLocation | null;
+  npcs: CampaignNpc[];
+  facts: CampaignFact[];
+  tone: string[];
+  safety: CampaignBible["safety"];
+};
+
 type StateEventProposal = {
   id: string;
   createdAt: string;
@@ -177,6 +223,8 @@ type SessionSnapshot = {
   currentScene: string;
   tablePin: string;
   joinUrl: string;
+  campaignBible: CampaignBible;
+  activeSceneContext: ActiveSceneContext;
   party: Character[];
   rollLog: RollRecord[];
   eventLog: TableEventRecord[];
@@ -232,6 +280,7 @@ const currentDir = dirname(fileURLToPath(import.meta.url));
 const playerCompanionDistDir = join(currentDir, "../../../apps/player-companion/dist");
 const sessionSummaryExportDir = join(currentDir, "../../../_exports/session-summaries");
 const memoryEntryExportDir = join(currentDir, "../../../_exports/memory-entries");
+const sampleCampaignDir = join(currentDir, "../../../campaigns/sample-campaign");
 
 const app = express();
 const server = createServer(app);
@@ -322,6 +371,172 @@ const eventLog: TableEventRecord[] = [];
 const approvalQueue: StateEventProposal[] = [];
 const memoryEntries: MemoryEntry[] = [];
 
+function parseQuotedValue(line: string) {
+  const quotedMatch = line.match(/:\s*"([^"]*)"/);
+
+  if (quotedMatch) {
+    return quotedMatch[1];
+  }
+
+  return line.split(":").slice(1).join(":").trim();
+}
+
+function parseCampaignBibleYaml(raw: string): CampaignBible {
+  const lines = raw.split(/\r?\n/);
+  const tone: string[] = [];
+  const safetyLines: string[] = [];
+  const safetyVeils: string[] = [];
+  const facts: CampaignFact[] = [];
+  let currentSection: "tone" | "lines" | "veils" | "facts" | null = null;
+  let pendingFact: Partial<CampaignFact> | null = null;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      continue;
+    }
+
+    if (trimmed === "tone:") {
+      currentSection = "tone";
+      continue;
+    }
+
+    if (trimmed === "lines:") {
+      currentSection = "lines";
+      continue;
+    }
+
+    if (trimmed === "veils:") {
+      currentSection = "veils";
+      continue;
+    }
+
+    if (trimmed === "facts:") {
+      currentSection = "facts";
+      continue;
+    }
+
+    if (trimmed.startsWith("- ")) {
+      if (currentSection === "tone") {
+        tone.push(trimmed.replace(/^- /, "").replace(/^"|"$/g, ""));
+        continue;
+      }
+
+      if (currentSection === "lines") {
+        safetyLines.push(trimmed.replace(/^- /, "").replace(/^"|"$/g, ""));
+        continue;
+      }
+
+      if (currentSection === "veils") {
+        safetyVeils.push(trimmed.replace(/^- /, "").replace(/^"|"$/g, ""));
+        continue;
+      }
+
+      if (currentSection === "facts") {
+        if (pendingFact?.id && pendingFact.text && pendingFact.source) {
+          facts.push(pendingFact as CampaignFact);
+        }
+
+        pendingFact = {
+          id: parseQuotedValue(trimmed.replace(/^- /, ""))
+        };
+      }
+
+      continue;
+    }
+
+    if (currentSection === "facts" && pendingFact) {
+      if (trimmed.startsWith("text:")) {
+        pendingFact.text = parseQuotedValue(trimmed);
+      } else if (trimmed.startsWith("source:")) {
+        pendingFact.source = parseQuotedValue(trimmed);
+      }
+    }
+  }
+
+  if (pendingFact?.id && pendingFact.text && pendingFact.source) {
+    facts.push(pendingFact as CampaignFact);
+  }
+
+  const getRootValue = (key: string) => {
+    const matched = lines.find((line) => line.startsWith(`${key}:`));
+    return matched ? parseQuotedValue(matched) : "";
+  };
+
+  const ratingLine = lines.find((line) => line.trim().startsWith("rating:"));
+
+  return {
+    id: getRootValue("id"),
+    title: getRootValue("title"),
+    subtitle: getRootValue("subtitle"),
+    visibility: (getRootValue("visibility") as CampaignBible["visibility"]) || "public_demo",
+    tone,
+    safety: {
+      rating: ratingLine ? parseQuotedValue(ratingLine.trim()) : "unknown",
+      lines: safetyLines,
+      veils: safetyVeils
+    },
+    facts
+  };
+}
+
+function loadSampleCampaignContext() {
+  const campaignBible = parseCampaignBibleYaml(
+    readFileSync(join(sampleCampaignDir, "campaign-bible.yml"), "utf8")
+  );
+  const locationFile = JSON.parse(
+    readFileSync(join(sampleCampaignDir, "locations.json"), "utf8")
+  ) as { locations: CampaignLocation[] };
+  const npcFile = JSON.parse(readFileSync(join(sampleCampaignDir, "npcs.json"), "utf8")) as {
+    npcs: CampaignNpc[];
+  };
+
+  return {
+    campaignBible,
+    locations: locationFile.locations,
+    npcs: npcFile.npcs
+  };
+}
+
+const sampleCampaignContext = loadSampleCampaignContext();
+
+function buildActiveSceneContext(currentScene: string): ActiveSceneContext {
+  const sceneLower = currentScene.toLowerCase();
+  const location =
+    sampleCampaignContext.locations.find((entry) =>
+      sceneLower.includes(entry.name.toLowerCase())
+    ) ?? null;
+  const locationTerms = location
+    ? location.name
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter((part) => part.length > 2)
+    : [];
+  const npcs = sampleCampaignContext.npcs.filter((entry) => {
+    const roleLower = entry.role.toLowerCase();
+    return locationTerms.some((term) => roleLower.includes(term));
+  });
+  const facts = sampleCampaignContext.campaignBible.facts.filter((fact) => {
+    const factLower = fact.text.toLowerCase();
+
+    if (location && factLower.includes(location.name.toLowerCase())) {
+      return true;
+    }
+
+    return location?.features.some((feature) => factLower.includes(feature.toLowerCase())) ?? false;
+  });
+
+  return {
+    title: currentScene,
+    location,
+    npcs,
+    facts,
+    tone: sampleCampaignContext.campaignBible.tone,
+    safety: sampleCampaignContext.campaignBible.safety
+  };
+}
+
 app.use(cors());
 app.use(express.json());
 app.use("/player", express.static(playerCompanionDistDir));
@@ -410,13 +625,19 @@ function getLanJoinHost() {
 
 function getSessionSnapshot(): SessionSnapshot {
   const joinHost = host === "0.0.0.0" ? getLanJoinHost() : host;
+  const campaignBible = sampleCampaignContext.campaignBible;
+  const activeSceneContext = buildActiveSceneContext(
+    "Lantern Gate, just before the watchtower ascent"
+  );
 
   return {
-    campaignId: "sample-campaign",
-    campaignTitle: "The Shattered Oath",
-    currentScene: "Lantern Gate, just before the watchtower ascent",
+    campaignId: campaignBible.id,
+    campaignTitle: campaignBible.title,
+    currentScene: activeSceneContext.title,
     tablePin: "BD20",
     joinUrl: `http://${joinHost}:${gameServerPort}/player/?pin=BD20`,
+    campaignBible,
+    activeSceneContext,
     party,
     rollLog,
     eventLog,
@@ -821,6 +1042,9 @@ function buildMemoryEntry() {
   ).slice(0, 12);
   const summaryParts = [
     `${snapshot.currentScene} remains the active scene.`,
+    snapshot.activeSceneContext.location
+      ? `${snapshot.activeSceneContext.location.name}: ${snapshot.activeSceneContext.location.summary}.`
+      : "No scene location summary has been resolved yet.",
     woundedCharacters.length
       ? `${woundedCharacters
           .map((character) => `${character.name} is at ${character.hp.current}/${character.hp.max} HP`)
@@ -836,7 +1060,13 @@ function buildMemoryEntry() {
       : "No player-visible table events have been recorded yet.",
     pendingSummaries.length
       ? `Pending GM review: ${pendingSummaries.slice(0, 3).join(" | ")}.`
-      : "No risky state changes are waiting for GM review."
+      : "No risky state changes are waiting for GM review.",
+    snapshot.activeSceneContext.facts.length
+      ? `Relevant world facts: ${snapshot.activeSceneContext.facts
+          .map((fact) => fact.text)
+          .slice(0, 2)
+          .join(" | ")}.`
+      : "No campaign-bible facts were matched to this scene."
   ];
 
   const entry: MemoryEntry = {
@@ -867,20 +1097,24 @@ function buildMemoryEntry() {
 }
 
 function buildScenePacket(): ScenePacket {
-  const woundedCharacters = party.filter((character) => character.hp.current < character.hp.max);
-  const queuedApprovals = approvalQueue.length;
+  const snapshot = getSessionSnapshot();
+  const woundedCharacters = snapshot.party.filter((character) => character.hp.current < character.hp.max);
+  const queuedApprovals = snapshot.approvalQueue.length;
+  const { activeSceneContext } = snapshot;
+  const locationSummary =
+    activeSceneContext.location?.summary ?? "A tense local scene remains unresolved.";
+  const npcBeat = activeSceneContext.npcs[0];
 
   return {
     id: `scene-${Date.now().toString(36)}`,
-    campaignId: "sample-campaign",
-    sceneTitle: "Lantern Gate Approach",
+    campaignId: snapshot.campaignId,
+    sceneTitle: activeSceneContext.location?.name ?? "Lantern Gate Approach",
     visibility: "gm_only",
-    summary:
-      "The party stands at Lantern Gate before the ascent to the watchtower, with black sand pulses building under the stones and tension rising around the next reveal.",
+    summary: `${locationSummary} ${activeSceneContext.facts[0]?.text ?? ""}`.trim(),
     beats: [
       {
         kind: "description",
-        text: "Wind pushes black sand across the old gate while lanternlight shivers against wet stone."
+        text: `Wind pushes black sand across ${activeSceneContext.location?.name ?? "the old gate"} while lanternlight shivers against wet stone.`
       },
       {
         kind: "threat",
@@ -888,23 +1122,28 @@ function buildScenePacket(): ScenePacket {
       },
       {
         kind: "clue",
-        text: "The sand pulses are tracking a pattern that points toward the watchtower mechanism rather than a random curse."
+        text:
+          activeSceneContext.facts[0]?.text ??
+          "The sand pulses are tracking a pattern that points toward the watchtower mechanism rather than a random curse."
       },
       {
         kind: "choice",
-        text: "Offer a split between a careful investigation of the gate machinery and an immediate push toward the tower stairs."
+        text: `Offer a split between a careful investigation of the ${
+          activeSceneContext.location?.features[0] ?? "gate machinery"
+        } and an immediate push toward the tower stairs.`
       },
       {
         kind: "consequence",
         text: queuedApprovals
           ? `There are ${queuedApprovals} queued state changes waiting for GM approval, so the next narration should avoid assuming those outcomes are final.`
-          : "Any risky revelation here should still pass through GM approval before it becomes permanent state."
+          : npcBeat?.motive ??
+            "Any risky revelation here should still pass through GM approval before it becomes permanent state."
       }
     ],
     proposedStateEvents: [
       {
         id: `proposal-${Date.now().toString(36)}`,
-        campaignId: "sample-campaign",
+        campaignId: snapshot.campaignId,
         type: "condition_added",
         actor: {
           id: "ai-scene-packet",
