@@ -1,6 +1,6 @@
 # Branding
 
-Black Dice Engine uses a black-and-gold d20 as its primary project mark and a wide concept banner for presentations.
+Black Dice Engine uses a black-and-gold d20 as its primary project mark, a clean presentation banner, and a separate info-pitch banner.
 
 ## Primary Project Mark
 
@@ -35,7 +35,22 @@ Use the banner for:
 - documentation landing pages
 - GM dashboard splash screen
 
-Treat the banner as concept/key art, not as an exact product screenshot. The current banner text is harder to read at GitHub/README sizes, so do not use it as the default README hero or social preview until a simpler high-legibility version exists. Future real UI screenshots should be labeled separately.
+This is the cleaner title-led banner. Use it anywhere the project needs a readable cinematic brand image, but keep the d20 as the default README hero and GitHub social preview.
+
+## Info-Pitch Banner
+
+```text
+docs/assets/branding/black-dice-engine-banner-info-pitch.png
+```
+
+Use the info-pitch banner for:
+
+- portfolio case study sections
+- pitch deck overview slides
+- project pages that need feature callouts
+- social posts or showcase images where the UI concept helps explain the product
+
+Treat the info-pitch banner as concept and product-story art, not as a literal shipped UI screenshot. Future real screenshots should be labeled separately.
 
 ## Canonical Asset
 
