@@ -116,6 +116,7 @@ The working product decisions live in `docs/decisions/`. Start with:
 - `latency-and-performance-policy.md`
 - `runtime-reliability.md`
 - `dice-rolling-and-presentation.md`
+- `player-companion-strategy.md`
 - `build-start-checklist.md`
 - `campaign-design.md`
 - `character-creation.md`

@@ -15,6 +15,7 @@ Keep the private GitHub repository clean and turn the planning work into a small
 - [ ] Decide the first app stack: likely TypeScript with either Vite or Next.js.
 - [ ] Decide the first service stack: likely Node.js/TypeScript first, Python only where it clearly helps.
 - [ ] Review runtime reliability contracts before the first server implementation.
+- [ ] Review mobile web companion and QR join strategy before the first dashboard implementation.
 - [ ] Convert these TODO items into GitHub issues after publishing.
 - [ ] Create GitHub milestones for repo foundation, runtime spike, playable LAN MVP, and media integration.
 
@@ -75,6 +76,8 @@ Goal: let the GM and three players use the system together on the same network.
 - [ ] Add GM roll log and state event approval view.
 - [ ] Add HP, AC, inventory, conditions, notes, and resource tracking.
 - [ ] Add WebSocket updates between dashboard and player phones.
+- [ ] Add QR-code join panel to the GM dashboard.
+- [ ] Add local table PIN/session token strategy for player join.
 - [ ] Add visible connected/reconnecting/disconnected status.
 - [ ] Prevent duplicate rolls/actions after reconnect.
 - [ ] Test over LAN using at least one phone.
@@ -130,6 +133,7 @@ Goal: make failures visible and recoverable before adding heavier integrations.
 - [ ] Add GM dashboard status strip.
 - [ ] Add player client heartbeat.
 - [ ] Add reconnect/resume flow.
+- [ ] Add local table PIN/session token strategy for QR join.
 - [ ] Add idempotency keys for rolls and submitted actions.
 - [ ] Add error event log with visibility labels.
 - [ ] Add degraded-mode behavior for unavailable LLM, ComfyUI, audio, and import services.
@@ -157,6 +161,7 @@ Goal: demonstrate a complete safe sample session without private or copyrighted 
 - [ ] Add short cinematic video jobs as queued special events.
 - [ ] Add AI-assisted music/ambience generation for prepared or queued scenes.
 - [ ] Add Tailscale-friendly remote play guidance.
+- [ ] Add optional Discord bridge after the mobile web companion is useful.
 - [ ] Add backup, restore, export, and archive tools.
 - [ ] Add stronger permissions for GM, player, spectator, and AI roles.
 - [ ] Add runtime resource governor for local model, media, audio, disk, and queue pressure.

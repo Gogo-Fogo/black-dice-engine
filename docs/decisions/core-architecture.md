@@ -66,6 +66,8 @@ Optional presentation adapters display:
 
 They do not replace the local dice service, roll history, or state-event audit trail.
 
+The primary player surface is the mobile web companion. Discord is deferred as an optional bridge, not a replacement for the first player app.
+
 The runtime layer validates operational safety:
 
 - whether a subsystem is available
@@ -84,6 +86,7 @@ Default development should assume:
 - Local ComfyUI.
 - Local model endpoints where configured.
 - Local backup/export path.
+- QR-code LAN join flow for player phones.
 - Optional cloud/director calls only when explicitly enabled.
 
 ## Cloud Later

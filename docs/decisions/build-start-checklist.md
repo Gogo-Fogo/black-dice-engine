@@ -12,6 +12,8 @@ Use this checklist before the first implementation pass. The goal is to start wi
 - Heavy/private data stays outside Git.
 - Codex should edit inside this repo unless the user approves another path.
 - The game server is the single coordination boundary for dashboard, player phones, AI, state, dice, media, audio, and imports.
+- The player companion is a mobile web app first; Discord is deferred as an optional bridge.
+- Players should be able to join by scanning a QR code from the GM dashboard.
 - Dice truth stays local even when dddice or another 3D roller is used for presentation.
 - Images, video, audio, local models, real campaigns, private PDFs, and secrets stay outside the repo.
 

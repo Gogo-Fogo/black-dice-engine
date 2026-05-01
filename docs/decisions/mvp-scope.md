@@ -10,6 +10,8 @@ Create a local multiplayer web app where a Windows PC acts as the GM server and 
 
 - GM dashboard running locally.
 - Player companion views over LAN.
+- QR-code join flow from GM dashboard to player phones.
+- Local session identity, optional table PIN, and character claim/assignment.
 - SQLite-backed campaign state.
 - WebSocket live updates.
 - Dice roller and roll log.
@@ -30,6 +32,8 @@ Create a local multiplayer web app where a Windows PC acts as the GM server and 
 - Custom model training.
 - Full video generation.
 - Public internet hosting.
+- Discord bot as primary player surface.
+- Discord or Google login.
 - Paid/copyrighted module ingestion for demo content.
 - Real campaign databases in the repo.
 - Private/generated/adult assets in the repo.
@@ -49,6 +53,7 @@ Create a local multiplayer web app where a Windows PC acts as the GM server and 
 ## Success Criteria
 
 - A player can open a phone sheet on the same network.
+- A player can join by scanning a QR code from the GM dashboard.
 - The GM can start a scene.
 - A player can roll or submit an action.
 - The system can apply a deterministic state event.
