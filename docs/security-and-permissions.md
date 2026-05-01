@@ -1,0 +1,43 @@
+# Security And Permissions
+
+Black Dice Engine is local-first, but local does not mean risk-free. Player devices, browser clients, imported files, and local services still need clear trust boundaries.
+
+## Defaults
+
+- Bind services to localhost during development.
+- Expose LAN access only when needed for player devices.
+- Keep secrets in local `.env` files, never in Git.
+- Keep private campaign data outside this repository.
+- Treat imported content as private unless marked demo-safe.
+
+## Visibility Boundaries
+
+Data should be labeled by audience:
+
+- `gm_only`: hidden from players.
+- `player_visible`: safe for current table participants.
+- `public_demo`: safe for screenshots, portfolio demos, and repository samples.
+
+## Permission Checks
+
+Before sending data to a player client, generated prompt, media workflow, or export, services should check visibility and source labels.
+
+## Dangerous Data
+
+Never commit or expose:
+
+- Secrets and API keys.
+- Real campaign databases.
+- Private notes.
+- Paid PDFs or copied adventure text.
+- Model checkpoints.
+- Generated private images or videos.
+- Player personal information.
+
+## Future Hardening
+
+- Session tokens for player clients.
+- Explicit host allowlist for LAN binding.
+- Read-only demo mode.
+- Redaction tools for logs and exports.
+- Local backup and restore workflows.

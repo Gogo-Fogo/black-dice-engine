@@ -1,0 +1,26 @@
+{
+  "campaignId": "sample-campaign",
+  "locations": [
+    {
+      "id": "loc-lantern-gate",
+      "name": "Lantern Gate",
+      "visibility": "public_demo",
+      "summary": "A fortified watch-station beside a ruined signal tower.",
+      "features": ["cinder bell", "salt-stained walls", "signal lens stores"]
+    },
+    {
+      "id": "loc-glassfen-coast",
+      "name": "Glassfen Coast",
+      "visibility": "public_demo",
+      "summary": "A fog-heavy shoreline where sound carries strangely across the water.",
+      "features": ["reed channels", "wreck markers", "low-tide roads"]
+    },
+    {
+      "id": "loc-blackstep-pier",
+      "name": "Blackstep Pier",
+      "visibility": "public_demo",
+      "summary": "A half-sunk trade pier used by salvagers and night fishers.",
+      "features": ["tarred pilings", "cold lanterns", "locked tide shed"]
+    }
+  ]
+}

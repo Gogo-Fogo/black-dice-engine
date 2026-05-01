@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-dice-engine.local/schemas/character.schema.json",
+  "title": "Character",
+  "type": "object",
+  "required": ["id", "campaignId", "name", "role", "visibility", "stats"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "campaignId": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "role": {
+      "type": "string"
+    },
+    "visibility": {
+      "type": "string",
+      "enum": ["gm_only", "player_visible", "public_demo"]
+    },
+    "pronouns": {
+      "type": "string"
+    },
+    "stats": {
+      "type": "object",
+      "additionalProperties": {
+        "type": ["number", "string", "boolean"]
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["current", "max"],
+        "additionalProperties": false,
+        "properties": {
+          "current": {
+            "type": "number"
+          },
+          "max": {
+            "type": "number"
+          }
+        }
+      },
+      "default": {}
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    }
+  }
+}

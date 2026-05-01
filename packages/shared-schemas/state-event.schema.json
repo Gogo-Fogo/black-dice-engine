@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-dice-engine.local/schemas/state-event.schema.json",
+  "title": "State Event",
+  "type": "object",
+  "required": ["id", "campaignId", "type", "actor", "visibility", "timestamp", "payload"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "campaignId": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "roll_recorded",
+        "resource_changed",
+        "condition_added",
+        "condition_removed",
+        "scene_started",
+        "scene_ended",
+        "faction_standing_changed",
+        "memory_added"
+      ]
+    },
+    "actor": {
+      "type": "object",
+      "required": ["id", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["gm", "player", "system", "ai_assistant"]
+        }
+      }
+    },
+    "visibility": {
+      "type": "string",
+      "enum": ["gm_only", "player_visible", "public_demo"]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "payload": {
+      "type": "object"
+    }
+  }
+}

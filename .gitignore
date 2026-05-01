@@ -1,0 +1,104 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Dependencies
+node_modules/
+.pnpm-store/
+.yarn/
+.npm/
+vendor/
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+coverage/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Local databases and campaign state
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+campaigns/private/
+campaigns/**/private/
+campaigns/**/imports/
+campaigns/**/sessions/
+
+# Generated media and assets
+generated/
+outputs/
+assets/generated/
+assets/private/
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.mp4
+*.mov
+*.avi
+*.wav
+*.mp3
+
+# Keep intentional docs/sample placeholders
+!docs/**/*.png
+!campaigns/sample-campaign/**
+
+# AI models and checkpoints
+models/
+*.safetensors
+*.ckpt
+*.gguf
+*.onnx
+*.pt
+*.pth
+*.bin
+
+# ComfyUI local outputs
+ComfyUI/output/
+ComfyUI/input/
+ComfyUI/temp/
+comfy-output/
+comfy-input/
+comfy-temp/
+comfy-workflows/private/
+
+# Private source material
+private/
+imports/
+source-pdfs/
+*.pdf
+*.epub
+
+# Logs and temp files
+logs/
+*.log
+*.tmp
+*.temp
+tmp/
+temp/
+.cache/
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

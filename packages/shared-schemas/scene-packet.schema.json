@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-dice-engine.local/schemas/scene-packet.schema.json",
+  "title": "Scene Packet",
+  "type": "object",
+  "required": ["id", "campaignId", "sceneTitle", "visibility", "summary", "beats"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_-]+$"
+    },
+    "campaignId": {
+      "type": "string"
+    },
+    "sceneTitle": {
+      "type": "string",
+      "minLength": 1
+    },
+    "visibility": {
+      "type": "string",
+      "enum": ["gm_only", "player_visible", "public_demo"]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "beats": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "text"],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["description", "choice", "threat", "clue", "consequence"]
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "proposedStateEvents": {
+      "type": "array",
+      "items": {
+        "$ref": "state-event.schema.json"
+      },
+      "default": []
+    },
+    "mediaRequests": {
+      "type": "array",
+      "items": {
+        "$ref": "asset.schema.json"
+      },
+      "default": []
+    }
+  }
+}

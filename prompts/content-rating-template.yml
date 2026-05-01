@@ -1,0 +1,17 @@
+rating: "table-defined"
+visibility: "player_visible"
+tone:
+  - "dark"
+  - "collaborative"
+  - "serious with moments of relief"
+lines:
+  - "Add hard lines here before play."
+veils:
+  - "Add fade-to-black topics here before play."
+allowed_intensity:
+  violence: "stylized"
+  horror: "moderate"
+  romance: "fade-to-black"
+  language: "table-defined"
+notes:
+  - "This is a template. Replace with table-specific safety settings outside public demo content when needed."

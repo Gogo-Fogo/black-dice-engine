@@ -1,0 +1,29 @@
+{
+  "campaignId": "sample-campaign",
+  "quests": [
+    {
+      "id": "quest-first-signal",
+      "title": "Confirm the First Signal",
+      "status": "available",
+      "dependsOn": [],
+      "leadsTo": ["quest-salvage-ledger"],
+      "summary": "Investigate a distress signal reported after the signal tower went dark."
+    },
+    {
+      "id": "quest-salvage-ledger",
+      "title": "Find the Salvage Ledger",
+      "status": "locked",
+      "dependsOn": ["quest-first-signal"],
+      "leadsTo": ["quest-road-underwater"],
+      "summary": "Locate records that show which crew reached the ruined tower last."
+    },
+    {
+      "id": "quest-road-underwater",
+      "title": "Walk the Road Underwater",
+      "status": "locked",
+      "dependsOn": ["quest-salvage-ledger"],
+      "leadsTo": [],
+      "summary": "Reach the old tide road during the brief hour when the sea pulls back."
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "campaignId": "sample-campaign",
+  "factions": [
+    {
+      "id": "faction-lantern-wardens",
+      "name": "Lantern Wardens",
+      "visibility": "public_demo",
+      "goal": "Keep the coast warned, supplied, and under watch.",
+      "standing": 0
+    },
+    {
+      "id": "faction-ashen-keel",
+      "name": "Ashen Keel Salvagers",
+      "visibility": "public_demo",
+      "goal": "Claim wreckage rights before the storms bury the evidence.",
+      "standing": -1
+    },
+    {
+      "id": "faction-fenbound",
+      "name": "Fenbound Families",
+      "visibility": "public_demo",
+      "goal": "Protect the old paths and keep outsiders from stirring the coast.",
+      "standing": 0
+    }
+  ]
+}

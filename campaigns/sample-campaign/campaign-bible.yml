@@ -1,0 +1,26 @@
+id: "sample-campaign"
+title: "The Glassfen Signals"
+subtitle: "A demo-safe campaign frame for Black Dice Engine"
+visibility: "public_demo"
+tone:
+  - "dark frontier mystery"
+  - "collaborative problem solving"
+  - "weathered coastal survival"
+safety:
+  rating: "teen"
+  lines:
+    - "No graphic torture."
+    - "No harm to children."
+  veils:
+    - "Romance fades to black."
+    - "Severe injury is described briefly, not graphically."
+facts:
+  - id: "fact-lantern-gate"
+    text: "The Lantern Gate is a watch-station built beside a ruined signal tower."
+    source: "sample-campaign"
+  - id: "fact-glassfen"
+    text: "The Glassfen Coast is known for fog banks that carry sound farther than sight."
+    source: "sample-campaign"
+  - id: "fact-cinder-bell"
+    text: "The Cinder Bell rings only when a distress signal is confirmed by two witnesses."
+    source: "sample-campaign"

@@ -1,0 +1,3 @@
+This directory is reserved for demo-safe ComfyUI workflow notes and placeholders.
+
+Do not commit generated outputs, model files, checkpoints, private inputs, or large assets.

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-dice-engine.local/schemas/asset.schema.json",
+  "title": "Asset Request Or Record",
+  "type": "object",
+  "required": ["id", "campaignId", "kind", "visibility", "status"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "campaignId": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["image", "video", "audio", "map", "handout"]
+    },
+    "visibility": {
+      "type": "string",
+      "enum": ["gm_only", "player_visible", "public_demo"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["requested", "approved", "queued", "generated", "rejected", "failed"]
+    },
+    "prompt": {
+      "type": "string"
+    },
+    "workflowId": {
+      "type": "string"
+    },
+    "localPath": {
+      "type": "string",
+      "description": "Path to local generated output. Generated media should stay outside the repository."
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    }
+  }
+}

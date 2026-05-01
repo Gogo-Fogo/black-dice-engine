@@ -1,0 +1,29 @@
+{
+  "campaignId": "sample-campaign",
+  "npcs": [
+    {
+      "id": "npc-mara-vell",
+      "name": "Mara Vell",
+      "role": "Lantern Gate watch captain",
+      "visibility": "public_demo",
+      "motive": "Keep the station calm until the signal is explained.",
+      "detail": "Carries a cracked brass signal lens as a worry stone."
+    },
+    {
+      "id": "npc-osric-vale",
+      "name": "Osric Vale",
+      "role": "Salvage crew speaker",
+      "visibility": "public_demo",
+      "motive": "Recover a missing ledger before the Wardens find it.",
+      "detail": "Speaks softly so people lean in before he bargains."
+    },
+    {
+      "id": "npc-sella-morn",
+      "name": "Sella Morn",
+      "role": "Fenbound tide-reader",
+      "visibility": "public_demo",
+      "motive": "Stop anyone from opening the old tide road unprepared.",
+      "detail": "Knows which foghorn patterns mean storm, ship, or warning."
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-dice-engine.local/schemas/campaign-bible.schema.json",
+  "title": "Campaign Bible",
+  "type": "object",
+  "required": ["id", "title", "visibility", "tone", "safety", "facts"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "subtitle": {
+      "type": "string"
+    },
+    "visibility": {
+      "type": "string",
+      "enum": ["gm_only", "player_visible", "public_demo"]
+    },
+    "tone": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "safety": {
+      "type": "object",
+      "required": ["rating", "lines", "veils"],
+      "additionalProperties": false,
+      "properties": {
+        "rating": {
+          "type": "string"
+        },
+        "lines": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "veils": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "facts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "text", "source"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

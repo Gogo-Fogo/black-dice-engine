@@ -1,0 +1,18 @@
+campaign_id: "sample-campaign"
+rating: "teen"
+visibility: "public_demo"
+tone:
+  - "dark mystery"
+  - "coastal survival"
+  - "team investigation"
+lines:
+  - "No graphic torture."
+  - "No harm to children."
+veils:
+  - "Romance fades to black."
+  - "Severe injury is brief and non-graphic."
+allowed_intensity:
+  violence: "stylized"
+  horror: "moderate"
+  romance: "fade-to-black"
+  language: "mild"

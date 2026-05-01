@@ -1,0 +1,26 @@
+{
+  "campaignId": "sample-campaign",
+  "entries": [
+    {
+      "id": "lore-signal-fires",
+      "title": "Signal Fires",
+      "visibility": "public_demo",
+      "keywords": ["signal", "lantern", "tower", "cinder bell"],
+      "text": "Coastal stations use colored signal fires to warn ships and settlements. The Cinder Bell confirms urgent distress."
+    },
+    {
+      "id": "lore-tide-roads",
+      "title": "Tide Roads",
+      "visibility": "public_demo",
+      "keywords": ["tide road", "low tide", "old road", "glassfen"],
+      "text": "Some old roads cross the flats and can be walked only during rare low tides. Locals mark them with black stones."
+    },
+    {
+      "id": "lore-salvage-rights",
+      "title": "Salvage Rights",
+      "visibility": "public_demo",
+      "keywords": ["salvage", "ledger", "wreck", "ashen keel"],
+      "text": "Salvage claims are recorded in ledgers kept by crew speakers. Disputes are settled by witness marks and tide timing."
+    }
+  ]
+}
