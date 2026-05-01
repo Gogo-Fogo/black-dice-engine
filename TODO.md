@@ -47,6 +47,7 @@ Goal: define the structured language the apps, services, AI prompts, and databas
 - [ ] Add examples for runtime status, client session, permission policy, backup manifest, and error events.
 - [ ] Add dice roll schema/examples for local roll truth and optional dddice presentation.
 - [ ] Add a sample character-creation intake packet.
+- [ ] Add visual identity examples for accepted character reference assets and local generation history.
 - [ ] Add a sample session packet for the sample campaign.
 
 ### Milestone 0.3: Local Runtime Spike
@@ -107,6 +108,7 @@ Goal: route scene images through local ComfyUI without blocking gameplay.
 - [ ] Add async image job status updates to GM dashboard.
 - [ ] Add cleanup policy for drafts, temp frames, failed jobs, and final assets.
 - [ ] Add resource pressure checks before starting expensive media jobs.
+- [ ] Add character visual-canon job type for portrait variants, turnaround sheets, and accepted reference packs.
 
 ### Milestone 0.7: Local Audio Pipeline
 
@@ -166,6 +168,7 @@ Goal: demonstrate a complete safe sample session without private or copyrighted 
 - [ ] Add stronger permissions for GM, player, spectator, and AI roles.
 - [ ] Add runtime resource governor for local model, media, audio, disk, and queue pressure.
 - [ ] Add Black Dice Engine custom dice theme after the MVP roll loop works.
+- [ ] Evaluate Qwen Image Edit, multi-angle LoRA, Flux/Kontext turnaround, IP-Adapter, and ControlNet workflows for character consistency.
 - [ ] Add campaign pacing, quest graph, reveal manager, and faction-state tooling.
 - [ ] Add GitHub Actions checks once there is real code to test.
 - [ ] Create a simplified high-legibility banner/social-preview image.

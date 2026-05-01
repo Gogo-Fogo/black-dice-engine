@@ -55,6 +55,54 @@
         "type": "string"
       },
       "default": []
+    },
+    "visualIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artStyle": {
+          "type": "string"
+        },
+        "visualCanon": {
+          "type": "string",
+          "description": "Compact description of the character's locked visual identity."
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "negativePrompt": {
+          "type": "string"
+        },
+        "acceptedReferenceAssetIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "turnaroundAssetIds": {
+          "type": "object",
+          "description": "Map of view names such as front, threeQuarter, profile, back, combatPose, or expressionSheet to asset ids.",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "rejectedAssetIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "generationNotes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      }
     }
   }
 }

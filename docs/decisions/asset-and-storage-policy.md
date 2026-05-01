@@ -62,12 +62,16 @@ Keep:
 - workflow id/settings
 - seeds where available
 - selected reference images
+- accepted character visual-canon images
+- accepted turnaround/reference views
+- lightweight local history records for accepted/rejected character variants
 
 Delete or expire:
 
 - temporary frames
 - failed generations
 - draft variations
+- stale rejected character variants
 - previews
 - intermediate PNG sequences
 - stale workflow copies

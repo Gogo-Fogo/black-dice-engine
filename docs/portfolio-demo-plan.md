@@ -9,7 +9,8 @@ The portfolio demo should show the promise of Black Dice Engine without exposing
 - Show deterministic dice and state events.
 - Show campaign memory retrieval.
 - Show a local scene generation request routed through placeholder ComfyUI workflow metadata.
-- Use the Black Dice Engine banner as the project hero image, splash image, and portfolio visual anchor.
+- Use the readable d20 mark as the default repo/demo visual.
+- Use the Black Dice Engine banner only where it remains readable, or replace it with a simplified high-legibility banner later.
 
 ## Demo Content
 

@@ -22,6 +22,7 @@ The host machine should run:
 - Local LLMs: Ollama, KoboldCPP, or compatible local HTTP endpoints.
 - Media generation: ComfyUI.
 - Audio playback: local tagged music, ambience, and stinger library.
+- Character visual consistency: optional ComfyUI reference/turnaround workflows during prep.
 - Schemas: JSON Schema.
 
 ## Network Shape
