@@ -3,6 +3,8 @@ import express from "express";
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { networkInterfaces } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 
 type ServiceState = {
@@ -65,6 +67,8 @@ type ClientSession = {
 const host = process.env.BDE_HOST ?? "0.0.0.0";
 const gameServerPort = Number(process.env.BDE_GAME_SERVER_PORT ?? 4310);
 const playerCompanionPort = Number(process.env.BDE_PLAYER_COMPANION_PORT ?? 4311);
+const currentDir = dirname(fileURLToPath(import.meta.url));
+const playerCompanionDistDir = join(currentDir, "../../../apps/player-companion/dist");
 
 const app = express();
 const server = createServer(app);
@@ -120,6 +124,7 @@ const rollLog: RollRecord[] = [
 
 app.use(cors());
 app.use(express.json());
+app.use("/player", express.static(playerCompanionDistDir));
 
 function getRuntimeStatus(): RuntimeStatus {
   const now = new Date().toISOString();
@@ -186,7 +191,7 @@ function getSessionSnapshot(): SessionSnapshot {
     campaignTitle: "The Shattered Oath",
     currentScene: "Lantern Gate, just before the watchtower ascent",
     tablePin: "BD20",
-    joinUrl: `http://${joinHost}:${playerCompanionPort}/?pin=BD20`,
+    joinUrl: `http://${joinHost}:${gameServerPort}/player/?pin=BD20`,
     party,
     rollLog
   };
@@ -208,6 +213,21 @@ app.get("/health", (_request, response) => {
     service: "game-server",
     port: gameServerPort
   });
+});
+
+app.get("/player", (_request, response) => {
+  response.sendFile(join(playerCompanionDistDir, "index.html"));
+});
+
+app.get("/player/*rest", (request, response, next) => {
+  const requestPath = request.path.replace(/^\/player\/?/, "");
+
+  if (requestPath.includes(".")) {
+    next();
+    return;
+  }
+
+  response.sendFile(join(playerCompanionDistDir, "index.html"));
 });
 
 app.get("/api/runtime-status", (_request, response) => {
@@ -383,7 +403,7 @@ setInterval(() => {
 
 server.listen(gameServerPort, host, () => {
   const gmUrl = "http://127.0.0.1:5173";
-  const playerUrl = `http://${getLanJoinHost()}:${playerCompanionPort}`;
+  const playerUrl = `http://${getLanJoinHost()}:${gameServerPort}/player/`;
 
   console.log(`Black Dice Engine game server listening on http://${host}:${gameServerPort}`);
   console.log(`GM dashboard expected at ${gmUrl}`);
