@@ -71,7 +71,9 @@ type TableEventRecord = {
     | "condition_added"
     | "condition_removed"
     | "character_claimed"
-    | "character_released";
+    | "character_released"
+    | "proposal_approved"
+    | "proposal_rejected";
   actor: {
     id: string;
     kind: "gm" | "player" | "system" | "ai_assistant";
@@ -83,6 +85,18 @@ type TableEventRecord = {
   payload: Record<string, unknown>;
 };
 
+type StateEventProposal = {
+  id: string;
+  createdAt: string;
+  summary: string;
+  submittedBy: {
+    id: string;
+    kind: "gm" | "player" | "system" | "ai_assistant";
+    label: string;
+  };
+  event: StateEventDraft;
+};
+
 type SessionSnapshot = {
   campaignId: string;
   campaignTitle: string;
@@ -92,6 +106,7 @@ type SessionSnapshot = {
   party: Character[];
   rollLog: RollRecord[];
   eventLog: TableEventRecord[];
+  approvalQueue: StateEventProposal[];
 };
 
 type SocketEnvelope =
@@ -235,6 +250,7 @@ export default function App() {
   const [qrCodeUrl, setQrCodeUrl] = useState("");
   const [pendingActionKey, setPendingActionKey] = useState("");
   const [conditionDrafts, setConditionDrafts] = useState<Record<string, string>>({});
+  const [queueApprovalMode, setQueueApprovalMode] = useState(false);
 
   async function submitStateEvent(
     event: StateEventDraft,
@@ -246,15 +262,23 @@ export default function App() {
     const requestId = getOrCreatePendingRequestId(fingerprint);
 
     try {
-      const response = await fetch("/api/state-events", {
+      const endpoint = queueApprovalMode ? "/api/state-events/propose" : "/api/state-events";
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
           ...event,
-          requestId
-        } as StateEventRequest)
+          requestId,
+          submittedBy: queueApprovalMode
+            ? {
+                id: "gm-dashboard",
+                kind: "gm",
+                label: "GM Dashboard"
+              }
+            : undefined
+        })
       });
 
       if (!response.ok) {
@@ -272,6 +296,24 @@ export default function App() {
           [characterId]: ""
         }));
       }
+    } finally {
+      setPendingActionKey("");
+    }
+  }
+
+  async function resolveProposal(proposalId: string, action: "approve" | "reject") {
+    setPendingActionKey(`${action}-${proposalId}`);
+    try {
+      const response = await fetch(`/api/state-events/${proposalId}/${action}`, {
+        method: "POST"
+      });
+
+      if (!response.ok) {
+        return;
+      }
+
+      const json = (await response.json()) as { sessionSnapshot: SessionSnapshot };
+      setSnapshot(json.sessionSnapshot);
     } finally {
       setPendingActionKey("");
     }
@@ -505,6 +547,14 @@ export default function App() {
             <h2>Party State</h2>
             <span>{snapshot?.party.length ?? 0} linked</span>
           </div>
+          <label className="mode-toggle">
+            <input
+              checked={queueApprovalMode}
+              onChange={(event) => setQueueApprovalMode(event.target.checked)}
+              type="checkbox"
+            />
+            <span>Queue risky state changes for approval</span>
+          </label>
           <div className="party-list">
             {snapshot?.party.map((character) => (
               <div key={character.id} className="party-card">
@@ -727,6 +777,47 @@ export default function App() {
                 </p>
               </div>
             )) ?? <p>No party state yet.</p>}
+          </div>
+        </article>
+
+        <article className="panel">
+          <div className="panel-header">
+            <h2>Approval Queue</h2>
+            <span>{snapshot?.approvalQueue.length ?? 0} waiting</span>
+          </div>
+          <div className="approval-list">
+            {snapshot?.approvalQueue.length ? (
+              snapshot.approvalQueue.map((proposal) => (
+                <div className="approval-row" key={proposal.id}>
+                  <div>
+                    <strong>{proposal.summary}</strong>
+                    <p>
+                      queued by {proposal.submittedBy.label} · {formatTime(proposal.createdAt)}
+                    </p>
+                  </div>
+                  <div className="approval-actions">
+                    <button
+                      className="mini-button"
+                      disabled={pendingActionKey !== ""}
+                      onClick={() => void resolveProposal(proposal.id, "approve")}
+                      type="button"
+                    >
+                      Approve
+                    </button>
+                    <button
+                      className="mini-button secondary-button"
+                      disabled={pendingActionKey !== ""}
+                      onClick={() => void resolveProposal(proposal.id, "reject")}
+                      type="button"
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p>No queued state changes.</p>
+            )}
           </div>
         </article>
 

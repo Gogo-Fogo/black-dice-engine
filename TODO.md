@@ -79,7 +79,7 @@ Goal: let the GM and three players use the system together on the same network.
 - [x] Add player roll submission.
 - [x] Add GM roll log view.
 - [x] Add recent table event history view.
-- [ ] Add state event approval view.
+- [x] Add state event approval view.
 - [x] Add GM controls for HP, conditions, and resources.
 - [x] Add HP, AC, inventory, conditions, notes, and resource tracking.
 - [x] Add WebSocket updates between dashboard and player phones.

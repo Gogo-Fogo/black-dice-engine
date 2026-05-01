@@ -79,7 +79,9 @@ type TableEventRecord = {
     | "condition_added"
     | "condition_removed"
     | "character_claimed"
-    | "character_released";
+    | "character_released"
+    | "proposal_approved"
+    | "proposal_rejected";
   actor: {
     id: string;
     kind: "gm" | "player" | "system" | "ai_assistant";
@@ -91,6 +93,18 @@ type TableEventRecord = {
   payload: Record<string, unknown>;
 };
 
+type StateEventProposal = {
+  id: string;
+  createdAt: string;
+  summary: string;
+  submittedBy: {
+    id: string;
+    kind: "gm" | "player" | "system" | "ai_assistant";
+    label: string;
+  };
+  event: StateEventRequest;
+};
+
 type SessionSnapshot = {
   campaignId: string;
   campaignTitle: string;
@@ -100,6 +114,7 @@ type SessionSnapshot = {
   party: Character[];
   rollLog: RollRecord[];
   eventLog: TableEventRecord[];
+  approvalQueue: StateEventProposal[];
 };
 
 type StateEventRequest =
@@ -235,6 +250,7 @@ const rollLog: RollRecord[] = [
   }
 ];
 const eventLog: TableEventRecord[] = [];
+const approvalQueue: StateEventProposal[] = [];
 
 app.use(cors());
 app.use(express.json());
@@ -333,7 +349,8 @@ function getSessionSnapshot(): SessionSnapshot {
     joinUrl: `http://${joinHost}:${gameServerPort}/player/?pin=BD20`,
     party,
     rollLog,
-    eventLog
+    eventLog,
+    approvalQueue
   };
 }
 
@@ -363,6 +380,230 @@ function publishSessionState() {
   broadcast("session_snapshot", sessionSnapshot);
   broadcast("runtime_status", getRuntimeStatus());
   return sessionSnapshot;
+}
+
+function applyStateEvent(event: StateEventRequest, actorLabel = "GM Dashboard") {
+  const character = resolveCharacter(event.characterId);
+
+  if (!character) {
+    return {
+      ok: false as const,
+      statusCode: 404,
+      body: {
+        error: "Character not found"
+      }
+    };
+  }
+
+  if (event.type === "hp_delta") {
+    if (typeof event.amount !== "number" || Number.isNaN(event.amount)) {
+      return {
+        ok: false as const,
+        statusCode: 400,
+        body: {
+          error: "Numeric amount is required"
+        }
+      };
+    }
+
+    const previous = character.hp.current;
+    character.hp.current = clamp(character.hp.current + event.amount, 0, character.hp.max);
+    recordTableEvent({
+      category: "state",
+      type: "hp_changed",
+      actor: {
+        id: "gm-dashboard",
+        kind: "gm",
+        label: actorLabel
+      },
+      visibility: "player_visible",
+      summary: `${character.name} HP ${previous} -> ${character.hp.current}`,
+      payload: {
+        characterId: character.id,
+        characterName: character.name,
+        previous,
+        current: character.hp.current,
+        delta: event.amount
+      }
+    });
+    return {
+      ok: true as const,
+      statusCode: 200,
+      body: {
+        ok: true,
+        sessionSnapshot: publishSessionState()
+      }
+    };
+  }
+
+  if (event.type === "condition_add") {
+    const condition = typeof event.condition === "string" ? event.condition.trim() : "";
+
+    if (!condition) {
+      return {
+        ok: false as const,
+        statusCode: 400,
+        body: {
+          error: "Condition is required"
+        }
+      };
+    }
+
+    if (!character.conditions.includes(condition)) {
+      character.conditions.push(condition);
+      recordTableEvent({
+        category: "state",
+        type: "condition_added",
+        actor: {
+          id: "gm-dashboard",
+          kind: "gm",
+          label: actorLabel
+        },
+        visibility: "player_visible",
+        summary: `${character.name} gained condition: ${condition}`,
+        payload: {
+          characterId: character.id,
+          characterName: character.name,
+          condition
+        }
+      });
+    }
+
+    return {
+      ok: true as const,
+      statusCode: 200,
+      body: {
+        ok: true,
+        sessionSnapshot: publishSessionState()
+      }
+    };
+  }
+
+  if (event.type === "condition_remove") {
+    const condition = typeof event.condition === "string" ? event.condition.trim() : "";
+
+    if (!condition) {
+      return {
+        ok: false as const,
+        statusCode: 400,
+        body: {
+          error: "Condition is required"
+        }
+      };
+    }
+
+    const hadCondition = character.conditions.includes(condition);
+    character.conditions = character.conditions.filter((entry) => entry !== condition);
+    if (hadCondition) {
+      recordTableEvent({
+        category: "state",
+        type: "condition_removed",
+        actor: {
+          id: "gm-dashboard",
+          kind: "gm",
+          label: actorLabel
+        },
+        visibility: "player_visible",
+        summary: `${character.name} cleared condition: ${condition}`,
+        payload: {
+          characterId: character.id,
+          characterName: character.name,
+          condition
+        }
+      });
+    }
+    return {
+      ok: true as const,
+      statusCode: 200,
+      body: {
+        ok: true,
+        sessionSnapshot: publishSessionState()
+      }
+    };
+  }
+
+  if (event.type === "resource_set") {
+    if (typeof event.resourceId !== "string" || typeof event.value !== "number" || Number.isNaN(event.value)) {
+      return {
+        ok: false as const,
+        statusCode: 400,
+        body: {
+          error: "resourceId and numeric value are required"
+        }
+      };
+    }
+
+    const resource = character.resources.find((entry) => entry.id === event.resourceId);
+
+    if (!resource) {
+      return {
+        ok: false as const,
+        statusCode: 404,
+        body: {
+          error: "Resource not found"
+        }
+      };
+    }
+
+    const previous = resource.current;
+    resource.current = clamp(event.value, 0, resource.max);
+    recordTableEvent({
+      category: "state",
+      type: "resource_changed",
+      actor: {
+        id: "gm-dashboard",
+        kind: "gm",
+        label: actorLabel
+      },
+      visibility: "player_visible",
+      summary: `${character.name} ${resource.label} ${previous}/${resource.max} -> ${resource.current}/${resource.max}`,
+      payload: {
+        characterId: character.id,
+        characterName: character.name,
+        resourceId: resource.id,
+        resourceLabel: resource.label,
+        previous,
+        current: resource.current,
+        max: resource.max
+      }
+    });
+    return {
+      ok: true as const,
+      statusCode: 200,
+      body: {
+        ok: true,
+        sessionSnapshot: publishSessionState()
+      }
+    };
+  }
+
+  return {
+    ok: false as const,
+    statusCode: 400,
+    body: {
+      error: "Unsupported state event type"
+    }
+  };
+}
+
+function summarizeStateEvent(event: StateEventRequest) {
+  const character = resolveCharacter(event.characterId);
+  const characterName = character?.name ?? "Unknown character";
+
+  if (event.type === "hp_delta") {
+    const direction = event.amount >= 0 ? "+" : "";
+    return `${characterName} HP ${direction}${event.amount}`;
+  }
+
+  if (event.type === "condition_add") {
+    return `${characterName} add condition: ${event.condition}`;
+  }
+
+  if (event.type === "condition_remove") {
+    return `${characterName} remove condition: ${event.condition}`;
+  }
+
+  return `${characterName} set resource`;
 }
 
 function buildMutationCacheKey(kind: string, requestId: string) {
@@ -438,6 +679,139 @@ app.get("/api/rolls", (_request, response) => {
   response.json(rollLog);
 });
 
+app.get("/api/state-event-queue", (_request, response) => {
+  response.json(approvalQueue);
+});
+
+app.post("/api/state-events/propose", (request, response) => {
+  const body = request.body as Partial<StateEventRequest> & {
+    submittedBy?: { id?: string; kind?: string; label?: string };
+  };
+  const requestId = typeof body.requestId === "string" ? body.requestId.trim() : "";
+
+  if (requestId) {
+    const cached = getCachedMutationResponse("state-event-proposal", requestId);
+
+    if (cached) {
+      response.status(cached.statusCode).json(cached.body);
+      return;
+    }
+  }
+
+  if (typeof body.type !== "string" || typeof body.characterId !== "string") {
+    response.status(400).json({
+      error: "type and characterId are required"
+    });
+    return;
+  }
+
+  const event = body as StateEventRequest;
+  const submittedBy = {
+    id: typeof body.submittedBy?.id === "string" ? body.submittedBy.id : "gm-dashboard",
+    kind: body.submittedBy?.kind === "player" ? "player" : "gm",
+    label:
+      typeof body.submittedBy?.label === "string" && body.submittedBy.label.trim()
+        ? body.submittedBy.label.trim()
+        : "GM Dashboard"
+  } as StateEventProposal["submittedBy"];
+
+  const proposal: StateEventProposal = {
+    id: randomUUID(),
+    createdAt: new Date().toISOString(),
+    summary: summarizeStateEvent(event),
+    submittedBy,
+    event
+  };
+
+  approvalQueue.unshift(proposal);
+  approvalQueue.splice(12);
+  const result = {
+    ok: true,
+    proposal,
+    sessionSnapshot: publishSessionState()
+  };
+
+  if (requestId) {
+    cacheMutationResponse("state-event-proposal", requestId, 201, result);
+  }
+
+  response.status(201).json(result);
+});
+
+app.post("/api/state-events/:proposalId/approve", (request, response) => {
+  const proposalIndex = approvalQueue.findIndex((entry) => entry.id === request.params.proposalId);
+
+  if (proposalIndex === -1) {
+    response.status(404).json({
+      error: "Proposal not found"
+    });
+    return;
+  }
+
+  const [proposal] = approvalQueue.splice(proposalIndex, 1);
+  const applied = applyStateEvent(proposal.event, `GM Approved: ${proposal.submittedBy.label}`);
+
+  if (!applied.ok) {
+    approvalQueue.unshift(proposal);
+    response.status(applied.statusCode).json(applied.body);
+    return;
+  }
+
+  recordTableEvent({
+    category: "state",
+    type: "proposal_approved",
+    actor: {
+      id: "gm-dashboard",
+      kind: "gm",
+      label: "GM Dashboard"
+    },
+    visibility: "gm_only",
+    summary: `Approved queued change: ${proposal.summary}`,
+    payload: {
+      proposalId: proposal.id,
+      proposalType: proposal.event.type
+    }
+  });
+
+  response.json({
+    ok: true,
+    sessionSnapshot: publishSessionState()
+  });
+});
+
+app.post("/api/state-events/:proposalId/reject", (request, response) => {
+  const proposalIndex = approvalQueue.findIndex((entry) => entry.id === request.params.proposalId);
+
+  if (proposalIndex === -1) {
+    response.status(404).json({
+      error: "Proposal not found"
+    });
+    return;
+  }
+
+  const [proposal] = approvalQueue.splice(proposalIndex, 1);
+  recordTableEvent({
+    category: "state",
+    type: "proposal_rejected",
+    actor: {
+      id: "gm-dashboard",
+      kind: "gm",
+      label: "GM Dashboard"
+    },
+    visibility: "gm_only",
+    summary: `Rejected queued change: ${proposal.summary}`,
+    payload: {
+      proposalId: proposal.id,
+      proposalType: proposal.event.type
+    }
+  });
+
+  response.json({
+    ok: true,
+    sessionSnapshot: publishSessionState()
+  });
+});
+
 app.post("/api/state-events", (request, response) => {
   const body = request.body as Partial<StateEventRequest>;
   const requestId = typeof body.requestId === "string" ? body.requestId.trim() : "";
@@ -458,189 +832,13 @@ app.post("/api/state-events", (request, response) => {
     return;
   }
 
-  const character = resolveCharacter(body.characterId);
+  const applied = applyStateEvent(body as StateEventRequest);
 
-  if (!character) {
-    response.status(404).json({
-      error: "Character not found"
-    });
-    return;
+  if (requestId && applied.ok) {
+    cacheMutationResponse("state-event", requestId, applied.statusCode, applied.body);
   }
 
-  if (body.type === "hp_delta") {
-    if (typeof body.amount !== "number" || Number.isNaN(body.amount)) {
-      response.status(400).json({
-        error: "Numeric amount is required"
-      });
-      return;
-    }
-
-    const previous = character.hp.current;
-    character.hp.current = clamp(character.hp.current + body.amount, 0, character.hp.max);
-    recordTableEvent({
-      category: "state",
-      type: "hp_changed",
-      actor: {
-        id: "gm-dashboard",
-        kind: "gm",
-        label: "GM Dashboard"
-      },
-      visibility: "player_visible",
-      summary: `${character.name} HP ${previous} -> ${character.hp.current}`,
-      payload: {
-        characterId: character.id,
-        characterName: character.name,
-        previous,
-        current: character.hp.current,
-        delta: body.amount
-      }
-    });
-    const result = {
-      ok: true,
-      sessionSnapshot: publishSessionState()
-    };
-    if (requestId) {
-      cacheMutationResponse("state-event", requestId, 200, result);
-    }
-    response.json(result);
-    return;
-  }
-
-  if (body.type === "condition_add") {
-    const condition = typeof body.condition === "string" ? body.condition.trim() : "";
-
-    if (!condition) {
-      response.status(400).json({
-        error: "Condition is required"
-      });
-      return;
-    }
-
-    if (!character.conditions.includes(condition)) {
-      character.conditions.push(condition);
-      recordTableEvent({
-        category: "state",
-        type: "condition_added",
-        actor: {
-          id: "gm-dashboard",
-          kind: "gm",
-          label: "GM Dashboard"
-        },
-        visibility: "player_visible",
-        summary: `${character.name} gained condition: ${condition}`,
-        payload: {
-          characterId: character.id,
-          characterName: character.name,
-          condition
-        }
-      });
-    }
-
-    const result = {
-      ok: true,
-      sessionSnapshot: publishSessionState()
-    };
-    if (requestId) {
-      cacheMutationResponse("state-event", requestId, 200, result);
-    }
-    response.json(result);
-    return;
-  }
-
-  if (body.type === "condition_remove") {
-    const condition = typeof body.condition === "string" ? body.condition.trim() : "";
-
-    if (!condition) {
-      response.status(400).json({
-        error: "Condition is required"
-      });
-      return;
-    }
-
-    const hadCondition = character.conditions.includes(condition);
-    character.conditions = character.conditions.filter((entry) => entry !== condition);
-    if (hadCondition) {
-      recordTableEvent({
-        category: "state",
-        type: "condition_removed",
-        actor: {
-          id: "gm-dashboard",
-          kind: "gm",
-          label: "GM Dashboard"
-        },
-        visibility: "player_visible",
-        summary: `${character.name} cleared condition: ${condition}`,
-        payload: {
-          characterId: character.id,
-          characterName: character.name,
-          condition
-        }
-      });
-    }
-    const result = {
-      ok: true,
-      sessionSnapshot: publishSessionState()
-    };
-    if (requestId) {
-      cacheMutationResponse("state-event", requestId, 200, result);
-    }
-    response.json(result);
-    return;
-  }
-
-  if (body.type === "resource_set") {
-    if (typeof body.resourceId !== "string" || typeof body.value !== "number" || Number.isNaN(body.value)) {
-      response.status(400).json({
-        error: "resourceId and numeric value are required"
-      });
-      return;
-    }
-
-    const resource = character.resources.find((entry) => entry.id === body.resourceId);
-
-    if (!resource) {
-      response.status(404).json({
-        error: "Resource not found"
-      });
-      return;
-    }
-
-    const previous = resource.current;
-    resource.current = clamp(body.value, 0, resource.max);
-    recordTableEvent({
-      category: "state",
-      type: "resource_changed",
-      actor: {
-        id: "gm-dashboard",
-        kind: "gm",
-        label: "GM Dashboard"
-      },
-      visibility: "player_visible",
-      summary: `${character.name} ${resource.label} ${previous}/${resource.max} -> ${resource.current}/${resource.max}`,
-      payload: {
-        characterId: character.id,
-        characterName: character.name,
-        resourceId: resource.id,
-        resourceLabel: resource.label,
-        previous,
-        current: resource.current,
-        max: resource.max
-      }
-    });
-    const result = {
-      ok: true,
-      sessionSnapshot: publishSessionState()
-    };
-    if (requestId) {
-      cacheMutationResponse("state-event", requestId, 200, result);
-    }
-    response.json(result);
-    return;
-  }
-
-  response.status(400).json({
-    error: "Unsupported state event type"
-  });
+  response.status(applied.statusCode).json(applied.body);
 });
 
 app.post("/api/claim-character", (request, response) => {

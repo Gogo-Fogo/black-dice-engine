@@ -170,7 +170,8 @@ body {
 .presence-list,
 .party-list,
 .roll-log,
-.event-log {
+.event-log,
+.approval-list {
   display: grid;
   gap: 12px;
 }
@@ -185,7 +186,8 @@ body {
 .presence-row,
 .party-card,
 .roll-row,
-.event-row {
+.event-row,
+.approval-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -199,7 +201,8 @@ body {
 .presence-row strong,
 .party-card h3,
 .roll-row strong,
-.event-row strong {
+.event-row strong,
+.approval-row strong {
   display: block;
   margin-bottom: 4px;
 }
@@ -210,7 +213,8 @@ body {
 .roll-row p,
 .roll-row small,
 .event-row p,
-.event-row small {
+.event-row small,
+.approval-row p {
   color: #cdbb96;
 }
 
@@ -327,6 +331,18 @@ body {
   gap: 10px;
 }
 
+.mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  color: #d8c9aa;
+}
+
+.mode-toggle input {
+  accent-color: #c49b53;
+}
+
 .gm-action-grid {
   display: grid;
   gap: 14px;
@@ -370,6 +386,11 @@ body {
   opacity: 0.7;
 }
 
+.secondary-button {
+  background: linear-gradient(135deg, #3b3120 0%, #221b11 100%);
+  color: #f7ebd2;
+}
+
 .inline-input {
   flex: 1 1 180px;
   padding: 8px 10px;
@@ -410,6 +431,20 @@ body {
 
 .event-row p {
   margin: 0;
+}
+
+.approval-row {
+  align-items: flex-start;
+}
+
+.approval-row p {
+  margin: 0;
+}
+
+.approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .event-meta {

@@ -22,6 +22,8 @@
         "condition_removed",
         "character_claimed",
         "character_released",
+        "proposal_approved",
+        "proposal_rejected",
         "scene_started",
         "scene_ended",
         "faction_standing_changed",
