@@ -164,6 +164,30 @@ type ActiveSceneContext = {
   safety: CampaignBible["safety"];
 };
 
+type LocalModelAdapterDraft = {
+  adapter: {
+    mode: "placeholder";
+    provider: "local_llm";
+    endpointConfigured: boolean;
+    endpoint: string | null;
+  };
+  request: {
+    scenePacketId: string;
+    sceneTitle: string;
+    promptPreview: string;
+    contextSummary: string;
+    proposedStateEventCount: number;
+    mediaRequestCount: number;
+    audioCueCount: number;
+  };
+  response: {
+    narration: string;
+    gmNotes: string[];
+    suggestedNextBeat: string;
+    riskyStateChangeWarning: string | null;
+  };
+};
+
 type StateEventProposal = {
   id: string;
   createdAt: string;
@@ -380,6 +404,8 @@ export default function App() {
   const [scenePacketValidation, setScenePacketValidation] = useState<ScenePacketValidation | null>(null);
   const [memoryEntryStatus, setMemoryEntryStatus] = useState("");
   const [memoryEntryExportPath, setMemoryEntryExportPath] = useState("");
+  const [localModelDraft, setLocalModelDraft] = useState<LocalModelAdapterDraft | null>(null);
+  const [localModelStatus, setLocalModelStatus] = useState("");
 
   async function exportSessionSummary() {
     setExportStatus("exporting");
@@ -492,6 +518,38 @@ export default function App() {
       setMemoryEntryStatus(`ready:${json.entry.id}`);
     } catch {
       setMemoryEntryStatus("failed");
+    } finally {
+      setPendingActionKey("");
+    }
+  }
+
+  async function runLocalModelDraft() {
+    setPendingActionKey("local-model-draft");
+    setLocalModelStatus("running");
+
+    try {
+      const response = await fetch("/api/local-model/draft", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(scenePacket ? { packet: scenePacket } : {})
+      });
+
+      if (!response.ok) {
+        setLocalModelStatus("failed");
+        return;
+      }
+
+      const json = (await response.json()) as {
+        draft: LocalModelAdapterDraft;
+        validation: ScenePacketValidation;
+      };
+      setLocalModelDraft(json.draft);
+      setScenePacketValidation(json.validation);
+      setLocalModelStatus("ready");
+    } catch {
+      setLocalModelStatus("failed");
     } finally {
       setPendingActionKey("");
     }
@@ -1295,6 +1353,80 @@ export default function App() {
               <p>No memory entries generated yet.</p>
             )}
           </div>
+        </article>
+
+        <article className="panel">
+          <div className="panel-header">
+            <h2>Local Model Adapter</h2>
+            <span>{localModelDraft?.adapter.mode ?? "placeholder"}</span>
+          </div>
+          <button
+            className="export-button"
+            disabled={pendingActionKey !== ""}
+            onClick={() => void runLocalModelDraft()}
+            type="button"
+          >
+            Run Local Model Draft
+          </button>
+          {localModelStatus ? (
+            <p className="export-note">
+              {localModelStatus === "running"
+                ? "Preparing local-model draft..."
+                : localModelStatus === "ready"
+                  ? localModelDraft?.adapter.endpointConfigured
+                    ? `Placeholder contract built for ${localModelDraft.adapter.endpoint}`
+                    : "Placeholder contract built with no local endpoint configured yet."
+                  : "Local-model draft failed."}
+            </p>
+          ) : null}
+          {localModelDraft ? (
+            <div className="context-block">
+              <div className="packet-meta-grid">
+                <div>
+                  <span>Scene Packet</span>
+                  <strong>{localModelDraft.request.sceneTitle}</strong>
+                </div>
+                <div>
+                  <span>State / Media / Audio</span>
+                  <strong>
+                    {localModelDraft.request.proposedStateEventCount} / {localModelDraft.request.mediaRequestCount} /{" "}
+                    {localModelDraft.request.audioCueCount}
+                  </strong>
+                </div>
+              </div>
+              <div className="context-row">
+                <strong>Prompt Preview</strong>
+                <p>{localModelDraft.request.promptPreview}</p>
+              </div>
+              <div className="context-row">
+                <strong>Context Summary</strong>
+                <p>{localModelDraft.request.contextSummary}</p>
+              </div>
+              <div className="context-row">
+                <strong>Draft Narration</strong>
+                <p>{localModelDraft.response.narration}</p>
+              </div>
+              <div className="context-row">
+                <strong>Suggested Next Beat</strong>
+                <p>{localModelDraft.response.suggestedNextBeat}</p>
+              </div>
+              <div className="context-list">
+                {localModelDraft.response.gmNotes.map((note) => (
+                  <div className="context-row" key={note}>
+                    <strong>GM Note</strong>
+                    <p>{note}</p>
+                  </div>
+                ))}
+              </div>
+              {localModelDraft.response.riskyStateChangeWarning ? (
+                <div className="validation-list">
+                  <p>{localModelDraft.response.riskyStateChangeWarning}</p>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <p>No local-model draft run yet.</p>
+          )}
         </article>
 
         <article className="panel panel-wide">

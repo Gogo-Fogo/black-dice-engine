@@ -99,7 +99,7 @@ Goal: make AI output structured, reviewable, and grounded in campaign state.
 - [x] Add GM approval for risky state changes.
 - [x] Add memory-entry creation after scenes.
 - [x] Add campaign bible and active-scene context injection.
-- [ ] Add local model adapter placeholder.
+- [x] Add local model adapter placeholder.
 - [ ] Add optional ChatGPT/director-mode adapter placeholder.
 - [ ] Add logging for AI input packets, output packets, tool calls, and validation failures.
 

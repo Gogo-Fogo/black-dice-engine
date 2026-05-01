@@ -173,6 +173,30 @@ type ActiveSceneContext = {
   safety: CampaignBible["safety"];
 };
 
+type LocalModelAdapterDraft = {
+  adapter: {
+    mode: "placeholder";
+    provider: "local_llm";
+    endpointConfigured: boolean;
+    endpoint: string | null;
+  };
+  request: {
+    scenePacketId: string;
+    sceneTitle: string;
+    promptPreview: string;
+    contextSummary: string;
+    proposedStateEventCount: number;
+    mediaRequestCount: number;
+    audioCueCount: number;
+  };
+  response: {
+    narration: string;
+    gmNotes: string[];
+    suggestedNextBeat: string;
+    riskyStateChangeWarning: string | null;
+  };
+};
+
 type StateEventProposal = {
   id: string;
   createdAt: string;
@@ -276,11 +300,13 @@ type CachedMutationResponse = {
 const host = process.env.BDE_HOST ?? "0.0.0.0";
 const gameServerPort = Number(process.env.BDE_GAME_SERVER_PORT ?? 4310);
 const playerCompanionPort = Number(process.env.BDE_PLAYER_COMPANION_PORT ?? 4311);
+const localModelEndpoint = process.env.BDE_LOCAL_MODEL_ENDPOINT?.trim() || "";
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const playerCompanionDistDir = join(currentDir, "../../../apps/player-companion/dist");
 const sessionSummaryExportDir = join(currentDir, "../../../_exports/session-summaries");
 const memoryEntryExportDir = join(currentDir, "../../../_exports/memory-entries");
 const sampleCampaignDir = join(currentDir, "../../../campaigns/sample-campaign");
+const gmSystemPromptPath = join(currentDir, "../../../prompts/gm-system-prompt.md");
 
 const app = express();
 const server = createServer(app);
@@ -591,6 +617,13 @@ function getRuntimeStatus(): RuntimeStatus {
         status: "ok",
         latencyMs: 1,
         message: `${rollLog.length} roll(s) in memory`
+      },
+      {
+        name: "local-model-adapter",
+        status: localModelEndpoint ? "degraded" : "unknown",
+        message: localModelEndpoint
+          ? `Placeholder adapter ready for ${localModelEndpoint}`
+          : "No local model endpoint configured yet; placeholder mode only"
       }
     ],
     clients,
@@ -1191,6 +1224,65 @@ function buildScenePacket(): ScenePacket {
   };
 }
 
+function buildLocalModelAdapterDraft(scenePacket: ScenePacket): LocalModelAdapterDraft {
+  const snapshot = getSessionSnapshot();
+  const promptPreview = readFileSync(gmSystemPromptPath, "utf8")
+    .split(/\r?\n/)
+    .filter((line) => line.trim())
+    .slice(0, 8)
+    .join(" ");
+  const sceneLocation = snapshot.activeSceneContext.location?.name ?? snapshot.currentScene;
+  const npcNames = snapshot.activeSceneContext.npcs.map((entry) => entry.name);
+  const contextSummary = [
+    `Scene: ${sceneLocation}`,
+    `Tone: ${snapshot.activeSceneContext.tone.join(", ")}`,
+    npcNames.length ? `Relevant NPCs: ${npcNames.join(", ")}` : "Relevant NPCs: none resolved",
+    snapshot.activeSceneContext.facts.length
+      ? `Matched facts: ${snapshot.activeSceneContext.facts.map((fact) => fact.text).slice(0, 2).join(" | ")}`
+      : "Matched facts: none"
+  ].join(" || ");
+  const firstBeat = scenePacket.beats[0]?.text ?? "No scene beat available.";
+  const choiceBeat =
+    scenePacket.beats.find((beat) => beat.kind === "choice")?.text ??
+    "Offer a meaningful player choice before resolving the scene.";
+
+  return {
+    adapter: {
+      mode: "placeholder",
+      provider: "local_llm",
+      endpointConfigured: Boolean(localModelEndpoint),
+      endpoint: localModelEndpoint || null
+    },
+    request: {
+      scenePacketId: scenePacket.id,
+      sceneTitle: scenePacket.sceneTitle,
+      promptPreview,
+      contextSummary,
+      proposedStateEventCount: scenePacket.proposedStateEvents.length,
+      mediaRequestCount: scenePacket.mediaRequests.length,
+      audioCueCount: scenePacket.audioCues.length
+    },
+    response: {
+      narration: `${firstBeat} ${snapshot.activeSceneContext.location?.summary ?? ""}`.trim(),
+      gmNotes: [
+        choiceBeat,
+        scenePacket.audioCues.length
+          ? "Keep the suggested ambience low and continuous; do not let audio block the next response."
+          : "No audio cue is required for this beat.",
+        scenePacket.mediaRequests.length
+          ? "The visual request should stay asynchronous so the table can keep moving."
+          : "No visual request is currently attached."
+      ],
+      suggestedNextBeat:
+        scenePacket.beats.find((beat) => beat.kind === "consequence")?.text ??
+        "Escalate with a consequence only after the players commit to an approach.",
+      riskyStateChangeWarning: scenePacket.proposedStateEvents.length
+        ? "This draft includes proposed state changes that should stay in the GM approval queue until reviewed."
+        : null
+    }
+  };
+}
+
 function validateScenePacket(packet: ScenePacket): ScenePacketValidation {
   const errors: string[] = [];
 
@@ -1415,6 +1507,26 @@ app.get("/api/scene-packet", (_request, response) => {
   response.json({
     packet,
     validation: validateScenePacket(packet)
+  });
+});
+
+app.post("/api/local-model/draft", (request, response) => {
+  const body = request.body as { packet?: ScenePacket } | undefined;
+  const packet = body?.packet ?? buildScenePacket();
+  const validation = validateScenePacket(packet);
+
+  if (!validation.ok) {
+    response.status(400).json({
+      error: "Scene packet failed validation",
+      validation
+    });
+    return;
+  }
+
+  response.json({
+    ok: true,
+    validation,
+    draft: buildLocalModelAdapterDraft(packet)
   });
 });
 
