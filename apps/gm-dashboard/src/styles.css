@@ -285,6 +285,66 @@ body {
   flex-shrink: 0;
 }
 
+.detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.gm-action-grid {
+  display: grid;
+  gap: 14px;
+  width: 100%;
+}
+
+.action-panel {
+  padding: 12px;
+  border: 1px solid rgba(219, 187, 124, 0.1);
+  background: rgba(24, 18, 11, 0.58);
+}
+
+.quick-action-row,
+.stepper-row,
+.condition-entry-row,
+.removal-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mini-button,
+.inline-input {
+  min-height: 36px;
+  border: 1px solid rgba(219, 187, 124, 0.18);
+  font: inherit;
+}
+
+.mini-button {
+  min-width: 44px;
+  padding: 8px 12px;
+  background: linear-gradient(135deg, #c49b53 0%, #8d6d38 100%);
+  color: #140f07;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.mini-button:disabled,
+.removable-chip:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.inline-input {
+  flex: 1 1 180px;
+  padding: 8px 10px;
+  background: rgba(16, 13, 9, 0.86);
+  color: #f7ebd2;
+}
+
+.removable-chip {
+  cursor: pointer;
+}
+
 .party-note {
   font-size: 0.95rem;
 }

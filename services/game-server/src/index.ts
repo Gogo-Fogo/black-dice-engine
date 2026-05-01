@@ -69,6 +69,29 @@ type SessionSnapshot = {
   rollLog: RollRecord[];
 };
 
+type StateEventRequest =
+  | {
+      type: "hp_delta";
+      characterId: string;
+      amount: number;
+    }
+  | {
+      type: "condition_add";
+      characterId: string;
+      condition: string;
+    }
+  | {
+      type: "condition_remove";
+      characterId: string;
+      condition: string;
+    }
+  | {
+      type: "resource_set";
+      characterId: string;
+      resourceId: string;
+      value: number;
+    };
+
 type ClientSession = {
   id: string;
   role: "gm" | "player" | "spectator" | "ai" | "admin";
@@ -242,6 +265,21 @@ function getSessionSnapshot(): SessionSnapshot {
   };
 }
 
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function resolveCharacter(characterId: string) {
+  return party.find((entry) => entry.id === characterId) ?? null;
+}
+
+function publishSessionState() {
+  const sessionSnapshot = getSessionSnapshot();
+  broadcast("session_snapshot", sessionSnapshot);
+  broadcast("runtime_status", getRuntimeStatus());
+  return sessionSnapshot;
+}
+
 function broadcast(type: string, payload: unknown) {
   const message = JSON.stringify({ type, payload });
 
@@ -287,6 +325,110 @@ app.get("/api/rolls", (_request, response) => {
   response.json(rollLog);
 });
 
+app.post("/api/state-events", (request, response) => {
+  const body = request.body as Partial<StateEventRequest>;
+
+  if (typeof body.type !== "string" || typeof body.characterId !== "string") {
+    response.status(400).json({
+      error: "type and characterId are required"
+    });
+    return;
+  }
+
+  const character = resolveCharacter(body.characterId);
+
+  if (!character) {
+    response.status(404).json({
+      error: "Character not found"
+    });
+    return;
+  }
+
+  if (body.type === "hp_delta") {
+    if (typeof body.amount !== "number" || Number.isNaN(body.amount)) {
+      response.status(400).json({
+        error: "Numeric amount is required"
+      });
+      return;
+    }
+
+    character.hp.current = clamp(character.hp.current + body.amount, 0, character.hp.max);
+    response.json({
+      ok: true,
+      sessionSnapshot: publishSessionState()
+    });
+    return;
+  }
+
+  if (body.type === "condition_add") {
+    const condition = typeof body.condition === "string" ? body.condition.trim() : "";
+
+    if (!condition) {
+      response.status(400).json({
+        error: "Condition is required"
+      });
+      return;
+    }
+
+    if (!character.conditions.includes(condition)) {
+      character.conditions.push(condition);
+    }
+
+    response.json({
+      ok: true,
+      sessionSnapshot: publishSessionState()
+    });
+    return;
+  }
+
+  if (body.type === "condition_remove") {
+    const condition = typeof body.condition === "string" ? body.condition.trim() : "";
+
+    if (!condition) {
+      response.status(400).json({
+        error: "Condition is required"
+      });
+      return;
+    }
+
+    character.conditions = character.conditions.filter((entry) => entry !== condition);
+    response.json({
+      ok: true,
+      sessionSnapshot: publishSessionState()
+    });
+    return;
+  }
+
+  if (body.type === "resource_set") {
+    if (typeof body.resourceId !== "string" || typeof body.value !== "number" || Number.isNaN(body.value)) {
+      response.status(400).json({
+        error: "resourceId and numeric value are required"
+      });
+      return;
+    }
+
+    const resource = character.resources.find((entry) => entry.id === body.resourceId);
+
+    if (!resource) {
+      response.status(404).json({
+        error: "Resource not found"
+      });
+      return;
+    }
+
+    resource.current = clamp(body.value, 0, resource.max);
+    response.json({
+      ok: true,
+      sessionSnapshot: publishSessionState()
+    });
+    return;
+  }
+
+  response.status(400).json({
+    error: "Unsupported state event type"
+  });
+});
+
 app.post("/api/claim-character", (request, response) => {
   const clientId = typeof request.body.clientId === "string" ? request.body.clientId.trim() : "";
   const characterId = typeof request.body.characterId === "string" ? request.body.characterId.trim() : "";
@@ -327,8 +469,7 @@ app.post("/api/claim-character", (request, response) => {
   character.claimedByClientId = clientId;
   character.claimedByLabel = playerLabel;
 
-  const sessionSnapshot = getSessionSnapshot();
-  broadcast("session_snapshot", sessionSnapshot);
+  const sessionSnapshot = publishSessionState();
   response.json({
     ok: true,
     sessionSnapshot
@@ -352,8 +493,7 @@ app.post("/api/release-character", (request, response) => {
     }
   }
 
-  const sessionSnapshot = getSessionSnapshot();
-  broadcast("session_snapshot", sessionSnapshot);
+  const sessionSnapshot = publishSessionState();
   response.json({
     ok: true,
     sessionSnapshot
@@ -391,6 +531,7 @@ app.post("/api/rolls", (request, response) => {
   rollLog.splice(12);
 
   broadcast("roll_recorded", record);
+  broadcast("session_snapshot", getSessionSnapshot());
   broadcast("runtime_status", getRuntimeStatus());
 
   response.status(201).json(record);

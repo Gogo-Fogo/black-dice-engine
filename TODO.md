@@ -62,7 +62,7 @@ Goal: prove that a local game server can coordinate state and live updates.
 - [ ] Add WebSocket heartbeat and reconnect status prototype.
 - [x] Add dice roller endpoint/service.
 - [ ] Add dddice presentation adapter placeholder using free/default dice.
-- [ ] Add state-event validation prototype.
+- [x] Add state-event validation prototype.
 - [x] Add runtime status prototype.
 - [ ] Add player-safe error event prototype.
 - [x] Add in-memory session state before introducing persistent SQLite writes.
@@ -79,6 +79,7 @@ Goal: let the GM and three players use the system together on the same network.
 - [x] Add player roll submission.
 - [x] Add GM roll log view.
 - [ ] Add state event approval view.
+- [x] Add GM controls for HP, conditions, and resources.
 - [x] Add HP, AC, inventory, conditions, notes, and resource tracking.
 - [x] Add WebSocket updates between dashboard and player phones.
 - [x] Add QR-code join panel to the GM dashboard.

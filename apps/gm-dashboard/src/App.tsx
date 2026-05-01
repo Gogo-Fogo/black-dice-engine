@@ -67,6 +67,29 @@ type SocketEnvelope =
   | { type: "roll_recorded"; payload: RollRecord }
   | { type: "session_snapshot"; payload: SessionSnapshot };
 
+type StateEventRequest =
+  | {
+      type: "hp_delta";
+      characterId: string;
+      amount: number;
+    }
+  | {
+      type: "condition_add";
+      characterId: string;
+      condition: string;
+    }
+  | {
+      type: "condition_remove";
+      characterId: string;
+      condition: string;
+    }
+  | {
+      type: "resource_set";
+      characterId: string;
+      resourceId: string;
+      value: number;
+    };
+
 function formatTime(value: string) {
   return new Date(value).toLocaleTimeString([], {
     hour: "numeric",
@@ -79,6 +102,43 @@ export default function App() {
   const [snapshot, setSnapshot] = useState<SessionSnapshot | null>(null);
   const [connectionLabel, setConnectionLabel] = useState("connecting");
   const [qrCodeUrl, setQrCodeUrl] = useState("");
+  const [pendingActionKey, setPendingActionKey] = useState("");
+  const [conditionDrafts, setConditionDrafts] = useState<Record<string, string>>({});
+
+  async function submitStateEvent(
+    event: StateEventRequest,
+    actionKey: string,
+    options?: { clearConditionDraftFor?: string }
+  ) {
+    setPendingActionKey(actionKey);
+
+    try {
+      const response = await fetch("/api/state-events", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(event)
+      });
+
+      if (!response.ok) {
+        return;
+      }
+
+      const json = (await response.json()) as { sessionSnapshot: SessionSnapshot };
+      setSnapshot(json.sessionSnapshot);
+
+      if (options?.clearConditionDraftFor) {
+        const characterId = options.clearConditionDraftFor;
+        setConditionDrafts((current) => ({
+          ...current,
+          [characterId]: ""
+        }));
+      }
+    } finally {
+      setPendingActionKey("");
+    }
+  }
 
   useEffect(() => {
     let isMounted = true;
@@ -276,9 +336,49 @@ export default function App() {
                       {character.resources.map((resource) => (
                         <li key={resource.id}>
                           <span>{resource.label}</span>
-                          <strong>
-                            {resource.current}/{resource.max}
-                          </strong>
+                          <div className="detail-actions">
+                            <strong>
+                              {resource.current}/{resource.max}
+                            </strong>
+                            <div className="stepper-row">
+                              <button
+                                className="mini-button"
+                                disabled={pendingActionKey !== ""}
+                                onClick={() =>
+                                  void submitStateEvent(
+                                    {
+                                      type: "resource_set",
+                                      characterId: character.id,
+                                      resourceId: resource.id,
+                                      value: resource.current - 1
+                                    },
+                                    `resource-dec-${character.id}-${resource.id}`
+                                  )
+                                }
+                                type="button"
+                              >
+                                -
+                              </button>
+                              <button
+                                className="mini-button"
+                                disabled={pendingActionKey !== ""}
+                                onClick={() =>
+                                  void submitStateEvent(
+                                    {
+                                      type: "resource_set",
+                                      characterId: character.id,
+                                      resourceId: resource.id,
+                                      value: resource.current + 1
+                                    },
+                                    `resource-inc-${character.id}-${resource.id}`
+                                  )
+                                }
+                                type="button"
+                              >
+                                +
+                              </button>
+                            </div>
+                          </div>
                         </li>
                       ))}
                     </ul>
@@ -293,6 +393,124 @@ export default function App() {
                         </li>
                       ))}
                     </ul>
+                  </div>
+                </div>
+                <div className="gm-action-grid">
+                  <div className="action-panel">
+                    <p className="detail-label">HP Controls</p>
+                    <div className="quick-action-row">
+                      <button
+                        className="mini-button"
+                        disabled={pendingActionKey !== ""}
+                        onClick={() =>
+                          void submitStateEvent(
+                            { type: "hp_delta", characterId: character.id, amount: -1 },
+                            `hp-1-${character.id}`
+                          )
+                        }
+                        type="button"
+                      >
+                        -1
+                      </button>
+                      <button
+                        className="mini-button"
+                        disabled={pendingActionKey !== ""}
+                        onClick={() =>
+                          void submitStateEvent(
+                            { type: "hp_delta", characterId: character.id, amount: -5 },
+                            `hp-5-${character.id}`
+                          )
+                        }
+                        type="button"
+                      >
+                        -5
+                      </button>
+                      <button
+                        className="mini-button"
+                        disabled={pendingActionKey !== ""}
+                        onClick={() =>
+                          void submitStateEvent(
+                            { type: "hp_delta", characterId: character.id, amount: 1 },
+                            `hp+1-${character.id}`
+                          )
+                        }
+                        type="button"
+                      >
+                        +1
+                      </button>
+                      <button
+                        className="mini-button"
+                        disabled={pendingActionKey !== ""}
+                        onClick={() =>
+                          void submitStateEvent(
+                            { type: "hp_delta", characterId: character.id, amount: 5 },
+                            `hp+5-${character.id}`
+                          )
+                        }
+                        type="button"
+                      >
+                        +5
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="action-panel">
+                    <p className="detail-label">Condition Controls</p>
+                    <div className="condition-entry-row">
+                      <input
+                        className="inline-input"
+                        onChange={(event) =>
+                          setConditionDrafts((current) => ({
+                            ...current,
+                            [character.id]: event.target.value
+                          }))
+                        }
+                        placeholder="Add condition"
+                        value={conditionDrafts[character.id] ?? ""}
+                      />
+                      <button
+                        className="mini-button"
+                        disabled={pendingActionKey !== "" || !(conditionDrafts[character.id] ?? "").trim()}
+                        onClick={() =>
+                          void submitStateEvent(
+                            {
+                              type: "condition_add",
+                              characterId: character.id,
+                              condition: (conditionDrafts[character.id] ?? "").trim()
+                            },
+                            `condition-add-${character.id}`,
+                            { clearConditionDraftFor: character.id }
+                          )
+                        }
+                        type="button"
+                      >
+                        Add
+                      </button>
+                    </div>
+                    {character.conditions.length > 0 ? (
+                      <div className="removal-chip-row">
+                        {character.conditions.map((condition) => (
+                          <button
+                            className="tag-chip removable-chip"
+                            disabled={pendingActionKey !== ""}
+                            key={`${character.id}-${condition}`}
+                            onClick={() =>
+                              void submitStateEvent(
+                                {
+                                  type: "condition_remove",
+                                  characterId: character.id,
+                                  condition
+                                },
+                                `condition-remove-${character.id}-${condition}`
+                              )
+                            }
+                            type="button"
+                          >
+                            {condition} x
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
                 <p className="party-note">{character.notes[0]}</p>
