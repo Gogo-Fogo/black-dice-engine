@@ -42,6 +42,7 @@ Black Dice Engine is currently an early scaffold. This roadmap is directional an
 ## Phase 5: Local Media Pipeline
 
 - Add ComfyUI router service.
+- Add local audio service design for music, ambience, and stingers.
 - Add workflow registry.
 - Add prompt templates for scenes, portraits, props, and locations.
 - Store generated outputs outside the repo.

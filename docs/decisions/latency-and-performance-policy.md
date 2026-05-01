@@ -9,9 +9,10 @@ Text first.
 State instantly.
 Images async.
 Videos queued.
+Audio cached.
 ```
 
-The game should never wait for image or video generation before the GM can respond with text.
+The game should never wait for image, video, or audio generation before the GM can respond with text.
 
 ## Targets
 
@@ -20,12 +21,15 @@ The game should never wait for image or video generation before the GM can respo
 - State update: under 1 second.
 - Scene image: 10 to 60 seconds, asynchronous.
 - Video: queued for special moments, not expected during normal turns.
+- Audio cue playback: instant when using cached local files.
+- Generated audio: queued or prepared outside the live turn loop.
 
 ## Runtime Modes
 
 - `Fast Mode`: text only or existing images. Default for combat and quick table flow.
 - `Scene Mode`: text responds first, image generates in background.
 - `Cinematic Mode`: boss reveals, visions, major story beats, and short queued clips.
+- `Audio Mode`: local loops and stingers follow scene tags, with GM override.
 - `Prep Mode`: slower high-quality generation before or after sessions.
 - `Director Mode`: optional ChatGPT/GPT call for hard rulings, planning, memory canonization, and major scenes.
 
@@ -55,7 +59,7 @@ Practical defaults:
 
 ## Job Queues
 
-Image and video generation should be represented as jobs:
+Image, video, and generated audio work should be represented as jobs:
 
 ```json
 {
@@ -68,3 +72,13 @@ Image and video generation should be represented as jobs:
 ```
 
 Clients receive job status updates over WebSockets. Long-running jobs must not block the state or narration loop.
+
+## Audio Playback
+
+Music and ambience are scene state, not turn-blocking generation.
+
+- Music and ambience loops start on scene transitions and continue until changed.
+- Stingers play once for event triggers such as traps, critical hits, reveals, and combat starts.
+- The GM dashboard should be the default playback source.
+- Player phone playback is optional later because browser autoplay rules and synchronization can be awkward.
+- AI may suggest mood tags, but the audio service should choose from approved local files or ask the GM to approve new generated audio jobs.

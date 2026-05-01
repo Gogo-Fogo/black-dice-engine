@@ -20,6 +20,7 @@ The host machine should run:
 - Local database: SQLite.
 - Local LLMs: Ollama, KoboldCPP, or compatible local HTTP endpoints.
 - Media generation: ComfyUI.
+- Audio playback: local tagged music, ambience, and stinger library.
 - Schemas: JSON Schema.
 
 ## Network Shape

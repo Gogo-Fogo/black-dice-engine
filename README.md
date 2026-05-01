@@ -46,6 +46,7 @@ Planned capabilities include:
 - Structured game-state service with auditable state events.
 - Campaign memory service for canon, summaries, locations, factions, NPCs, and unresolved threads.
 - ComfyUI routing layer for local image and video generation.
+- Local audio cues for music moods, ambience loops, and one-shot stingers.
 - Import service for user-owned notes and campaign material, with strict privacy boundaries.
 - Shared JSON schemas for AI output and cross-service data.
 - Prompt templates for GM narration, scene direction, memory canonization, and content rating.
@@ -62,6 +63,7 @@ The stack is intentionally not locked yet. Current likely direction:
 - SQLite for local structured state and memory indexes.
 - Local LLM adapters for Ollama, KoboldCPP, or compatible endpoints.
 - ComfyUI for local media generation workflows.
+- Local tagged audio library for cached music, ambience, and stingers.
 - JSON Schema for structured AI output contracts.
 
 No dependencies are installed in this scaffold.
@@ -119,6 +121,7 @@ Near-term:
 - Create a player companion prototype.
 - Add campaign memory ingestion for demo-safe content.
 - Add local ComfyUI workflow routing with placeholders.
+- Add local audio cue routing for music, ambience, and stingers.
 
 Later:
 

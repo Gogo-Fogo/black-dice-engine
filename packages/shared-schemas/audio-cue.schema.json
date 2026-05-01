@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-dice-engine.local/schemas/audio-cue.schema.json",
+  "title": "Audio Cue",
+  "type": "object",
+  "required": ["id", "kind", "status", "visibility", "trigger"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["music", "ambience", "stinger", "silence", "fade"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["suggested", "approved", "queued", "playing", "stopped", "failed"]
+    },
+    "visibility": {
+      "type": "string",
+      "enum": ["gm_only", "player_visible", "public_demo"]
+    },
+    "trigger": {
+      "type": "string",
+      "enum": [
+        "scene_start",
+        "scene_change",
+        "combat_start",
+        "combat_end",
+        "state_event",
+        "reveal",
+        "crit",
+        "trap",
+        "manual",
+        "session_break"
+      ]
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "assetId": {
+      "type": "string",
+      "description": "Optional existing audio asset to play."
+    },
+    "localPath": {
+      "type": "string",
+      "description": "Optional local audio file path. Audio libraries should stay outside the repository."
+    },
+    "loop": {
+      "type": "boolean",
+      "default": false
+    },
+    "volume": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 0.7
+    },
+    "fadeInSeconds": {
+      "type": "number",
+      "minimum": 0,
+      "default": 3
+    },
+    "fadeOutSeconds": {
+      "type": "number",
+      "minimum": 0,
+      "default": 3
+    },
+    "notes": {
+      "type": "string"
+    }
+  }
+}

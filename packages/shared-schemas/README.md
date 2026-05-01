@@ -12,6 +12,7 @@ Current schemas:
 - `content-rating.schema.json`
 - `state-event.schema.json`
 - `asset.schema.json`
+- `audio-cue.schema.json`
 - `media-job.schema.json`
 - `memory-entry.schema.json`
 

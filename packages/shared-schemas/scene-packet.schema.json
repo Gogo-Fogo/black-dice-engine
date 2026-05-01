@@ -54,6 +54,13 @@
         "$ref": "asset.schema.json"
       },
       "default": []
+    },
+    "audioCues": {
+      "type": "array",
+      "items": {
+        "$ref": "audio-cue.schema.json"
+      },
+      "default": []
     }
   }
 }

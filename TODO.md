@@ -93,6 +93,20 @@ Goal: route scene images through local ComfyUI without blocking gameplay.
 - [ ] Add async image job status updates to GM dashboard.
 - [ ] Add cleanup policy for drafts, temp frames, failed jobs, and final assets.
 
+### Milestone 0.7: Local Audio Pipeline
+
+Goal: add music, ambience, and stingers without slowing live play.
+
+- [ ] Add audio cue schema examples.
+- [ ] Add local audio library path configuration.
+- [ ] Add tagged audio asset metadata for music, ambience, and stingers.
+- [ ] Add audio service scaffold.
+- [ ] Add GM dashboard controls for play, pause, mute, fade, and override.
+- [ ] Trigger ambience/music loops on scene start and scene change.
+- [ ] Trigger one-shot stingers from reveals, traps, critical hits, and combat transitions.
+- [ ] Keep generated or licensed audio files outside Git.
+- [ ] Treat AI-generated audio as queued/prep-time content, not live per-turn generation.
+
 ### Milestone 1.0: First Portfolio Demo
 
 Goal: demonstrate a complete safe sample session without private or copyrighted content.
@@ -111,6 +125,7 @@ Goal: demonstrate a complete safe sample session without private or copyrighted 
 - [ ] Add import service for user-owned notes, Markdown, and PDFs with source/license tracking.
 - [ ] Add SillyTavern, Ollama, KoboldCpp, and ComfyUI integration adapters where useful.
 - [ ] Add short cinematic video jobs as queued special events.
+- [ ] Add AI-assisted music/ambience generation for prepared or queued scenes.
 - [ ] Add Tailscale-friendly remote play guidance.
 - [ ] Add backup, restore, export, and archive tools.
 - [ ] Add stronger permissions for GM, player, spectator, and AI roles.

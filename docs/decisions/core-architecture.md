@@ -16,13 +16,14 @@ GM dashboard / player phones
 
 ## Runtime Roles
 
-- `GM Dashboard`: main screen for narration, scene control, party state, image/video queue, hidden notes, and GM approvals.
+- `GM Dashboard`: main screen for narration, scene control, party state, image/video/audio queues, hidden notes, and GM approvals.
 - `Player Companion`: phone-first sheet/controller for HP, stats, inventory, rolls, current scene, handouts, and submitted actions.
 - `Game Server`: session coordinator and single API boundary for clients.
 - `Dice Service`: deterministic roll parsing and roll history.
 - `State Service`: authoritative state-event validation and application.
 - `Memory Service`: campaign bible, scene summaries, lore retrieval, and canon updates.
 - `Comfy Router`: asynchronous image/video job routing to local ComfyUI workflows.
+- `Audio Service`: local music, ambience loop, and stinger playback control.
 - `Import Service`: private/local ingestion of open material, user notes, and user-owned documents.
 
 ## AI Roles
@@ -41,6 +42,7 @@ The LLM can propose:
 - state changes
 - memory updates
 - image/video prompts
+- audio mood cues
 - reveal suggestions
 
 The game server validates and applies:

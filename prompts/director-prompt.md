@@ -21,4 +21,6 @@ Return a scene packet that can be validated against `scene-packet.schema.json`.
 - Keep scene beats actionable at the table.
 - Separate atmosphere from consequences.
 - Mark media requests as `requested`, not `approved`.
+- Mark audio cues as `suggested`, not `approved`, unless the GM explicitly approved them.
+- Prefer cached/local audio moods and stingers over live audio generation.
 - Use only provided canon and clearly labeled demo-safe material.

@@ -15,7 +15,7 @@ Generated assets, model files, private campaigns, and imports should live outsid
 ## Repository Does Not Contain
 
 - model files
-- generated images/videos
+- generated images/videos/audio
 - private campaign databases
 - private PDFs
 - paid adventure text
@@ -31,6 +31,12 @@ Recommended external roots:
 G:\AI-DM\02_models\
 G:\AI-DM\03_campaigns\
 G:\AI-DM\04_assets\
+```
+
+Recommended local audio library root:
+
+```text
+G:\AI-DM\04_assets\audio\
 ```
 
 Current known Ollama model root on this machine:
@@ -51,6 +57,7 @@ Keep:
 
 - final images
 - final videos
+- selected final audio tracks or generated audio
 - final prompts
 - workflow id/settings
 - seeds where available
@@ -78,6 +85,20 @@ Practical defaults:
 - 5 to 8 seconds for major reveals
 - final 1080p maximum for early builds
 - delete temp frames after successful export
+
+## Audio Defaults
+
+Audio should improve atmosphere without slowing the table.
+
+Practical defaults:
+
+- use local/cached loops before live generation
+- start ambience and music loops when a scene begins
+- use stingers as one-shot event sounds
+- crossfade between moods instead of hard cuts
+- let the GM override, mute, pause, or replace any cue
+- treat AI-generated audio as prep-time or queued content, not a per-turn requirement
+- keep local audio files outside Git
 
 ## Cleanup Controls
 

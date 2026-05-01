@@ -17,7 +17,7 @@
     },
     "type": {
       "type": "string",
-      "enum": ["image", "video", "upscale", "interpolation"]
+      "enum": ["image", "video", "audio", "upscale", "interpolation"]
     },
     "status": {
       "type": "string",

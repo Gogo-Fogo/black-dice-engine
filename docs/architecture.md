@@ -40,6 +40,10 @@ The memory service stores and retrieves canon, summaries, unresolved threads, NP
 
 The Comfy router translates approved scene generation requests into local ComfyUI workflow calls.
 
+### Audio Service
+
+The audio service controls local music, ambience, and stingers. It should use cached/local files first, keep playback under GM control, and avoid blocking narration or state updates.
+
 ### Import Service
 
 The import service will handle user-owned notes and campaign material. It must preserve privacy boundaries and never assume imported content is safe to commit.
@@ -53,6 +57,7 @@ The import service will handle user-owned notes and campaign material. It must p
 5. State changes are applied as explicit events.
 6. Player-visible updates are broadcast to companion clients.
 7. Optional image/video requests are routed through ComfyUI after GM approval.
+8. Optional audio cues start loops, crossfade moods, or play one-shot stingers from the local audio library.
 
 ## Repository Boundary
 
