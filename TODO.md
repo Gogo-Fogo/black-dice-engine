@@ -96,7 +96,7 @@ Goal: let the GM and three players use the system together on the same network.
 Goal: make AI output structured, reviewable, and grounded in campaign state.
 
 - [x] Add scene-packet request/response flow.
-- [ ] Add GM approval for risky state changes.
+- [x] Add GM approval for risky state changes.
 - [ ] Add memory-entry creation after scenes.
 - [ ] Add campaign bible and active-scene context injection.
 - [ ] Add local model adapter placeholder.

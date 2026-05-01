@@ -116,7 +116,19 @@ type ScenePacket = {
     kind: "description" | "choice" | "threat" | "clue" | "consequence";
     text: string;
   }>;
-  proposedStateEvents: Array<Record<string, unknown>>;
+  proposedStateEvents: Array<{
+    id: string;
+    campaignId: string;
+    type: "hp_changed" | "resource_changed" | "condition_added" | "condition_removed";
+    actor: {
+      id: string;
+      kind: "gm" | "player" | "system" | "ai_assistant";
+      label: string;
+    };
+    visibility: "gm_only" | "player_visible" | "public_demo";
+    timestamp: string;
+    payload: Record<string, unknown>;
+  }>;
   mediaRequests: Array<Record<string, unknown>>;
   audioCues: Array<Record<string, unknown>>;
 };
@@ -835,6 +847,79 @@ function buildScenePacket(): ScenePacket {
   };
 }
 
+function convertScenePacketEventToStateEvent(
+  event: ScenePacket["proposedStateEvents"][number]
+): StateEventRequest | null {
+  if (event.type === "condition_added") {
+    const characterId =
+      typeof event.payload.characterId === "string" ? event.payload.characterId : "";
+    const condition = typeof event.payload.condition === "string" ? event.payload.condition : "";
+
+    if (!characterId || !condition) {
+      return null;
+    }
+
+    return {
+      type: "condition_add",
+      characterId,
+      condition
+    };
+  }
+
+  if (event.type === "condition_removed") {
+    const characterId =
+      typeof event.payload.characterId === "string" ? event.payload.characterId : "";
+    const condition = typeof event.payload.condition === "string" ? event.payload.condition : "";
+
+    if (!characterId || !condition) {
+      return null;
+    }
+
+    return {
+      type: "condition_remove",
+      characterId,
+      condition
+    };
+  }
+
+  if (event.type === "hp_changed") {
+    const characterId =
+      typeof event.payload.characterId === "string" ? event.payload.characterId : "";
+    const delta = typeof event.payload.delta === "number" ? event.payload.delta : NaN;
+
+    if (!characterId || Number.isNaN(delta)) {
+      return null;
+    }
+
+    return {
+      type: "hp_delta",
+      characterId,
+      amount: delta
+    };
+  }
+
+  if (event.type === "resource_changed") {
+    const characterId =
+      typeof event.payload.characterId === "string" ? event.payload.characterId : "";
+    const resourceId =
+      typeof event.payload.resourceId === "string" ? event.payload.resourceId : "";
+    const value = typeof event.payload.value === "number" ? event.payload.value : NaN;
+
+    if (!characterId || !resourceId || Number.isNaN(value)) {
+      return null;
+    }
+
+    return {
+      type: "resource_set",
+      characterId,
+      resourceId,
+      value
+    };
+  }
+
+  return null;
+}
+
 function buildMutationCacheKey(kind: string, requestId: string) {
   return `${kind}:${requestId}`;
 }
@@ -926,6 +1011,50 @@ app.get("/api/session-summary.md", (_request, response) => {
 
 app.get("/api/scene-packet", (_request, response) => {
   response.json(buildScenePacket());
+});
+
+app.post("/api/scene-packet/queue-proposals", (request, response) => {
+  const body = request.body as Partial<ScenePacket>;
+
+  if (!Array.isArray(body.proposedStateEvents)) {
+    response.status(400).json({
+      error: "proposedStateEvents array is required"
+    });
+    return;
+  }
+
+  const queued: StateEventProposal[] = [];
+
+  for (const rawEvent of body.proposedStateEvents as ScenePacket["proposedStateEvents"]) {
+    const stateEvent = convertScenePacketEventToStateEvent(rawEvent);
+
+    if (!stateEvent) {
+      continue;
+    }
+
+    const proposal: StateEventProposal = {
+      id: randomUUID(),
+      createdAt: new Date().toISOString(),
+      summary: summarizeStateEvent(stateEvent),
+      submittedBy: {
+        id: rawEvent.actor.id,
+        kind: rawEvent.actor.kind,
+        label: rawEvent.actor.label
+      },
+      event: stateEvent
+    };
+
+    approvalQueue.unshift(proposal);
+    queued.push(proposal);
+  }
+
+  approvalQueue.splice(12);
+
+  response.json({
+    ok: true,
+    queuedCount: queued.length,
+    sessionSnapshot: publishSessionState()
+  });
 });
 
 app.get("/api/state-event-queue", (_request, response) => {

@@ -107,7 +107,19 @@ type ScenePacket = {
     kind: "description" | "choice" | "threat" | "clue" | "consequence";
     text: string;
   }>;
-  proposedStateEvents: Array<Record<string, unknown>>;
+  proposedStateEvents: Array<{
+    id: string;
+    campaignId: string;
+    type: "hp_changed" | "resource_changed" | "condition_added" | "condition_removed";
+    actor: {
+      id: string;
+      kind: "gm" | "player" | "system" | "ai_assistant";
+      label: string;
+    };
+    visibility: "gm_only" | "player_visible" | "public_demo";
+    timestamp: string;
+    payload: Record<string, unknown>;
+  }>;
   mediaRequests: Array<Record<string, unknown>>;
   audioCues: Array<Record<string, unknown>>;
 };
@@ -318,6 +330,34 @@ export default function App() {
       setScenePacketStatus("ready");
     } catch {
       setScenePacketStatus("failed");
+    }
+  }
+
+  async function queueScenePacketProposals() {
+    if (!scenePacket) {
+      return;
+    }
+
+    setPendingActionKey("scene-packet-queue");
+    try {
+      const response = await fetch("/api/scene-packet/queue-proposals", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(scenePacket)
+      });
+
+      if (!response.ok) {
+        setScenePacketStatus("failed");
+        return;
+      }
+
+      const json = (await response.json()) as { sessionSnapshot: SessionSnapshot; queuedCount: number };
+      setSnapshot(json.sessionSnapshot);
+      setScenePacketStatus(`queued:${json.queuedCount}`);
+    } finally {
+      setPendingActionKey("");
     }
   }
 
@@ -918,6 +958,8 @@ export default function App() {
                 ? "Building scene packet..."
                 : scenePacketStatus === "ready"
                   ? "Scene packet refreshed."
+                  : scenePacketStatus.startsWith("queued:")
+                    ? `${scenePacketStatus.split(":")[1]} proposal(s) added to the approval queue.`
                   : "Scene packet failed to load."}
             </p>
           ) : null}
@@ -951,6 +993,24 @@ export default function App() {
                   </div>
                 ))}
               </div>
+              {scenePacket.proposedStateEvents.length ? (
+                <div className="packet-beat-list">
+                  {scenePacket.proposedStateEvents.map((event) => (
+                    <div className="packet-beat" key={event.id}>
+                      <span className="event-pill event-claim">{event.type}</span>
+                      <p>{event.actor.label} proposed a GM-reviewed state change.</p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <button
+                className="export-button"
+                disabled={pendingActionKey !== "" || !scenePacket.proposedStateEvents.length}
+                onClick={() => void queueScenePacketProposals()}
+                type="button"
+              >
+                Queue Proposed State Events
+              </button>
             </div>
           ) : (
             <p>No scene packet generated yet.</p>
