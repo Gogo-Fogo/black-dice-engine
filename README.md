@@ -3,7 +3,7 @@
 Local-first AI Game Master engine for dark, collaborative TTRPG campaigns.
 
 <p align="center">
-  <img src="docs/assets/branding/black-dice-engine-d20-lowres.png" alt="Black Dice Engine black and gold d20 key art" width="720">
+  <img src="docs/assets/branding/black-dice-engine-banner.png" alt="Black Dice Engine concept banner" width="960">
 </p>
 
 Black Dice Engine turns a local gaming PC into an AI-powered tabletop RPG command center, combining live GM narration, player phone sheets, deterministic game-state tracking, campaign memory, and local scene generation.

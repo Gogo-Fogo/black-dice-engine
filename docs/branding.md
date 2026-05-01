@@ -1,6 +1,26 @@
 # Branding
 
-Black Dice Engine uses a black-and-gold d20 as its current key art and visual anchor.
+Black Dice Engine uses a wide concept banner for presentation and a black-and-gold d20 as its project mark.
+
+## Presentation Banner
+
+```text
+docs/assets/branding/black-dice-engine-banner.png
+```
+
+Use the banner for:
+
+- README hero art
+- GitHub social preview image
+- portfolio hero image
+- project showcase thumbnails
+- release headers
+- demo video title card
+- pitch deck title slide
+- documentation landing pages
+- GM dashboard splash screen
+
+Treat the banner as concept/key art, not as an exact product screenshot. Future real UI screenshots should be labeled separately.
 
 ## Canonical Asset
 
@@ -8,9 +28,9 @@ Black Dice Engine uses a black-and-gold d20 as its current key art and visual an
 docs/assets/branding/black-dice-engine-d20.png
 ```
 
-This is the high-resolution source art.
+This is the high-resolution source art for the d20 mark.
 
-## Web/Preview Asset
+## D20 Web/Preview Asset
 
 ```text
 docs/assets/branding/black-dice-engine-d20-lowres.png
@@ -18,18 +38,16 @@ docs/assets/branding/black-dice-engine-d20-lowres.png
 
 Use the low-resolution asset for:
 
-- README hero art
-- GitHub social preview image
-- portfolio thumbnail
-- issue/project board banners
+- icon-style thumbnails
+- secondary docs art
+- issue/project board visuals
 - quick-loading docs pages
+- dice roller visual reference
 
 Use either the source or low-resolution version, depending on size needs, for:
 
-- portfolio project thumbnail
-- documentation banner art
+- documentation art
 - release notes and demo pages
-- GM dashboard splash/loading screen
 - local lobby or main menu background
 - dice roller visual reference
 
@@ -52,4 +70,4 @@ Do not place generated campaign art, private table art, player character referen
 
 ## GitHub Setup Note
 
-After publishing the repository, set the GitHub social preview manually in the repository settings using the low-resolution asset. Git cannot configure that repository setting by itself.
+After publishing the repository, set the GitHub social preview manually in the repository settings using the presentation banner. Git cannot configure that repository setting by itself.

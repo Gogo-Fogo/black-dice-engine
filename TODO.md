@@ -11,7 +11,7 @@ Get the private GitHub repository published, keep the scaffold clean, and turn t
 - [ ] Publish the repository to GitHub as private.
 - [ ] Consider renaming the default branch from `master` to `main` before heavy collaboration starts.
 - [ ] Confirm `_local-context/`, secrets, generated assets, model files, and real campaign data are ignored.
-- [ ] Set `docs/assets/branding/black-dice-engine-d20-lowres.png` as the GitHub social preview after publishing.
+- [ ] Set `docs/assets/branding/black-dice-engine-banner.png` as the GitHub social preview after publishing.
 - [ ] Decide the first app stack: likely TypeScript with either Vite or Next.js.
 - [ ] Decide the first service stack: likely Node.js/TypeScript first, Python only where it clearly helps.
 - [ ] Review runtime reliability contracts before the first server implementation.
@@ -30,7 +30,7 @@ Goal: make the repo safe, understandable, and GitHub-ready.
 - [x] Add rule requiring thorough GitHub descriptions.
 - [ ] Publish private GitHub repository.
 - [ ] Add GitHub repo description and topics.
-- [ ] Add GitHub social preview image from `docs/assets/branding/black-dice-engine-d20-lowres.png`.
+- [ ] Add GitHub social preview image from `docs/assets/branding/black-dice-engine-banner.png`.
 - [ ] Create first GitHub project board or issue list.
 
 ### Milestone 0.2: Data Contracts And Campaign Design
