@@ -63,7 +63,7 @@ type RollRecord = {
 
 type TableEventRecord = {
   id: string;
-  category: "roll" | "state" | "claim";
+  category: "roll" | "state" | "claim" | "memory";
   type:
     | "roll_recorded"
     | "hp_changed"
@@ -73,7 +73,8 @@ type TableEventRecord = {
     | "character_claimed"
     | "character_released"
     | "proposal_approved"
-    | "proposal_rejected";
+    | "proposal_rejected"
+    | "memory_entry_created";
   actor: {
     id: string;
     kind: "gm" | "player" | "system" | "ai_assistant";
@@ -83,6 +84,38 @@ type TableEventRecord = {
   timestamp: string;
   summary: string;
   payload: Record<string, unknown>;
+};
+
+type MemoryEntry = {
+  id: string;
+  campaignId: string;
+  sceneId?: string;
+  sessionId?: string;
+  kind:
+    | "campaign_fact"
+    | "scene_summary"
+    | "session_summary"
+    | "npc_fact"
+    | "location_fact"
+    | "faction_change"
+    | "character_development"
+    | "open_thread"
+    | "resolved_thread"
+    | "rules_note";
+  visibility: "gm_only" | "player_visible" | "public_demo";
+  status: "proposed" | "confirmed" | "rejected" | "superseded";
+  summary: string;
+  entities: string[];
+  stateEventIds: string[];
+  assetIds: string[];
+  source: {
+    kind: "session" | "scene" | "campaign_bible" | "import" | "manual" | "ai_summary";
+    label: string;
+    sourcePath?: string;
+    license?: string;
+    pageOrLocation?: string;
+  };
+  createdAt: string;
 };
 
 type StateEventProposal = {
@@ -139,6 +172,7 @@ type SessionSnapshot = {
   rollLog: RollRecord[];
   eventLog: TableEventRecord[];
   approvalQueue: StateEventProposal[];
+  memoryEntries: MemoryEntry[];
 };
 
 type SocketEnvelope =
@@ -230,6 +264,10 @@ function formatVisibilityLabel(value: TableEventRecord["visibility"]) {
   }
 }
 
+function formatMemoryKind(value: MemoryEntry["kind"]) {
+  return value.replace(/_/g, " ");
+}
+
 function createRequestId() {
   const randomPart = Math.random().toString(36).slice(2, 10);
   return `request-${Date.now().toString(36)}-${randomPart}`;
@@ -288,6 +326,8 @@ export default function App() {
   const [scenePacket, setScenePacket] = useState<ScenePacket | null>(null);
   const [scenePacketStatus, setScenePacketStatus] = useState("");
   const [scenePacketValidation, setScenePacketValidation] = useState<ScenePacketValidation | null>(null);
+  const [memoryEntryStatus, setMemoryEntryStatus] = useState("");
+  const [memoryEntryExportPath, setMemoryEntryExportPath] = useState("");
 
   async function exportSessionSummary() {
     setExportStatus("exporting");
@@ -371,6 +411,35 @@ export default function App() {
       setSnapshot(json.sessionSnapshot);
       setScenePacketValidation(json.validation);
       setScenePacketStatus(`queued:${json.queuedCount}`);
+    } finally {
+      setPendingActionKey("");
+    }
+  }
+
+  async function createMemoryEntry() {
+    setPendingActionKey("memory-entry-create");
+    setMemoryEntryStatus("creating");
+
+    try {
+      const response = await fetch("/api/memory-entries", {
+        method: "POST"
+      });
+
+      if (!response.ok) {
+        setMemoryEntryStatus("failed");
+        return;
+      }
+
+      const json = (await response.json()) as {
+        entry: MemoryEntry;
+        exportPath: string;
+        sessionSnapshot: SessionSnapshot;
+      };
+      setSnapshot(json.sessionSnapshot);
+      setMemoryEntryExportPath(json.exportPath);
+      setMemoryEntryStatus(`ready:${json.entry.id}`);
+    } catch {
+      setMemoryEntryStatus("failed");
     } finally {
       setPendingActionKey("");
     }
@@ -1045,6 +1114,61 @@ export default function App() {
           ) : (
             <p>No scene packet generated yet.</p>
           )}
+        </article>
+
+        <article className="panel">
+          <div className="panel-header">
+            <h2>Memory Entry Drafts</h2>
+            <span>{snapshot?.memoryEntries.length ?? 0} saved</span>
+          </div>
+          <button
+            className="export-button"
+            disabled={pendingActionKey !== ""}
+            onClick={() => void createMemoryEntry()}
+            type="button"
+          >
+            Create Memory Entry
+          </button>
+          {memoryEntryStatus ? (
+            <p className="export-note">
+              {memoryEntryStatus === "creating"
+                ? "Building memory entry..."
+                : memoryEntryStatus.startsWith("ready:")
+                  ? memoryEntryExportPath
+                    ? `Memory entry saved to ${memoryEntryExportPath}`
+                    : "Memory entry created."
+                  : "Memory entry generation failed."}
+            </p>
+          ) : null}
+          <div className="memory-entry-list">
+            {snapshot?.memoryEntries.length ? (
+              snapshot.memoryEntries.map((entry) => (
+                <div className="memory-entry-card" key={entry.id}>
+                  <div className="memory-entry-header">
+                    <strong>{entry.source.label}</strong>
+                    <span className="event-pill event-memory">{formatMemoryKind(entry.kind)}</span>
+                  </div>
+                  <p>{entry.summary}</p>
+                  <div className="memory-entry-meta">
+                    <span>{formatVisibilityLabel(entry.visibility)}</span>
+                    <span>{entry.status}</span>
+                    <span>{formatTime(entry.createdAt)}</span>
+                  </div>
+                  {entry.entities.length ? (
+                    <div className="tag-row">
+                      {entry.entities.slice(0, 6).map((entity) => (
+                        <span className="tag-chip" key={`${entry.id}-${entity}`}>
+                          {entity}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ))
+            ) : (
+              <p>No memory entries generated yet.</p>
+            )}
+          </div>
         </article>
 
         <article className="panel panel-wide">

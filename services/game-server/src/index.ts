@@ -72,7 +72,7 @@ type RollRecord = {
 
 type TableEventRecord = {
   id: string;
-  category: "roll" | "state" | "claim";
+  category: "roll" | "state" | "claim" | "memory";
   type:
     | "roll_recorded"
     | "hp_changed"
@@ -82,7 +82,8 @@ type TableEventRecord = {
     | "character_claimed"
     | "character_released"
     | "proposal_approved"
-    | "proposal_rejected";
+    | "proposal_rejected"
+    | "memory_entry_created";
   actor: {
     id: string;
     kind: "gm" | "player" | "system" | "ai_assistant";
@@ -92,6 +93,38 @@ type TableEventRecord = {
   timestamp: string;
   summary: string;
   payload: Record<string, unknown>;
+};
+
+type MemoryEntry = {
+  id: string;
+  campaignId: string;
+  sceneId?: string;
+  sessionId?: string;
+  kind:
+    | "campaign_fact"
+    | "scene_summary"
+    | "session_summary"
+    | "npc_fact"
+    | "location_fact"
+    | "faction_change"
+    | "character_development"
+    | "open_thread"
+    | "resolved_thread"
+    | "rules_note";
+  visibility: "gm_only" | "player_visible" | "public_demo";
+  status: "proposed" | "confirmed" | "rejected" | "superseded";
+  summary: string;
+  entities: string[];
+  stateEventIds: string[];
+  assetIds: string[];
+  source: {
+    kind: "session" | "scene" | "campaign_bible" | "import" | "manual" | "ai_summary";
+    label: string;
+    sourcePath?: string;
+    license?: string;
+    pageOrLocation?: string;
+  };
+  createdAt: string;
 };
 
 type StateEventProposal = {
@@ -148,6 +181,7 @@ type SessionSnapshot = {
   rollLog: RollRecord[];
   eventLog: TableEventRecord[];
   approvalQueue: StateEventProposal[];
+  memoryEntries: MemoryEntry[];
 };
 
 type StateEventRequest =
@@ -197,6 +231,7 @@ const playerCompanionPort = Number(process.env.BDE_PLAYER_COMPANION_PORT ?? 4311
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const playerCompanionDistDir = join(currentDir, "../../../apps/player-companion/dist");
 const sessionSummaryExportDir = join(currentDir, "../../../_exports/session-summaries");
+const memoryEntryExportDir = join(currentDir, "../../../_exports/memory-entries");
 
 const app = express();
 const server = createServer(app);
@@ -285,6 +320,7 @@ const rollLog: RollRecord[] = [
 ];
 const eventLog: TableEventRecord[] = [];
 const approvalQueue: StateEventProposal[] = [];
+const memoryEntries: MemoryEntry[] = [];
 
 app.use(cors());
 app.use(express.json());
@@ -384,7 +420,8 @@ function getSessionSnapshot(): SessionSnapshot {
     party,
     rollLog,
     eventLog,
-    approvalQueue
+    approvalQueue,
+    memoryEntries
   };
 }
 
@@ -766,6 +803,69 @@ function buildSessionSummaryMarkdown() {
   return lines.join("\n");
 }
 
+function buildMemoryEntry() {
+  const snapshot = getSessionSnapshot();
+  const createdAt = new Date().toISOString();
+  const recentVisibleEvents = snapshot.eventLog.filter((entry) => entry.visibility !== "gm_only").slice(0, 5);
+  const woundedCharacters = snapshot.party.filter((character) => character.hp.current < character.hp.max);
+  const activeConditions = snapshot.party.flatMap((character) =>
+    character.conditions.map((condition) => `${character.name}: ${condition}`)
+  );
+  const pendingSummaries = snapshot.approvalQueue.map((proposal) => proposal.summary);
+  const entities = Array.from(
+    new Set([
+      snapshot.currentScene,
+      ...snapshot.party.map((character) => character.name),
+      ...recentVisibleEvents.map((entry) => entry.actor.label)
+    ])
+  ).slice(0, 12);
+  const summaryParts = [
+    `${snapshot.currentScene} remains the active scene.`,
+    woundedCharacters.length
+      ? `${woundedCharacters
+          .map((character) => `${character.name} is at ${character.hp.current}/${character.hp.max} HP`)
+          .join("; ")}.`
+      : "The party is currently uninjured.",
+    activeConditions.length
+      ? `Notable conditions: ${activeConditions.slice(0, 4).join("; ")}.`
+      : "No notable lingering conditions are active.",
+    recentVisibleEvents.length
+      ? `Recent table beats: ${recentVisibleEvents
+          .map((entry) => entry.summary)
+          .join(" | ")}.`
+      : "No player-visible table events have been recorded yet.",
+    pendingSummaries.length
+      ? `Pending GM review: ${pendingSummaries.slice(0, 3).join(" | ")}.`
+      : "No risky state changes are waiting for GM review."
+  ];
+
+  const entry: MemoryEntry = {
+    id: randomUUID(),
+    campaignId: snapshot.campaignId,
+    sceneId: sanitizeFilePart(snapshot.currentScene),
+    sessionId: `${snapshot.campaignId}-${createdAt.slice(0, 10)}`,
+    kind: "scene_summary",
+    visibility: "gm_only",
+    status: "proposed",
+    summary: summaryParts.join(" "),
+    entities,
+    stateEventIds: recentVisibleEvents.map((entry) => entry.id),
+    assetIds: [],
+    source: {
+      kind: "session",
+      label: `${snapshot.campaignTitle} - ${snapshot.currentScene}`
+    },
+    createdAt
+  };
+  const filename = `${sanitizeFilePart(snapshot.campaignTitle)}-${sanitizeFilePart(snapshot.currentScene)}-${createdAt
+    .slice(0, 19)
+    .replace(/[:T]/g, "-")}.json`;
+  mkdirSync(memoryEntryExportDir, { recursive: true });
+  const exportPath = join(memoryEntryExportDir, filename);
+  writeFileSync(exportPath, JSON.stringify(entry, null, 2), "utf8");
+  return { entry, exportPath };
+}
+
 function buildScenePacket(): ScenePacket {
   const woundedCharacters = party.filter((character) => character.hp.current < character.hp.max);
   const queuedApprovals = approvalQueue.length;
@@ -1076,6 +1176,35 @@ app.get("/api/scene-packet", (_request, response) => {
   response.json({
     packet,
     validation: validateScenePacket(packet)
+  });
+});
+
+app.post("/api/memory-entries", (_request, response) => {
+  const { entry, exportPath } = buildMemoryEntry();
+  memoryEntries.unshift(entry);
+  memoryEntries.splice(8);
+  recordTableEvent({
+    category: "memory",
+    type: "memory_entry_created",
+    actor: {
+      id: "memory-service",
+      kind: "system",
+      label: "Memory Service"
+    },
+    visibility: "gm_only",
+    summary: `Created memory entry for ${entry.source.label}`,
+    payload: {
+      memoryEntryId: entry.id,
+      kind: entry.kind,
+      exportPath
+    }
+  });
+
+  response.status(201).json({
+    ok: true,
+    entry,
+    exportPath,
+    sessionSnapshot: publishSessionState()
   });
 });
 
