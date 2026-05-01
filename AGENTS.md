@@ -20,6 +20,13 @@ Instructions for Codex and other coding agents working in this repository.
 - Ask before introducing new frameworks, package managers, service runtimes, or large dependencies.
 - Do not install dependencies unless the user explicitly asks.
 
+## Git And GitHub Workflow
+
+- Every commit, push summary, pull request, release note, or GitHub Desktop publish description should be specific and thorough.
+- For non-trivial changes, include what changed, why it changed, how it was verified, known risks or limitations, and any useful follow-up work.
+- Avoid vague messages such as "updates", "misc fixes", or "stuff"; prefer descriptions that help a future reader understand the project history.
+- Before pushing to GitHub, summarize what will be sent and confirm that private context, secrets, model files, generated assets, and real campaign data are not included.
+
 ## Content Rules
 
 - Use placeholder/demo content only.
