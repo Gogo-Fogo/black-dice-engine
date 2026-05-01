@@ -97,6 +97,21 @@ type StateEventProposal = {
   event: StateEventDraft;
 };
 
+type ScenePacket = {
+  id: string;
+  campaignId: string;
+  sceneTitle: string;
+  visibility: "gm_only" | "player_visible" | "public_demo";
+  summary: string;
+  beats: Array<{
+    kind: "description" | "choice" | "threat" | "clue" | "consequence";
+    text: string;
+  }>;
+  proposedStateEvents: Array<Record<string, unknown>>;
+  mediaRequests: Array<Record<string, unknown>>;
+  audioCues: Array<Record<string, unknown>>;
+};
+
 type SessionSnapshot = {
   campaignId: string;
   campaignTitle: string;
@@ -253,6 +268,8 @@ export default function App() {
   const [queueApprovalMode, setQueueApprovalMode] = useState(false);
   const [exportStatus, setExportStatus] = useState("");
   const [exportPath, setExportPath] = useState("");
+  const [scenePacket, setScenePacket] = useState<ScenePacket | null>(null);
+  const [scenePacketStatus, setScenePacketStatus] = useState("");
 
   async function exportSessionSummary() {
     setExportStatus("exporting");
@@ -282,6 +299,25 @@ export default function App() {
       setExportStatus("ready");
     } catch {
       setExportStatus("failed");
+    }
+  }
+
+  async function loadScenePacket() {
+    setScenePacketStatus("loading");
+
+    try {
+      const response = await fetch("/api/scene-packet");
+
+      if (!response.ok) {
+        setScenePacketStatus("failed");
+        return;
+      }
+
+      const json = (await response.json()) as ScenePacket;
+      setScenePacket(json);
+      setScenePacketStatus("ready");
+    } catch {
+      setScenePacketStatus("failed");
     }
   }
 
@@ -866,6 +902,59 @@ export default function App() {
               <p>No queued state changes.</p>
             )}
           </div>
+        </article>
+
+        <article className="panel">
+          <div className="panel-header">
+            <h2>Scene Packet Draft</h2>
+            <span>{scenePacket ? scenePacket.visibility : "not generated"}</span>
+          </div>
+          <button className="export-button" onClick={() => void loadScenePacket()} type="button">
+            Generate Scene Packet
+          </button>
+          {scenePacketStatus ? (
+            <p className="export-note">
+              {scenePacketStatus === "loading"
+                ? "Building scene packet..."
+                : scenePacketStatus === "ready"
+                  ? "Scene packet refreshed."
+                  : "Scene packet failed to load."}
+            </p>
+          ) : null}
+          {scenePacket ? (
+            <div className="scene-packet-block">
+              <strong>{scenePacket.sceneTitle}</strong>
+              <p>{scenePacket.summary}</p>
+              <div className="packet-meta-grid">
+                <div>
+                  <span>Beats</span>
+                  <strong>{scenePacket.beats.length}</strong>
+                </div>
+                <div>
+                  <span>Proposed State</span>
+                  <strong>{scenePacket.proposedStateEvents.length}</strong>
+                </div>
+                <div>
+                  <span>Media</span>
+                  <strong>{scenePacket.mediaRequests.length}</strong>
+                </div>
+                <div>
+                  <span>Audio</span>
+                  <strong>{scenePacket.audioCues.length}</strong>
+                </div>
+              </div>
+              <div className="packet-beat-list">
+                {scenePacket.beats.map((beat, index) => (
+                  <div className="packet-beat" key={`${scenePacket.id}-${index}`}>
+                    <span className="event-pill event-state">{beat.kind}</span>
+                    <p>{beat.text}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p>No scene packet generated yet.</p>
+          )}
         </article>
 
         <article className="panel panel-wide">

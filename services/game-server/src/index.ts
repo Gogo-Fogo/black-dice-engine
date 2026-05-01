@@ -106,6 +106,21 @@ type StateEventProposal = {
   event: StateEventRequest;
 };
 
+type ScenePacket = {
+  id: string;
+  campaignId: string;
+  sceneTitle: string;
+  visibility: "gm_only" | "player_visible" | "public_demo";
+  summary: string;
+  beats: Array<{
+    kind: "description" | "choice" | "threat" | "clue" | "consequence";
+    text: string;
+  }>;
+  proposedStateEvents: Array<Record<string, unknown>>;
+  mediaRequests: Array<Record<string, unknown>>;
+  audioCues: Array<Record<string, unknown>>;
+};
+
 type SessionSnapshot = {
   campaignId: string;
   campaignTitle: string;
@@ -734,6 +749,92 @@ function buildSessionSummaryMarkdown() {
   return lines.join("\n");
 }
 
+function buildScenePacket(): ScenePacket {
+  const woundedCharacters = party.filter((character) => character.hp.current < character.hp.max);
+  const queuedApprovals = approvalQueue.length;
+
+  return {
+    id: `scene-${Date.now().toString(36)}`,
+    campaignId: "sample-campaign",
+    sceneTitle: "Lantern Gate Approach",
+    visibility: "gm_only",
+    summary:
+      "The party stands at Lantern Gate before the ascent to the watchtower, with black sand pulses building under the stones and tension rising around the next reveal.",
+    beats: [
+      {
+        kind: "description",
+        text: "Wind pushes black sand across the old gate while lanternlight shivers against wet stone."
+      },
+      {
+        kind: "threat",
+        text: `The table is carrying ${woundedCharacters.length} wounded character(s), so the next hazard should feel sharp without stalling the ascent.`
+      },
+      {
+        kind: "clue",
+        text: "The sand pulses are tracking a pattern that points toward the watchtower mechanism rather than a random curse."
+      },
+      {
+        kind: "choice",
+        text: "Offer a split between a careful investigation of the gate machinery and an immediate push toward the tower stairs."
+      },
+      {
+        kind: "consequence",
+        text: queuedApprovals
+          ? `There are ${queuedApprovals} queued state changes waiting for GM approval, so the next narration should avoid assuming those outcomes are final.`
+          : "Any risky revelation here should still pass through GM approval before it becomes permanent state."
+      }
+    ],
+    proposedStateEvents: [
+      {
+        id: `proposal-${Date.now().toString(36)}`,
+        campaignId: "sample-campaign",
+        type: "condition_added",
+        actor: {
+          id: "ai-scene-packet",
+          kind: "ai_assistant",
+          label: "Scene Packet Draft"
+        },
+        visibility: "gm_only",
+        timestamp: new Date().toISOString(),
+        payload: {
+          characterId: "character-ivar",
+          condition: "Sand-touched"
+        }
+      }
+    ],
+    mediaRequests: [
+      {
+        id: `media-${Date.now().toString(36)}`,
+        campaignId: "sample-campaign",
+        kind: "image",
+        visibility: "player_visible",
+        status: "requested",
+        prompt:
+          "Dark fantasy gate at night, wet stone, black sand drifting in lanternlight, looming watchtower above, tense local reveal shot",
+        workflowId: "scene-reveal-placeholder",
+        metadata: {
+          shotType: "location_reveal"
+        }
+      }
+    ],
+    audioCues: [
+      {
+        id: `audio-${Date.now().toString(36)}`,
+        kind: "ambience",
+        status: "suggested",
+        visibility: "player_visible",
+        trigger: "scene_change",
+        tags: ["rain", "ruins", "low_dread", "watchtower"],
+        loop: true,
+        volume: 0.6,
+        fadeInSeconds: 3,
+        fadeOutSeconds: 4,
+        notes: "Hold this under exploration until the next reveal or combat escalation."
+      }
+    ]
+  };
+}
+
 function buildMutationCacheKey(kind: string, requestId: string) {
   return `${kind}:${requestId}`;
 }
@@ -821,6 +922,10 @@ app.get("/api/session-summary.md", (_request, response) => {
   response.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
   response.setHeader("X-Export-Path", exportPath);
   response.send(markdown);
+});
+
+app.get("/api/scene-packet", (_request, response) => {
+  response.json(buildScenePacket());
 });
 
 app.get("/api/state-event-queue", (_request, response) => {

@@ -116,6 +116,55 @@ body {
   min-height: 22px;
 }
 
+.scene-packet-block {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid rgba(219, 187, 124, 0.12);
+  background: rgba(19, 15, 9, 0.72);
+}
+
+.scene-packet-block p,
+.packet-beat p {
+  margin: 0;
+  color: #d8c9aa;
+}
+
+.packet-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.packet-meta-grid div {
+  padding: 10px 12px;
+  border: 1px solid rgba(219, 187, 124, 0.1);
+  background: rgba(24, 18, 11, 0.66);
+}
+
+.packet-meta-grid span {
+  display: block;
+  margin-bottom: 6px;
+  color: #bca06d;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.packet-beat-list {
+  display: grid;
+  gap: 10px;
+}
+
+.packet-beat {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(219, 187, 124, 0.1);
+  background: rgba(24, 18, 11, 0.66);
+}
+
 .qr-preview {
   display: block;
   width: 168px;
