@@ -23,6 +23,7 @@ GM dashboard / player phones
 - `Dice Service`: deterministic roll parsing and roll history.
 - `State Service`: authoritative state-event validation and application.
 - `Memory Service`: campaign bible, scene summaries, lore retrieval, and canon updates.
+- `Dice Presentation Adapter`: optional 3D dice renderer such as dddice; never the sole source of roll truth.
 - `Comfy Router`: asynchronous image/video job routing to local ComfyUI workflows.
 - `Audio Service`: local music, ambience loop, and stinger playback control.
 - `Import Service`: private/local ingestion of open material, user notes, and user-owned documents.
@@ -56,6 +57,14 @@ The game server validates and applies:
 - quest flags
 - faction standing
 - visibility rules
+
+Optional presentation adapters display:
+
+- 3D dice animations
+- roll sounds/effects
+- branded dice themes
+
+They do not replace the local dice service, roll history, or state-event audit trail.
 
 The runtime layer validates operational safety:
 

@@ -47,6 +47,7 @@ Planned capabilities include:
 - GM dashboard for live narration, scene control, and adjudication.
 - Player companion app for phone/tablet character sheets.
 - Deterministic dice and rules event service.
+- Optional 3D dice presentation adapter, starting with free/default dddice visuals.
 - Structured game-state service with auditable state events.
 - Campaign memory service for canon, summaries, locations, factions, NPCs, and unresolved threads.
 - Runtime health, reconnect, backup, and graceful-degradation design.
@@ -112,6 +113,7 @@ The working product decisions live in `docs/decisions/`. Start with:
 - `database-and-memory-design.md`
 - `latency-and-performance-policy.md`
 - `runtime-reliability.md`
+- `dice-rolling-and-presentation.md`
 - `campaign-design.md`
 - `character-creation.md`
 

@@ -18,6 +18,7 @@ The host machine should run:
 - Service layer: Node.js and/or Python.
 - Realtime updates: WebSockets.
 - Local database: SQLite.
+- Dice presentation: optional dddice adapter first, local/open-source fallback later.
 - Local LLMs: Ollama, KoboldCPP, or compatible local HTTP endpoints.
 - Media generation: ComfyUI.
 - Audio playback: local tagged music, ambience, and stinger library.

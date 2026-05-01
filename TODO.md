@@ -43,6 +43,7 @@ Goal: define the structured language the apps, services, AI prompts, and databas
 - [ ] Define state-event validation rules for HP, resources, inventory, conditions, rolls, and visibility.
 - [ ] Define player-visible, GM-only, and public/demo-safe content boundaries.
 - [ ] Add examples for runtime status, client session, permission policy, backup manifest, and error events.
+- [ ] Add dice roll schema/examples for local roll truth and optional dddice presentation.
 - [ ] Add a sample character-creation intake packet.
 - [ ] Add a sample session packet for the sample campaign.
 
@@ -55,6 +56,7 @@ Goal: prove that a local game server can coordinate state and live updates.
 - [ ] Add WebSocket broadcast prototype.
 - [ ] Add WebSocket heartbeat and reconnect status prototype.
 - [ ] Add dice roller endpoint/service.
+- [ ] Add dddice presentation adapter placeholder using free/default dice.
 - [ ] Add state-event validation prototype.
 - [ ] Add runtime status and player-safe error event prototype.
 - [ ] Add in-memory session state before introducing persistent SQLite writes.
@@ -157,6 +159,7 @@ Goal: demonstrate a complete safe sample session without private or copyrighted 
 - [ ] Add backup, restore, export, and archive tools.
 - [ ] Add stronger permissions for GM, player, spectator, and AI roles.
 - [ ] Add runtime resource governor for local model, media, audio, disk, and queue pressure.
+- [ ] Add Black Dice Engine custom dice theme after the MVP roll loop works.
 - [ ] Add campaign pacing, quest graph, reveal manager, and faction-state tooling.
 - [ ] Add GitHub Actions checks once there is real code to test.
 
