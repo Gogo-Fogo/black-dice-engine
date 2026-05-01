@@ -89,7 +89,7 @@ Goal: let the GM and three players use the system together on the same network.
 - [x] Add stale-client presence view for GM.
 - [x] Prevent duplicate rolls/actions after reconnect.
 - [x] Test over LAN using at least one phone.
-- [ ] Export a session summary to Markdown.
+- [x] Export a session summary to Markdown.
 
 ### Milestone 0.5: AI Narration And Memory Loop
 

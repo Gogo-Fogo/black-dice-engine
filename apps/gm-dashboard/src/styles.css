@@ -100,6 +100,22 @@ body {
   color: #d8c9aa;
 }
 
+.export-button {
+  margin-top: 16px;
+  min-height: 42px;
+  width: 100%;
+  border: 1px solid rgba(219, 187, 124, 0.18);
+  background: linear-gradient(135deg, #c49b53 0%, #8d6d38 100%);
+  color: #140f07;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.export-note {
+  min-height: 22px;
+}
+
 .qr-preview {
   display: block;
   width: 168px;

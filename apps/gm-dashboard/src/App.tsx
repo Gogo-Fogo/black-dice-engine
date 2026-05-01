@@ -251,6 +251,37 @@ export default function App() {
   const [pendingActionKey, setPendingActionKey] = useState("");
   const [conditionDrafts, setConditionDrafts] = useState<Record<string, string>>({});
   const [queueApprovalMode, setQueueApprovalMode] = useState(false);
+  const [exportStatus, setExportStatus] = useState("");
+
+  async function exportSessionSummary() {
+    setExportStatus("exporting");
+
+    try {
+      const response = await fetch("/api/session-summary.md");
+
+      if (!response.ok) {
+        setExportStatus("failed");
+        return;
+      }
+
+      const markdown = await response.text();
+      const disposition = response.headers.get("Content-Disposition") ?? "";
+      const fileNameMatch = disposition.match(/filename="([^"]+)"/);
+      const fileName = fileNameMatch?.[1] ?? "black-dice-engine-session-summary.md";
+      const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = fileName;
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      window.URL.revokeObjectURL(url);
+      setExportStatus("ready");
+    } catch {
+      setExportStatus("failed");
+    }
+  }
 
   async function submitStateEvent(
     event: StateEventDraft,
@@ -493,6 +524,18 @@ export default function App() {
           <span>Join path</span>
           <strong>{snapshot?.joinUrl ?? "Waiting for server..."}</strong>
           <p>Table PIN: {snapshot?.tablePin ?? "----"}</p>
+          <button className="export-button" onClick={() => void exportSessionSummary()} type="button">
+            Export Session Markdown
+          </button>
+          {exportStatus ? (
+            <p className="export-note">
+              {exportStatus === "exporting"
+                ? "Preparing Markdown export..."
+                : exportStatus === "ready"
+                  ? "Session summary downloaded."
+                  : "Export failed."}
+            </p>
+          ) : null}
           {qrCodeUrl ? <img className="qr-preview" src={qrCodeUrl} alt="Player join QR code" /> : null}
         </div>
       </section>

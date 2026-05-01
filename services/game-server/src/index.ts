@@ -606,6 +606,132 @@ function summarizeStateEvent(event: StateEventRequest) {
   return `${characterName} set resource`;
 }
 
+function formatIsoForMarkdown(value: string) {
+  return new Date(value).toLocaleString([], {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
+}
+
+function sanitizeFilePart(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function buildSessionSummaryMarkdown() {
+  const snapshot = getSessionSnapshot();
+  const runtime = getRuntimeStatus();
+  const generatedAt = new Date().toISOString();
+  const fileStamp = generatedAt.slice(0, 10);
+  const lines: string[] = [];
+
+  lines.push(`# Session Summary - ${snapshot.campaignTitle}`);
+  lines.push("");
+  lines.push(`- Generated: ${formatIsoForMarkdown(generatedAt)}`);
+  lines.push(`- Current Scene: ${snapshot.currentScene}`);
+  lines.push(`- Table PIN: ${snapshot.tablePin}`);
+  lines.push(`- Join URL: ${snapshot.joinUrl}`);
+  lines.push(`- Runtime Status: ${runtime.status} (${runtime.mode})`);
+  lines.push("");
+  lines.push("## Party State");
+  lines.push("");
+
+  for (const character of snapshot.party) {
+    lines.push(`### ${character.name} - ${character.classLabel}`);
+    lines.push(`- HP: ${character.hp.current}/${character.hp.max}`);
+    lines.push(`- AC: ${character.armorClass}`);
+    lines.push(
+      `- Conditions: ${character.conditions.length ? character.conditions.join(", ") : "None"}`
+    );
+    lines.push(
+      `- Claimed By: ${character.claimedByLabel ? character.claimedByLabel : "Unclaimed"}`
+    );
+    lines.push(
+      `- Resources: ${
+        character.resources.length
+          ? character.resources.map((resource) => `${resource.label} ${resource.current}/${resource.max}`).join(", ")
+          : "None"
+      }`
+    );
+    lines.push(
+      `- Inventory: ${
+        character.inventory.length
+          ? character.inventory
+              .map((item) => `${item.name} x${item.quantity}${item.detail ? ` (${item.detail})` : ""}`)
+              .join(", ")
+          : "None"
+      }`
+    );
+    if (character.notes.length) {
+      lines.push(`- Notes: ${character.notes.join(" | ")}`);
+    }
+    lines.push("");
+  }
+
+  lines.push("## Recent Rolls");
+  lines.push("");
+  if (snapshot.rollLog.length) {
+    for (const roll of snapshot.rollLog) {
+      lines.push(
+        `- ${formatIsoForMarkdown(roll.timestamp)} - ${roll.actorName} rolled ${roll.total} (${roll.rolled} + ${roll.modifier}) for ${roll.note}`
+      );
+    }
+  } else {
+    lines.push("- No rolls recorded.");
+  }
+  lines.push("");
+
+  lines.push("## Recent Table Events");
+  lines.push("");
+  if (snapshot.eventLog.length) {
+    for (const entry of snapshot.eventLog) {
+      lines.push(
+        `- ${formatIsoForMarkdown(entry.timestamp)} - [${entry.category}] ${entry.summary} (${entry.actor.label}; ${entry.visibility})`
+      );
+    }
+  } else {
+    lines.push("- No table events recorded.");
+  }
+  lines.push("");
+
+  lines.push("## Pending Approval Queue");
+  lines.push("");
+  if (snapshot.approvalQueue.length) {
+    for (const proposal of snapshot.approvalQueue) {
+      lines.push(
+        `- ${formatIsoForMarkdown(proposal.createdAt)} - ${proposal.summary} (queued by ${proposal.submittedBy.label})`
+      );
+    }
+  } else {
+    lines.push("- No queued state changes.");
+  }
+  lines.push("");
+
+  lines.push("## Presence Snapshot");
+  lines.push("");
+  if (runtime.clients.length) {
+    for (const client of runtime.clients) {
+      lines.push(
+        `- ${client.role} - ${client.playerLabel ?? client.clientId} - ${client.status} - last seen ${formatIsoForMarkdown(client.lastSeenAt)}`
+      );
+    }
+  } else {
+    lines.push("- No connected clients.");
+  }
+  lines.push("");
+  lines.push("---");
+  lines.push(
+    `Export file hint: ${sanitizeFilePart(snapshot.campaignTitle)}-session-summary-${fileStamp}.md`
+  );
+
+  return lines.join("\n");
+}
+
 function buildMutationCacheKey(kind: string, requestId: string) {
   return `${kind}:${requestId}`;
 }
@@ -677,6 +803,17 @@ app.get("/api/session-snapshot", (_request, response) => {
 
 app.get("/api/rolls", (_request, response) => {
   response.json(rollLog);
+});
+
+app.get("/api/session-summary.md", (_request, response) => {
+  const snapshot = getSessionSnapshot();
+  const filename = `${sanitizeFilePart(snapshot.campaignTitle)}-session-summary-${new Date()
+    .toISOString()
+    .slice(0, 10)}.md`;
+
+  response.setHeader("Content-Type", "text/markdown; charset=utf-8");
+  response.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  response.send(buildSessionSummaryMarkdown());
 });
 
 app.get("/api/state-event-queue", (_request, response) => {
