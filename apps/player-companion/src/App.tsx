@@ -51,9 +51,11 @@ type RollRequest = {
   actorName: string;
   modifier: number;
   note: string;
+  requestId: string;
 };
 
 const storageKey = "black-dice-engine-player-client-id";
+const pendingRequestStorageKey = "black-dice-engine-pending-requests";
 
 function createClientId() {
   const randomPart = Math.random().toString(36).slice(2, 10);
@@ -70,6 +72,51 @@ function getOrCreateClientId() {
   const created = createClientId();
   window.localStorage.setItem(storageKey, created);
   return created;
+}
+
+function createRequestId() {
+  const randomPart = Math.random().toString(36).slice(2, 10);
+  return `request-${Date.now().toString(36)}-${randomPart}`;
+}
+
+function readPendingRequests() {
+  try {
+    const raw = window.sessionStorage.getItem(pendingRequestStorageKey);
+    return raw ? (JSON.parse(raw) as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writePendingRequests(value: Record<string, string>) {
+  window.sessionStorage.setItem(pendingRequestStorageKey, JSON.stringify(value));
+}
+
+function getOrCreatePendingRequestId(fingerprint: string) {
+  const pending = readPendingRequests();
+  const existing = pending[fingerprint];
+
+  if (existing) {
+    return existing;
+  }
+
+  const created = createRequestId();
+  writePendingRequests({
+    ...pending,
+    [fingerprint]: created
+  });
+  return created;
+}
+
+function clearPendingRequestId(fingerprint: string) {
+  const pending = readPendingRequests();
+
+  if (!(fingerprint in pending)) {
+    return;
+  }
+
+  delete pending[fingerprint];
+  writePendingRequests(pending);
 }
 
 function formatTime(value: string) {
@@ -182,19 +229,27 @@ export default function App() {
       actorId: claimedCharacter.id,
       actorName: claimedCharacter.name,
       modifier,
-      note
+      note,
+      requestId: getOrCreatePendingRequestId(
+        `roll:${claimedCharacter.id}:${note.trim() || "Check"}:${modifier}`
+      )
     };
+    const fingerprint = `roll:${claimedCharacter.id}:${note.trim() || "Check"}:${modifier}`;
 
     setSubmitting(true);
 
     try {
-      await fetch("/api/rolls", {
+      const response = await fetch("/api/rolls", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify(payload)
       });
+
+      if (response.ok) {
+        clearPendingRequestId(fingerprint);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -206,6 +261,8 @@ export default function App() {
     }
 
     setClaimBusy(true);
+    const fingerprint = `claim:${clientId}:${selectedCharacterId}:${playerLabel.trim() || "Player"}`;
+    const requestId = getOrCreatePendingRequestId(fingerprint);
 
     try {
       const response = await fetch("/api/claim-character", {
@@ -216,13 +273,15 @@ export default function App() {
         body: JSON.stringify({
           clientId,
           characterId: selectedCharacterId,
-          playerLabel
+          playerLabel,
+          requestId
         })
       });
 
       if (response.ok) {
         const json = (await response.json()) as { sessionSnapshot: SessionSnapshot };
         setSnapshot(json.sessionSnapshot);
+        clearPendingRequestId(fingerprint);
       }
     } finally {
       setClaimBusy(false);
@@ -235,6 +294,8 @@ export default function App() {
     }
 
     setClaimBusy(true);
+    const fingerprint = `release:${clientId}`;
+    const requestId = getOrCreatePendingRequestId(fingerprint);
 
     try {
       const response = await fetch("/api/release-character", {
@@ -243,13 +304,15 @@ export default function App() {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          clientId
+          clientId,
+          requestId
         })
       });
 
       if (response.ok) {
         const json = (await response.json()) as { sessionSnapshot: SessionSnapshot };
         setSnapshot(json.sessionSnapshot);
+        clearPendingRequestId(fingerprint);
       }
     } finally {
       setClaimBusy(false);

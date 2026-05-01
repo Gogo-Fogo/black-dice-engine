@@ -74,22 +74,26 @@ type StateEventRequest =
       type: "hp_delta";
       characterId: string;
       amount: number;
+      requestId?: string;
     }
   | {
       type: "condition_add";
       characterId: string;
       condition: string;
+      requestId?: string;
     }
   | {
       type: "condition_remove";
       characterId: string;
       condition: string;
+      requestId?: string;
     }
   | {
       type: "resource_set";
       characterId: string;
       resourceId: string;
       value: number;
+      requestId?: string;
     };
 
 type ClientSession = {
@@ -98,6 +102,12 @@ type ClientSession = {
   clientId: string;
   connectedAt: string;
   lastSeenAt: string;
+};
+
+type CachedMutationResponse = {
+  statusCode: number;
+  body: unknown;
+  expiresAt: number;
 };
 
 const host = process.env.BDE_HOST ?? "0.0.0.0";
@@ -111,6 +121,7 @@ const server = createServer(app);
 const wss = new WebSocketServer({ server, path: "/ws" });
 
 const clientSessions = new Map<string, ClientSession>();
+const recentMutationResponses = new Map<string, CachedMutationResponse>();
 const party: Character[] = [
   {
     id: "character-kael",
@@ -280,6 +291,34 @@ function publishSessionState() {
   return sessionSnapshot;
 }
 
+function buildMutationCacheKey(kind: string, requestId: string) {
+  return `${kind}:${requestId}`;
+}
+
+function getCachedMutationResponse(kind: string, requestId: string) {
+  const cacheKey = buildMutationCacheKey(kind, requestId);
+  const cached = recentMutationResponses.get(cacheKey);
+
+  if (!cached) {
+    return null;
+  }
+
+  if (cached.expiresAt < Date.now()) {
+    recentMutationResponses.delete(cacheKey);
+    return null;
+  }
+
+  return cached;
+}
+
+function cacheMutationResponse(kind: string, requestId: string, statusCode: number, body: unknown) {
+  recentMutationResponses.set(buildMutationCacheKey(kind, requestId), {
+    statusCode,
+    body,
+    expiresAt: Date.now() + 5 * 60 * 1000
+  });
+}
+
 function broadcast(type: string, payload: unknown) {
   const message = JSON.stringify({ type, payload });
 
@@ -327,6 +366,16 @@ app.get("/api/rolls", (_request, response) => {
 
 app.post("/api/state-events", (request, response) => {
   const body = request.body as Partial<StateEventRequest>;
+  const requestId = typeof body.requestId === "string" ? body.requestId.trim() : "";
+
+  if (requestId) {
+    const cached = getCachedMutationResponse("state-event", requestId);
+
+    if (cached) {
+      response.status(cached.statusCode).json(cached.body);
+      return;
+    }
+  }
 
   if (typeof body.type !== "string" || typeof body.characterId !== "string") {
     response.status(400).json({
@@ -353,10 +402,14 @@ app.post("/api/state-events", (request, response) => {
     }
 
     character.hp.current = clamp(character.hp.current + body.amount, 0, character.hp.max);
-    response.json({
+    const result = {
       ok: true,
       sessionSnapshot: publishSessionState()
-    });
+    };
+    if (requestId) {
+      cacheMutationResponse("state-event", requestId, 200, result);
+    }
+    response.json(result);
     return;
   }
 
@@ -374,10 +427,14 @@ app.post("/api/state-events", (request, response) => {
       character.conditions.push(condition);
     }
 
-    response.json({
+    const result = {
       ok: true,
       sessionSnapshot: publishSessionState()
-    });
+    };
+    if (requestId) {
+      cacheMutationResponse("state-event", requestId, 200, result);
+    }
+    response.json(result);
     return;
   }
 
@@ -392,10 +449,14 @@ app.post("/api/state-events", (request, response) => {
     }
 
     character.conditions = character.conditions.filter((entry) => entry !== condition);
-    response.json({
+    const result = {
       ok: true,
       sessionSnapshot: publishSessionState()
-    });
+    };
+    if (requestId) {
+      cacheMutationResponse("state-event", requestId, 200, result);
+    }
+    response.json(result);
     return;
   }
 
@@ -417,10 +478,14 @@ app.post("/api/state-events", (request, response) => {
     }
 
     resource.current = clamp(body.value, 0, resource.max);
-    response.json({
+    const result = {
       ok: true,
       sessionSnapshot: publishSessionState()
-    });
+    };
+    if (requestId) {
+      cacheMutationResponse("state-event", requestId, 200, result);
+    }
+    response.json(result);
     return;
   }
 
@@ -432,9 +497,19 @@ app.post("/api/state-events", (request, response) => {
 app.post("/api/claim-character", (request, response) => {
   const clientId = typeof request.body.clientId === "string" ? request.body.clientId.trim() : "";
   const characterId = typeof request.body.characterId === "string" ? request.body.characterId.trim() : "";
+  const requestId = typeof request.body.requestId === "string" ? request.body.requestId.trim() : "";
   const playerLabelRaw =
     typeof request.body.playerLabel === "string" ? request.body.playerLabel.trim() : "";
   const playerLabel = playerLabelRaw || "Player";
+
+  if (requestId) {
+    const cached = getCachedMutationResponse("claim-character", requestId);
+
+    if (cached) {
+      response.status(cached.statusCode).json(cached.body);
+      return;
+    }
+  }
 
   if (!clientId || !characterId) {
     response.status(400).json({
@@ -470,14 +545,28 @@ app.post("/api/claim-character", (request, response) => {
   character.claimedByLabel = playerLabel;
 
   const sessionSnapshot = publishSessionState();
-  response.json({
+  const result = {
     ok: true,
     sessionSnapshot
-  });
+  };
+  if (requestId) {
+    cacheMutationResponse("claim-character", requestId, 200, result);
+  }
+  response.json(result);
 });
 
 app.post("/api/release-character", (request, response) => {
   const clientId = typeof request.body.clientId === "string" ? request.body.clientId.trim() : "";
+  const requestId = typeof request.body.requestId === "string" ? request.body.requestId.trim() : "";
+
+  if (requestId) {
+    const cached = getCachedMutationResponse("release-character", requestId);
+
+    if (cached) {
+      response.status(cached.statusCode).json(cached.body);
+      return;
+    }
+  }
 
   if (!clientId) {
     response.status(400).json({
@@ -494,18 +583,32 @@ app.post("/api/release-character", (request, response) => {
   }
 
   const sessionSnapshot = publishSessionState();
-  response.json({
+  const result = {
     ok: true,
     sessionSnapshot
-  });
+  };
+  if (requestId) {
+    cacheMutationResponse("release-character", requestId, 200, result);
+  }
+  response.json(result);
 });
 
 app.post("/api/rolls", (request, response) => {
   const actorId = typeof request.body.actorId === "string" ? request.body.actorId : "";
   const actorName = typeof request.body.actorName === "string" ? request.body.actorName : "";
+  const requestId = typeof request.body.requestId === "string" ? request.body.requestId.trim() : "";
   const modifierValue =
     typeof request.body.modifier === "number" ? request.body.modifier : Number(request.body.modifier ?? 0);
   const note = typeof request.body.note === "string" && request.body.note.trim() ? request.body.note : "Check";
+
+  if (requestId) {
+    const cached = getCachedMutationResponse("roll", requestId);
+
+    if (cached) {
+      response.status(cached.statusCode).json(cached.body);
+      return;
+    }
+  }
 
   if (!actorId || !actorName || Number.isNaN(modifierValue)) {
     response.status(400).json({
@@ -533,6 +636,10 @@ app.post("/api/rolls", (request, response) => {
   broadcast("roll_recorded", record);
   broadcast("session_snapshot", getSessionSnapshot());
   broadcast("runtime_status", getRuntimeStatus());
+
+  if (requestId) {
+    cacheMutationResponse("roll", requestId, 201, record);
+  }
 
   response.status(201).json(record);
 });
@@ -586,6 +693,16 @@ wss.on("connection", (socket, request) => {
 setInterval(() => {
   broadcast("runtime_status", getRuntimeStatus());
 }, 10000);
+
+setInterval(() => {
+  const now = Date.now();
+
+  for (const [cacheKey, cached] of recentMutationResponses.entries()) {
+    if (cached.expiresAt < now) {
+      recentMutationResponses.delete(cacheKey);
+    }
+  }
+}, 60000);
 
 server.listen(gameServerPort, host, () => {
   const gmUrl = "http://127.0.0.1:5173";

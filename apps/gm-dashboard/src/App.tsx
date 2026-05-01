@@ -72,6 +72,33 @@ type StateEventRequest =
       type: "hp_delta";
       characterId: string;
       amount: number;
+      requestId: string;
+    }
+  | {
+      type: "condition_add";
+      characterId: string;
+      condition: string;
+      requestId: string;
+    }
+  | {
+      type: "condition_remove";
+      characterId: string;
+      condition: string;
+      requestId: string;
+    }
+  | {
+      type: "resource_set";
+      characterId: string;
+      resourceId: string;
+      value: number;
+      requestId: string;
+    };
+
+type StateEventDraft =
+  | {
+      type: "hp_delta";
+      characterId: string;
+      amount: number;
     }
   | {
       type: "condition_add";
@@ -90,11 +117,58 @@ type StateEventRequest =
       value: number;
     };
 
+const pendingRequestStorageKey = "black-dice-engine-pending-requests";
+
 function formatTime(value: string) {
   return new Date(value).toLocaleTimeString([], {
     hour: "numeric",
     minute: "2-digit"
   });
+}
+
+function createRequestId() {
+  const randomPart = Math.random().toString(36).slice(2, 10);
+  return `request-${Date.now().toString(36)}-${randomPart}`;
+}
+
+function readPendingRequests() {
+  try {
+    const raw = window.sessionStorage.getItem(pendingRequestStorageKey);
+    return raw ? (JSON.parse(raw) as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writePendingRequests(value: Record<string, string>) {
+  window.sessionStorage.setItem(pendingRequestStorageKey, JSON.stringify(value));
+}
+
+function getOrCreatePendingRequestId(fingerprint: string) {
+  const pending = readPendingRequests();
+  const existing = pending[fingerprint];
+
+  if (existing) {
+    return existing;
+  }
+
+  const created = createRequestId();
+  writePendingRequests({
+    ...pending,
+    [fingerprint]: created
+  });
+  return created;
+}
+
+function clearPendingRequestId(fingerprint: string) {
+  const pending = readPendingRequests();
+
+  if (!(fingerprint in pending)) {
+    return;
+  }
+
+  delete pending[fingerprint];
+  writePendingRequests(pending);
 }
 
 export default function App() {
@@ -106,11 +180,13 @@ export default function App() {
   const [conditionDrafts, setConditionDrafts] = useState<Record<string, string>>({});
 
   async function submitStateEvent(
-    event: StateEventRequest,
+    event: StateEventDraft,
+    fingerprint: string,
     actionKey: string,
     options?: { clearConditionDraftFor?: string }
   ) {
     setPendingActionKey(actionKey);
+    const requestId = getOrCreatePendingRequestId(fingerprint);
 
     try {
       const response = await fetch("/api/state-events", {
@@ -118,7 +194,10 @@ export default function App() {
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(event)
+        body: JSON.stringify({
+          ...event,
+          requestId
+        } as StateEventRequest)
       });
 
       if (!response.ok) {
@@ -127,6 +206,7 @@ export default function App() {
 
       const json = (await response.json()) as { sessionSnapshot: SessionSnapshot };
       setSnapshot(json.sessionSnapshot);
+      clearPendingRequestId(fingerprint);
 
       if (options?.clearConditionDraftFor) {
         const characterId = options.clearConditionDraftFor;
@@ -352,6 +432,7 @@ export default function App() {
                                       resourceId: resource.id,
                                       value: resource.current - 1
                                     },
+                                    `resource:${character.id}:${resource.id}:${resource.current - 1}`,
                                     `resource-dec-${character.id}-${resource.id}`
                                   )
                                 }
@@ -370,6 +451,7 @@ export default function App() {
                                       resourceId: resource.id,
                                       value: resource.current + 1
                                     },
+                                    `resource:${character.id}:${resource.id}:${resource.current + 1}`,
                                     `resource-inc-${character.id}-${resource.id}`
                                   )
                                 }
@@ -405,6 +487,7 @@ export default function App() {
                         onClick={() =>
                           void submitStateEvent(
                             { type: "hp_delta", characterId: character.id, amount: -1 },
+                            `hp:${character.id}:-1`,
                             `hp-1-${character.id}`
                           )
                         }
@@ -418,6 +501,7 @@ export default function App() {
                         onClick={() =>
                           void submitStateEvent(
                             { type: "hp_delta", characterId: character.id, amount: -5 },
+                            `hp:${character.id}:-5`,
                             `hp-5-${character.id}`
                           )
                         }
@@ -431,6 +515,7 @@ export default function App() {
                         onClick={() =>
                           void submitStateEvent(
                             { type: "hp_delta", characterId: character.id, amount: 1 },
+                            `hp:${character.id}:1`,
                             `hp+1-${character.id}`
                           )
                         }
@@ -444,6 +529,7 @@ export default function App() {
                         onClick={() =>
                           void submitStateEvent(
                             { type: "hp_delta", characterId: character.id, amount: 5 },
+                            `hp:${character.id}:5`,
                             `hp+5-${character.id}`
                           )
                         }
@@ -478,6 +564,7 @@ export default function App() {
                               characterId: character.id,
                               condition: (conditionDrafts[character.id] ?? "").trim()
                             },
+                            `condition-add:${character.id}:${(conditionDrafts[character.id] ?? "").trim()}`,
                             `condition-add-${character.id}`,
                             { clearConditionDraftFor: character.id }
                           )
@@ -501,6 +588,7 @@ export default function App() {
                                   characterId: character.id,
                                   condition
                                 },
+                                `condition-remove:${character.id}:${condition}`,
                                 `condition-remove-${character.id}-${condition}`
                               )
                             }

@@ -85,7 +85,7 @@ Goal: let the GM and three players use the system together on the same network.
 - [x] Add QR-code join panel to the GM dashboard.
 - [x] Add local table PIN/session token strategy for player join.
 - [x] Add visible connected/reconnecting/disconnected status.
-- [ ] Prevent duplicate rolls/actions after reconnect.
+- [x] Prevent duplicate rolls/actions after reconnect.
 - [x] Test over LAN using at least one phone.
 - [ ] Export a session summary to Markdown.
 
@@ -141,7 +141,7 @@ Goal: make failures visible and recoverable before adding heavier integrations.
 - [ ] Add player client heartbeat.
 - [ ] Add reconnect/resume flow.
 - [ ] Add local table PIN/session token strategy for QR join.
-- [ ] Add idempotency keys for rolls and submitted actions.
+- [x] Add idempotency keys for rolls and submitted actions.
 - [ ] Add error event log with visibility labels.
 - [ ] Add degraded-mode behavior for unavailable LLM, ComfyUI, audio, and import services.
 - [ ] Add manual backup placeholder.
