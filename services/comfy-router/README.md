@@ -1,13 +1,24 @@
 # Comfy Router
 
-Planned local media routing service for ComfyUI.
+Local media routing scaffold for ComfyUI.
 
-Expected responsibilities:
+Current responsibilities:
 
-- Register local workflow templates.
-- Translate approved scene requests into workflow inputs.
-- Submit jobs to ComfyUI.
-- Track job status.
-- Store generated outputs outside this repository.
+- Expose a health endpoint.
+- Publish a small placeholder workflow registry.
+- Accept media-job preparation requests.
+- Return prepared job contracts without pretending ComfyUI execution already exists.
+- Keep output destinations outside this repository through environment configuration.
 
-No service implementation exists yet.
+Current endpoints:
+
+- `GET /health`
+- `GET /api/workflows`
+- `GET /api/jobs`
+- `POST /api/jobs/prepare`
+
+Important notes:
+
+- This service is still a scaffold, not a full ComfyUI executor.
+- Real submission should wait until workflow registry format and output-path policy are finalized.
+- Use `BDE_COMFY_API_BASE` and `BDE_COMFY_OUTPUT_ROOT` later to move from placeholder mode to configured mode.

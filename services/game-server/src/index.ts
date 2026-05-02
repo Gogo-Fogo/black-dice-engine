@@ -355,6 +355,7 @@ type CachedMutationResponse = {
 const host = process.env.BDE_HOST ?? "0.0.0.0";
 const gameServerPort = Number(process.env.BDE_GAME_SERVER_PORT ?? 4310);
 const playerCompanionPort = Number(process.env.BDE_PLAYER_COMPANION_PORT ?? 4311);
+const comfyRouterEndpoint = process.env.BDE_COMFY_ROUTER_ENDPOINT?.trim() || "";
 const localModelEndpoint = process.env.BDE_LOCAL_MODEL_ENDPOINT?.trim() || "";
 const directorModeModel = process.env.BDE_DIRECTOR_MODE_MODEL?.trim() || "";
 const currentDir = dirname(fileURLToPath(import.meta.url));
@@ -705,6 +706,13 @@ function getRuntimeStatus(): RuntimeStatus {
         message: mediaJobs.length
           ? `${mediaJobs.filter((job) => job.status === "queued").length} queued / ${mediaJobs.length} tracked`
           : "No media jobs queued yet"
+      },
+      {
+        name: "comfy-router",
+        status: comfyRouterEndpoint ? "degraded" : "unknown",
+        message: comfyRouterEndpoint
+          ? `Placeholder router expected at ${comfyRouterEndpoint}`
+          : "No comfy-router endpoint configured yet; media queue remains internal only"
       },
       {
         name: "local-model-adapter",
