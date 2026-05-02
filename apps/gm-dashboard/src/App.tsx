@@ -264,6 +264,43 @@ type AssetRecord = {
   metadata: Record<string, unknown>;
 };
 
+type CleanupPolicy = {
+  failedJobArchiveAfterHours: number;
+  draftJobArchiveAfterHours: number;
+  rejectedJobArchiveAfterHours: number;
+  protectedGeneratedAssetCount: number;
+  notes: string[];
+};
+
+type CleanupCandidate = {
+  kind: "media_job" | "asset_record";
+  id: string;
+  status: string;
+  reason: string;
+  recommendedAction: "archive_metadata" | "review_output" | "keep_final";
+  workflowId?: string | null;
+  localPath?: string | null;
+  timestamp?: string | null;
+};
+
+type CleanupReport = {
+  generatedAt: string;
+  policy: CleanupPolicy;
+  outputRoots: {
+    mediaOutputRoot: string;
+    repoExportsRoot: string;
+  };
+  summary: {
+    trackedMediaJobs: number;
+    trackedAssets: number;
+    archiveCandidateCount: number;
+    reviewCandidateCount: number;
+    protectedFinalAssetCount: number;
+  };
+  archiveCandidates: CleanupCandidate[];
+  reviewCandidates: CleanupCandidate[];
+};
+
 type StateEventProposal = {
   id: string;
   createdAt: string;
@@ -493,6 +530,8 @@ export default function App() {
   const [scenePacketStatus, setScenePacketStatus] = useState("");
   const [scenePacketValidation, setScenePacketValidation] = useState<ScenePacketValidation | null>(null);
   const [mediaQueueStatus, setMediaQueueStatus] = useState("");
+  const [cleanupReport, setCleanupReport] = useState<CleanupReport | null>(null);
+  const [cleanupReportStatus, setCleanupReportStatus] = useState("");
   const [memoryEntryStatus, setMemoryEntryStatus] = useState("");
   const [memoryEntryExportPath, setMemoryEntryExportPath] = useState("");
   const [localModelDraft, setLocalModelDraft] = useState<LocalModelAdapterDraft | null>(null);
@@ -529,6 +568,35 @@ export default function App() {
       setExportStatus("ready");
     } catch {
       setExportStatus("failed");
+    }
+  }
+
+  async function loadCleanupReport(options?: { silent?: boolean }) {
+    if (!options?.silent) {
+      setCleanupReportStatus("loading");
+    }
+
+    try {
+      const response = await fetch("/api/media-cleanup-report");
+
+      if (!response.ok) {
+        if (!options?.silent) {
+          setCleanupReportStatus("failed");
+        }
+        return;
+      }
+
+      const json = (await response.json()) as {
+        report: CleanupReport;
+      };
+      setCleanupReport(json.report);
+      if (!options?.silent) {
+        setCleanupReportStatus("ready");
+      }
+    } catch {
+      if (!options?.silent) {
+        setCleanupReportStatus("failed");
+      }
     }
   }
 
@@ -617,6 +685,7 @@ export default function App() {
       setSnapshot(json.sessionSnapshot);
       setScenePacketValidation(json.validation);
       setMediaQueueStatus(`queued:${json.queuedCount}`);
+      await loadCleanupReport({ silent: true });
     } catch {
       setMediaQueueStatus("failed");
     } finally {
@@ -643,6 +712,7 @@ export default function App() {
       };
       setSnapshot(json.sessionSnapshot);
       setMediaQueueStatus(`generated:${json.asset.id}`);
+      await loadCleanupReport({ silent: true });
     } catch {
       setMediaQueueStatus("failed");
     } finally {
@@ -693,6 +763,7 @@ export default function App() {
         setRuntime(json.runtimeStatus);
       }
       setMediaQueueStatus(`started:${json.job.id}`);
+      await loadCleanupReport({ silent: true });
     } catch {
       setMediaQueueStatus("failed");
     } finally {
@@ -725,6 +796,7 @@ export default function App() {
       };
       setSnapshot(json.sessionSnapshot);
       setMediaQueueStatus(`failed-job:${json.job.id}`);
+      await loadCleanupReport({ silent: true });
     } catch {
       setMediaQueueStatus("failed");
     } finally {
@@ -911,13 +983,17 @@ export default function App() {
     let isMounted = true;
 
     async function load() {
-      const [runtimeResponse, snapshotResponse] = await Promise.all([
+      const [runtimeResponse, snapshotResponse, cleanupResponse] = await Promise.all([
         fetch("/api/runtime-status"),
-        fetch("/api/session-snapshot")
+        fetch("/api/session-snapshot"),
+        fetch("/api/media-cleanup-report")
       ]);
 
       const runtimeJson = (await runtimeResponse.json()) as RuntimeStatus;
       const snapshotJson = (await snapshotResponse.json()) as SessionSnapshot;
+      const cleanupJson = (await cleanupResponse.json()) as {
+        report: CleanupReport;
+      };
 
       if (!isMounted) {
         return;
@@ -925,6 +1001,7 @@ export default function App() {
 
       setRuntime(runtimeJson);
       setSnapshot(snapshotJson);
+      setCleanupReport(cleanupJson.report);
       await loadAiLogs();
     }
 
@@ -1631,7 +1708,7 @@ export default function App() {
               >
                 Queue Media Jobs
               </button>
-              {mediaQueueStatus ? (
+              {mediaQueueStatus === "queueing" || mediaQueueStatus.startsWith("queued:") || mediaQueueStatus === "failed" ? (
                 <p className="export-note">
                   {mediaQueueStatus === "queueing"
                     ? "Queueing media jobs..."
@@ -1787,6 +1864,112 @@ export default function App() {
               <p>No generated media metadata recorded yet.</p>
             )}
           </div>
+        </article>
+
+        <article className="panel">
+          <div className="panel-header">
+            <h2>Cleanup Policy</h2>
+            <span>{cleanupReport ? formatTime(cleanupReport.generatedAt) : "not loaded"}</span>
+          </div>
+          <p className="muted-line">
+            This is a report-only cleanup pass. It shows what should be archived or reviewed later while keeping
+            final files outside Git and untouched for now.
+          </p>
+          <button className="export-button" onClick={() => void loadCleanupReport()} type="button">
+            Refresh Cleanup Report
+          </button>
+          {cleanupReportStatus ? (
+            <p className="export-note">
+              {cleanupReportStatus === "loading"
+                ? "Refreshing cleanup report..."
+                : cleanupReportStatus === "ready"
+                  ? "Cleanup report refreshed."
+                  : "Cleanup report failed to load."}
+            </p>
+          ) : null}
+          {cleanupReport ? (
+            <div className="context-block">
+              <div className="packet-meta-grid">
+                <div>
+                  <span>Tracked Jobs</span>
+                  <strong>{cleanupReport.summary.trackedMediaJobs}</strong>
+                </div>
+                <div>
+                  <span>Tracked Assets</span>
+                  <strong>{cleanupReport.summary.trackedAssets}</strong>
+                </div>
+                <div>
+                  <span>Archive Candidates</span>
+                  <strong>{cleanupReport.summary.archiveCandidateCount}</strong>
+                </div>
+                <div>
+                  <span>Review Candidates</span>
+                  <strong>{cleanupReport.summary.reviewCandidateCount}</strong>
+                </div>
+                <div>
+                  <span>Protected Finals</span>
+                  <strong>{cleanupReport.summary.protectedFinalAssetCount}</strong>
+                </div>
+              </div>
+              <div className="tag-row">
+                <span className="tag-chip">media root: {cleanupReport.outputRoots.mediaOutputRoot}</span>
+                <span className="tag-chip">repo exports: {cleanupReport.outputRoots.repoExportsRoot}</span>
+              </div>
+              <div className="validation-list">
+                {cleanupReport.policy.notes.map((note) => (
+                  <p key={note}>{note}</p>
+                ))}
+              </div>
+              <div>
+                <p className="detail-label">Archive Candidates</p>
+                <div className="memory-entry-list">
+                  {cleanupReport.archiveCandidates.length ? (
+                    cleanupReport.archiveCandidates.map((candidate) => (
+                      <div className="memory-entry-card" key={`archive-${candidate.kind}-${candidate.id}`}>
+                        <div className="memory-entry-header">
+                          <strong>{candidate.kind.replace("_", " ")}</strong>
+                          <span className="event-pill event-memory">{candidate.status}</span>
+                        </div>
+                        <p>{candidate.reason}</p>
+                        <div className="memory-entry-meta">
+                          <span>{candidate.recommendedAction.replace("_", " ")}</span>
+                          <span>{candidate.workflowId ?? "no workflow"}</span>
+                          <span>{candidate.timestamp ? formatTime(candidate.timestamp) : "no timestamp"}</span>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p>No archive candidates yet.</p>
+                  )}
+                </div>
+              </div>
+              <div>
+                <p className="detail-label">Review / Protected Items</p>
+                <div className="memory-entry-list">
+                  {cleanupReport.reviewCandidates.length ? (
+                    cleanupReport.reviewCandidates.map((candidate) => (
+                      <div className="memory-entry-card" key={`review-${candidate.kind}-${candidate.id}`}>
+                        <div className="memory-entry-header">
+                          <strong>{candidate.kind.replace("_", " ")}</strong>
+                          <span className="event-pill event-state">{candidate.recommendedAction.replace("_", " ")}</span>
+                        </div>
+                        <p>{candidate.reason}</p>
+                        <div className="memory-entry-meta">
+                          <span>{candidate.status}</span>
+                          <span>{candidate.workflowId ?? "no workflow"}</span>
+                          <span>{candidate.localPath ?? "no local path"}</span>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p>No review candidates yet.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p>No cleanup report loaded yet.</p>
+          )}
         </article>
 
         <article className="panel">

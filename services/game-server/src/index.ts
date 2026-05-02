@@ -273,6 +273,43 @@ type AssetRecord = {
   metadata: Record<string, unknown>;
 };
 
+type CleanupPolicy = {
+  failedJobArchiveAfterHours: number;
+  draftJobArchiveAfterHours: number;
+  rejectedJobArchiveAfterHours: number;
+  protectedGeneratedAssetCount: number;
+  notes: string[];
+};
+
+type CleanupCandidate = {
+  kind: "media_job" | "asset_record";
+  id: string;
+  status: string;
+  reason: string;
+  recommendedAction: "archive_metadata" | "review_output" | "keep_final";
+  workflowId?: string | null;
+  localPath?: string | null;
+  timestamp?: string | null;
+};
+
+type CleanupReport = {
+  generatedAt: string;
+  policy: CleanupPolicy;
+  outputRoots: {
+    mediaOutputRoot: string;
+    repoExportsRoot: string;
+  };
+  summary: {
+    trackedMediaJobs: number;
+    trackedAssets: number;
+    archiveCandidateCount: number;
+    reviewCandidateCount: number;
+    protectedFinalAssetCount: number;
+  };
+  archiveCandidates: CleanupCandidate[];
+  reviewCandidates: CleanupCandidate[];
+};
+
 type StateEventProposal = {
   id: string;
   createdAt: string;
@@ -388,6 +425,7 @@ const playerCompanionDistDir = join(currentDir, "../../../apps/player-companion/
 const sessionSummaryExportDir = join(currentDir, "../../../_exports/session-summaries");
 const memoryEntryExportDir = join(currentDir, "../../../_exports/memory-entries");
 const aiLogExportDir = join(currentDir, "../../../_exports/ai-logs");
+const repoExportsRoot = join(currentDir, "../../../_exports");
 const sampleCampaignDir = join(currentDir, "../../../campaigns/sample-campaign");
 const gmSystemPromptPath = join(currentDir, "../../../prompts/gm-system-prompt.md");
 const directorPromptPath = join(currentDir, "../../../prompts/director-prompt.md");
@@ -738,6 +776,167 @@ function getMediaPressure() {
     summary,
     reasons,
     blockedJobTypes: Array.from(blocked)
+  };
+}
+
+function getCleanupPolicy(): CleanupPolicy {
+  return {
+    failedJobArchiveAfterHours: 24,
+    draftJobArchiveAfterHours: 6,
+    rejectedJobArchiveAfterHours: 12,
+    protectedGeneratedAssetCount: 6,
+    notes: [
+      "Generated media files live outside Git and should be reviewed before any deletion workflow exists.",
+      "Failed, draft, and rejected jobs are safe archive candidates once they age past the policy window.",
+      "The first cleanup slice is report-only: it never deletes files or erases final asset metadata."
+    ]
+  };
+}
+
+function getAgeHours(isoValue?: string | null) {
+  if (!isoValue) {
+    return 0;
+  }
+
+  return Math.max(0, (Date.now() - new Date(isoValue).getTime()) / 36e5);
+}
+
+function buildCleanupReport(): CleanupReport {
+  const policy = getCleanupPolicy();
+  const archiveCandidates: CleanupCandidate[] = [];
+  const reviewCandidates: CleanupCandidate[] = [];
+  const generatedAssetsNewestFirst = [...assetRecords]
+    .filter((asset) => asset.status === "generated")
+    .sort((left, right) => {
+      const leftTime = String(left.metadata.generatedAt ?? "");
+      const rightTime = String(right.metadata.generatedAt ?? "");
+      return rightTime.localeCompare(leftTime);
+    });
+  const protectedAssetIds = new Set(
+    generatedAssetsNewestFirst.slice(0, policy.protectedGeneratedAssetCount).map((asset) => asset.id)
+  );
+
+  mediaJobs.forEach((job) => {
+    const ageBasis = job.completedAt ?? job.startedAt ?? job.createdAt;
+    const ageHours = getAgeHours(ageBasis);
+
+    if (job.status === "failed" && ageHours >= policy.failedJobArchiveAfterHours) {
+      archiveCandidates.push({
+        kind: "media_job",
+        id: job.id,
+        status: job.status,
+        reason: `Failed jobs older than ${policy.failedJobArchiveAfterHours} hours should be archived out of the active queue.`,
+        recommendedAction: "archive_metadata",
+        workflowId: job.workflowId ?? null,
+        localPath: job.outputPath ?? null,
+        timestamp: ageBasis
+      });
+      return;
+    }
+
+    if (job.status === "draft" && ageHours >= policy.draftJobArchiveAfterHours) {
+      archiveCandidates.push({
+        kind: "media_job",
+        id: job.id,
+        status: job.status,
+        reason: `Draft jobs older than ${policy.draftJobArchiveAfterHours} hours are stale and should be archived.`,
+        recommendedAction: "archive_metadata",
+        workflowId: job.workflowId ?? null,
+        localPath: job.outputPath ?? null,
+        timestamp: ageBasis
+      });
+      return;
+    }
+
+    if (job.status === "rejected" && ageHours >= policy.rejectedJobArchiveAfterHours) {
+      archiveCandidates.push({
+        kind: "media_job",
+        id: job.id,
+        status: job.status,
+        reason: `Rejected jobs older than ${policy.rejectedJobArchiveAfterHours} hours should be archived to reduce queue noise.`,
+        recommendedAction: "archive_metadata",
+        workflowId: job.workflowId ?? null,
+        localPath: job.outputPath ?? null,
+        timestamp: ageBasis
+      });
+      return;
+    }
+
+    if (job.status === "generated" && !job.outputPath) {
+      reviewCandidates.push({
+        kind: "media_job",
+        id: job.id,
+        status: job.status,
+        reason: "Generated jobs should carry a resolved local output path before they are treated as stable final assets.",
+        recommendedAction: "review_output",
+        workflowId: job.workflowId ?? null,
+        localPath: null,
+        timestamp: ageBasis
+      });
+    }
+  });
+
+  assetRecords.forEach((asset) => {
+    const generatedAt = typeof asset.metadata.generatedAt === "string" ? asset.metadata.generatedAt : null;
+
+    if (asset.status === "failed") {
+      reviewCandidates.push({
+        kind: "asset_record",
+        id: asset.id,
+        status: asset.status,
+        reason: "Failed asset metadata needs review before future cleanup rules can trust it.",
+        recommendedAction: "review_output",
+        workflowId: asset.workflowId ?? null,
+        localPath: asset.localPath ?? null,
+        timestamp: generatedAt
+      });
+      return;
+    }
+
+    if (asset.status === "generated" && !asset.localPath) {
+      reviewCandidates.push({
+        kind: "asset_record",
+        id: asset.id,
+        status: asset.status,
+        reason: "Generated asset metadata is missing its local path and should be reviewed before reuse.",
+        recommendedAction: "review_output",
+        workflowId: asset.workflowId ?? null,
+        localPath: null,
+        timestamp: generatedAt
+      });
+      return;
+    }
+
+    if (asset.status === "generated" && protectedAssetIds.has(asset.id)) {
+      reviewCandidates.push({
+        kind: "asset_record",
+        id: asset.id,
+        status: asset.status,
+        reason: "Recent generated assets are protected from cleanup and should be treated as current canon candidates.",
+        recommendedAction: "keep_final",
+        workflowId: asset.workflowId ?? null,
+        localPath: asset.localPath ?? null,
+        timestamp: generatedAt
+      });
+    }
+  });
+
+  return {
+    generatedAt: new Date().toISOString(),
+    policy,
+    outputRoots: {
+      mediaOutputRoot,
+      repoExportsRoot
+    },
+    summary: {
+      trackedMediaJobs: mediaJobs.length,
+      trackedAssets: assetRecords.length,
+      archiveCandidateCount: archiveCandidates.length,
+      reviewCandidateCount: reviewCandidates.filter((candidate) => candidate.recommendedAction === "review_output").length,
+      protectedFinalAssetCount: reviewCandidates.filter((candidate) => candidate.recommendedAction === "keep_final").length
+    },
+    archiveCandidates,
+    reviewCandidates
   };
 }
 
@@ -2168,6 +2367,12 @@ app.get("/api/media-jobs", (_request, response) => {
 app.get("/api/assets", (_request, response) => {
   response.json({
     assets: assetRecords
+  });
+});
+
+app.get("/api/media-cleanup-report", (_request, response) => {
+  response.json({
+    report: buildCleanupReport()
   });
 });
 
