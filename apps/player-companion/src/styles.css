@@ -231,6 +231,30 @@ button:disabled {
   gap: 10px;
 }
 
+.roll-toggle-row {
+  display: flex;
+  gap: 6px;
+}
+
+.roll-toggle-row button {
+  flex: 1;
+  padding: 8px 4px;
+  border: 1px solid rgba(216, 175, 80, 0.25);
+  background: rgba(15, 15, 20, 0.8);
+  color: #8a8474;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.roll-toggle-row button.active {
+  background: rgba(216, 175, 80, 0.15);
+  color: #d8af50;
+  border-color: rgba(216, 175, 80, 0.5);
+}
+
 .roll-log {
   display: grid;
   gap: 12px;

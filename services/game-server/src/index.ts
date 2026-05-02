@@ -86,10 +86,11 @@ type RollRecord = {
   id: string;
   actorId: string;
   actorName: string;
-  dice: "d20";
+  dice: string;
   modifier: number;
-  rolled: number;
+  rolled: number | number[];
   total: number;
+  advantage: boolean | null;
   note: string;
   timestamp: string;
 };
@@ -548,10 +549,11 @@ const defaultRoll: RollRecord = {
   id: randomUUID(),
   actorId: "character-sera",
   actorName: "Sera",
-  dice: "d20",
+  dice: "1d20",
   modifier: 4,
   rolled: 15,
   total: 19,
+  advantage: null,
   note: "Insight",
   timestamp: new Date().toISOString()
 };
@@ -3321,39 +3323,110 @@ app.post("/api/release-character", requireRole("player", "gm", "admin"), (reques
   response.json(result);
 });
 
+function parseDiceNotation(raw: string): { count: number; sides: number; modifier: number; advantage: boolean | null; error?: string } {
+  const trimmed = raw.trim().toLowerCase();
+  
+  let advantage: boolean | null = null;
+  let notation = trimmed;
+
+  if (/\s+adv$/i.test(trimmed)) {
+    advantage = true;
+    notation = trimmed.slice(0, trimmed.lastIndexOf(" ")).trim();
+  } else if (/\s+dis$/i.test(trimmed)) {
+    advantage = false;
+    notation = trimmed.slice(0, trimmed.lastIndexOf(" ")).trim();
+  }
+
+  const match = notation.match(/^(\d+)?d(\d+)([+-]\d+)?$/);
+  if (!match) {
+    return { count: 0, sides: 0, modifier: 0, advantage: null, error: `Invalid dice notation: ${raw}` };
+  }
+
+  const count = match[1] ? Number(match[1]) : 1;
+  const sides = Number(match[2]);
+  const modifier = match[3] ? Number(match[3]) : 0;
+
+  if (count < 1 || count > 100) {
+    return { count: 0, sides: 0, modifier: 0, advantage: null, error: "Dice count must be between 1 and 100" };
+  }
+
+  if (sides < 2 || sides > 1000) {
+    return { count: 0, sides: 0, modifier: 0, advantage: null, error: "Dice sides must be between 2 and 1000" };
+  }
+
+  return { count, sides, modifier, advantage };
+}
+
+function rollDice(parsed: { count: number; sides: number; modifier: number; advantage: boolean | null }) {
+  const rolls: number[] = [];
+
+  if (parsed.advantage !== null) {
+    // Roll twice, take higher (adv) or lower (dis)
+    for (let i = 0; i < parsed.count; i++) {
+      const a = Math.floor(Math.random() * parsed.sides) + 1;
+      const b = Math.floor(Math.random() * parsed.sides) + 1;
+      rolls.push(parsed.advantage ? Math.max(a, b) : Math.min(a, b));
+    }
+  } else {
+    for (let i = 0; i < parsed.count; i++) {
+      rolls.push(Math.floor(Math.random() * parsed.sides) + 1);
+    }
+  }
+
+  const total = rolls.reduce((sum, r) => sum + r, 0) + parsed.modifier;
+  return { rolls, total };
+}
+
 app.post("/api/rolls", requireRole("player", "gm", "admin"), (request, response) => {
   const actorId = typeof request.body.actorId === "string" ? request.body.actorId : "";
   const actorName = typeof request.body.actorName === "string" ? request.body.actorName : "";
   const requestId = typeof request.body.requestId === "string" ? request.body.requestId.trim() : "";
-  const modifierValue =
-    typeof request.body.modifier === "number" ? request.body.modifier : Number(request.body.modifier ?? 0);
   const note = typeof request.body.note === "string" && request.body.note.trim() ? request.body.note : "Check";
+  const diceRaw = typeof request.body.dice === "string" && request.body.dice.trim() ? request.body.dice.trim() : "d20";
+  const modifierOverride =
+    typeof request.body.modifier === "number" ? request.body.modifier : Number(request.body.modifier ?? 0);
 
   if (requestId) {
     const cached = getCachedMutationResponse("roll", requestId);
-
     if (cached) {
       response.status(cached.statusCode).json(cached.body);
       return;
     }
   }
 
-  if (!actorId || !actorName || Number.isNaN(modifierValue)) {
+  if (!actorId || !actorName) {
     response.status(400).json({
-      error: "actorId, actorName, and numeric modifier are required"
+      error: "actorId and actorName are required"
     });
     return;
   }
 
-  const rolled = Math.floor(Math.random() * 20) + 1;
+  const parsed = parseDiceNotation(diceRaw);
+
+  if (parsed.error) {
+    response.status(400).json({ error: parsed.error });
+    return;
+  }
+
+  // If dice notation provided, use it; otherwise default to d20 with body modifier
+  const modifier = parsed.modifier + (request.body.modifier !== undefined ? modifierOverride : 0);
+  const effectiveParse = { ...parsed, modifier };
+
+  const { rolls, total } = rollDice(effectiveParse);
+  const rolled = rolls.length === 1 ? rolls[0] : rolls;
+  const diceLabel = parsed.advantage !== null
+    ? `${parsed.count}d${parsed.sides}${modifier !== 0 ? (modifier > 0 ? "+" : "") + modifier : ""} ${parsed.advantage ? "adv" : "dis"}`
+    : `${parsed.count}d${parsed.sides}${modifier !== 0 ? (modifier > 0 ? "+" : "") + modifier : ""}`;
+
   const record: RollRecord = {
     id: randomUUID(),
     actorId,
     actorName,
-    dice: "d20",
-    modifier: modifierValue,
+    dice: diceLabel,
+    modifier,
     rolled,
-    total: rolled + modifierValue,
+    total,
+    advantage: parsed.advantage,
     note,
     timestamp: new Date().toISOString()
   };

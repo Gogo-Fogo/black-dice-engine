@@ -42,8 +42,9 @@ type RollRecord = {
   actorName: string;
   dice: string;
   modifier: number;
-  rolled: number;
+  rolled: number | number[];
   total: number;
+  advantage: boolean | null;
   note: string;
   timestamp: string;
 };
@@ -67,6 +68,7 @@ type RollRequest = {
   actorId: string;
   actorName: string;
   modifier: number;
+  dice?: string;
   note: string;
   requestId: string;
 };
@@ -147,7 +149,9 @@ export default function App() {
   const [snapshot, setSnapshot] = useState<SessionSnapshot | null>(null);
   const [selectedCharacterId, setSelectedCharacterId] = useState("");
   const [note, setNote] = useState("Perception");
+  const [dice, setDice] = useState("d20");
   const [modifier, setModifier] = useState(3);
+  const [advantage, setAdvantage] = useState<boolean | null>(null);
   const [connectionLabel, setConnectionLabel] = useState("connecting");
   const [submitting, setSubmitting] = useState(false);
   const [playerLabel, setPlayerLabel] = useState("Player");
@@ -279,16 +283,18 @@ export default function App() {
       return;
     }
 
+    const diceFinal = advantage !== null ? `${dice} ${advantage ? "adv" : "dis"}` : dice;
     const payload: RollRequest = {
       actorId: claimedCharacter.id,
       actorName: claimedCharacter.name,
       modifier,
+      dice: diceFinal,
       note,
       requestId: getOrCreatePendingRequestId(
-        `roll:${claimedCharacter.id}:${note.trim() || "Check"}:${modifier}`
+        `roll:${claimedCharacter.id}:${note.trim() || "Check"}:${diceFinal}:${modifier}`
       )
     };
-    const fingerprint = `roll:${claimedCharacter.id}:${note.trim() || "Check"}:${modifier}`;
+    const fingerprint = `roll:${claimedCharacter.id}:${note.trim() || "Check"}:${diceFinal}:${modifier}`;
 
     setSubmitting(true);
 
@@ -508,6 +514,15 @@ export default function App() {
               value={note}
               onChange={(event) => setNote(event.target.value)}
             />
+            <label className="label" htmlFor="roll-dice">
+              Dice
+            </label>
+            <input
+              id="roll-dice"
+              value={dice}
+              onChange={(event) => setDice(event.target.value)}
+              placeholder="d20"
+            />
             <label className="label" htmlFor="roll-modifier">
               Modifier
             </label>
@@ -517,8 +532,19 @@ export default function App() {
               value={modifier}
               onChange={(event) => setModifier(Number(event.target.value))}
             />
+            <div className="roll-toggle-row">
+              <button type="button" className={advantage === true ? "active" : ""} onClick={() => setAdvantage(advantage === true ? null : true)}>
+                ADV
+              </button>
+              <button type="button" className={advantage === null ? "active" : ""} onClick={() => setAdvantage(null)}>
+                NORM
+              </button>
+              <button type="button" className={advantage === false ? "active" : ""} onClick={() => setAdvantage(advantage === false ? null : false)}>
+                DIS
+              </button>
+            </div>
             <button disabled={!claimedCharacter || submitting} type="submit">
-              {submitting ? "Rolling..." : "Roll d20"}
+              {submitting ? "Rolling..." : `Roll ${dice}${advantage !== null ? (advantage ? " (adv)" : " (dis)") : ""}`}
             </button>
           </form>
         </article>
@@ -532,7 +558,7 @@ export default function App() {
               <div className="roll-row" key={roll.id}>
                 <div>
                   <strong>{roll.actorName}</strong>
-                  <p>{roll.note}</p>
+                  <p>{roll.note} — {roll.dice}</p>
                 </div>
                 <div className="roll-values">
                   <strong>{roll.total}</strong>

@@ -73,8 +73,9 @@ type RollRecord = {
   actorName: string;
   dice: string;
   modifier: number;
-  rolled: number;
+  rolled: number | number[];
   total: number;
+  advantage: boolean | null;
   note: string;
   timestamp: string;
 };
