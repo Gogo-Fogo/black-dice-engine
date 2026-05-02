@@ -26,6 +26,30 @@
       "tags": ["portrait", "character-creation", "visual-canon"]
     },
     {
+      "id": "location-study-placeholder",
+      "type": "image",
+      "label": "Location Study Placeholder",
+      "description": "Environmental still focused on layout, landmarks, and atmosphere.",
+      "runWhen": "background",
+      "visibility": "player_visible",
+      "promptTemplateId": "location-study",
+      "workflowPath": "PLACEHOLDER.txt",
+      "outputCategory": "locations",
+      "tags": ["location", "study", "environment"]
+    },
+    {
+      "id": "item-clue-placeholder",
+      "type": "image",
+      "label": "Item Or Clue Placeholder",
+      "description": "Close-up prop or clue shot for loot, relics, and handout reveals.",
+      "runWhen": "background",
+      "visibility": "player_visible",
+      "promptTemplateId": "item-clue",
+      "workflowPath": "PLACEHOLDER.txt",
+      "outputCategory": "items",
+      "tags": ["item", "clue", "prop"]
+    },
+    {
       "id": "cinematic-boss-intro-placeholder",
       "type": "video",
       "label": "Boss Intro Placeholder",

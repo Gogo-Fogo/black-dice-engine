@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "templates": [
+    {
+      "id": "scene-reveal",
+      "category": "scene",
+      "label": "Scene Reveal",
+      "purpose": "First-pass scene art for a location reveal or moody exploration beat.",
+      "positiveTemplate": "Dark cinematic tabletop RPG scene, {location}, {time_of_day}, {weather}, {tone}, practical environmental detail, grounded fantasy atmosphere, readable composition, no text, no watermark.",
+      "negativeTemplate": "text, watermark, logo, blurry anatomy, low-detail faces, modern clothing, duplicate limbs, UI overlay.",
+      "requiredFields": ["location", "time_of_day", "weather", "tone"],
+      "defaultVisibility": "player_visible",
+      "safetyNotes": [
+        "Keep prompts aligned with the campaign content rating.",
+        "Do not leak GM-only twists or hidden threats into player-visible art."
+      ]
+    },
+    {
+      "id": "portrait-variant",
+      "category": "portrait",
+      "label": "Portrait Variant",
+      "purpose": "Prep-time portrait or visual-canon generation for recurring characters.",
+      "positiveTemplate": "Portrait of {subject_name}, {role}, {distinctive_features}, {expression}, moody practical lighting, grounded dark fantasy, expressive face, consistent silhouette, no text, no watermark.",
+      "negativeTemplate": "text, watermark, celebrity likeness, copyrighted character design, extra faces, distorted hands, mismatched eyes.",
+      "requiredFields": ["subject_name", "role", "distinctive_features", "expression"],
+      "defaultVisibility": "gm_only",
+      "safetyNotes": [
+        "Avoid real player likenesses unless explicitly approved.",
+        "Keep recurring character features consistent with accepted reference packs."
+      ]
+    },
+    {
+      "id": "location-study",
+      "category": "location",
+      "label": "Location Study",
+      "purpose": "Environmental still focused on layout, landmarks, and atmosphere rather than an action beat.",
+      "positiveTemplate": "Dark fantasy location study of {location}, {landmarks}, {lighting}, {mood}, rich material texture, grounded scale cues, no text, no watermark.",
+      "negativeTemplate": "text, watermark, map labels, UI framing, modern signage, oversaturated neon, duplicated architecture.",
+      "requiredFields": ["location", "landmarks", "lighting", "mood"],
+      "defaultVisibility": "player_visible",
+      "safetyNotes": [
+        "Player-facing versions should avoid hidden rooms, unrevealed clues, or tactical spoilers."
+      ]
+    },
+    {
+      "id": "item-clue",
+      "category": "item",
+      "label": "Item Or Clue",
+      "purpose": "Close-up prop shot for clues, relics, loot, and handout-style reveals.",
+      "positiveTemplate": "Detailed close-up of {object_name}, {material_detail}, {context_detail}, dramatic side lighting, grounded dark fantasy prop study, no text, no watermark.",
+      "negativeTemplate": "text, watermark, floating UI, modern packaging, duplicate objects, toy-like proportions.",
+      "requiredFields": ["object_name", "material_detail", "context_detail"],
+      "defaultVisibility": "player_visible",
+      "safetyNotes": [
+        "Avoid copyrighted logos, proprietary setting references, or direct reproductions of published handouts."
+      ]
+    }
+  ]
+}

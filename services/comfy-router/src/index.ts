@@ -16,9 +16,22 @@ type WorkflowDefinition = {
   tags: string[];
 };
 
+type PromptTemplateDefinition = {
+  id: string;
+  category: "scene" | "portrait" | "location" | "item";
+  label: string;
+  purpose: string;
+  positiveTemplate: string;
+  negativeTemplate: string;
+  requiredFields: string[];
+  defaultVisibility: "gm_only" | "player_visible" | "public_demo";
+  safetyNotes: string[];
+};
+
 type PreparedJob = {
   id: string;
   workflowId: string;
+  promptTemplateId: string;
   type: WorkflowDefinition["type"];
   status: "prepared";
   prompt: string;
@@ -35,10 +48,16 @@ const comfyApiBase = process.env.BDE_COMFY_API_BASE?.trim() || "";
 const comfyOutputRoot = process.env.BDE_COMFY_OUTPUT_ROOT?.trim() || "";
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const workflowRegistryPath = join(currentDir, "../../../comfy-workflows/registry.json");
+const promptTemplatePath = join(currentDir, "../../../prompts/image-prompt-templates.json");
 
 type WorkflowRegistryFile = {
   version: number;
   workflows: WorkflowDefinition[];
+};
+
+type PromptTemplateFile = {
+  version: number;
+  templates: PromptTemplateDefinition[];
 };
 
 function loadWorkflowRegistry() {
@@ -52,8 +71,21 @@ function loadWorkflowRegistry() {
   return parsed;
 }
 
+function loadPromptTemplates() {
+  const raw = readFileSync(promptTemplatePath, "utf8");
+  const parsed = JSON.parse(raw) as PromptTemplateFile;
+
+  if (!Array.isArray(parsed.templates)) {
+    throw new Error("Prompt template file is missing a templates array.");
+  }
+
+  return parsed;
+}
+
 const workflowRegistryFile = loadWorkflowRegistry();
 const workflowRegistry = workflowRegistryFile.workflows;
+const promptTemplateFile = loadPromptTemplates();
+const promptTemplates = promptTemplateFile.templates;
 
 const preparedJobs: PreparedJob[] = [];
 
@@ -83,6 +115,9 @@ function prepareJob(payload: Record<string, unknown>) {
   const negativePrompt =
     typeof payload.negativePrompt === "string" ? payload.negativePrompt.trim() : undefined;
   const workflow = workflowRegistry.find((entry) => entry.id === workflowId);
+  const promptTemplate = workflow
+    ? promptTemplates.find((entry) => entry.id === workflow.promptTemplateId)
+    : null;
 
   if (!workflow) {
     return {
@@ -90,6 +125,16 @@ function prepareJob(payload: Record<string, unknown>) {
       statusCode: 404,
       body: {
         error: "Workflow not found"
+      }
+    };
+  }
+
+  if (!promptTemplate) {
+    return {
+      ok: false as const,
+      statusCode: 500,
+      body: {
+        error: "Prompt template not found for workflow"
       }
     };
   }
@@ -114,13 +159,20 @@ function prepareJob(payload: Record<string, unknown>) {
     warnings.push("No BDE_COMFY_OUTPUT_ROOT configured yet; output destination is not locked.");
   }
 
+  if (workflow.visibility !== promptTemplate.defaultVisibility) {
+    warnings.push(
+      `Workflow visibility (${workflow.visibility}) differs from template default visibility (${promptTemplate.defaultVisibility}).`
+    );
+  }
+
   const job: PreparedJob = {
     id: typeof payload.id === "string" && payload.id ? payload.id : `media-job-${Date.now().toString(36)}`,
     workflowId: workflow.id,
+    promptTemplateId: promptTemplate.id,
     type: workflow.type,
     status: "prepared",
     prompt,
-    negativePrompt,
+    negativePrompt: negativePrompt || promptTemplate.negativeTemplate,
     outputRoot: comfyOutputRoot || null,
     readyForComfySubmission: Boolean(comfyApiBase && comfyOutputRoot),
     warnings,
@@ -150,7 +202,9 @@ const server = createServer(async (request, response) => {
       port,
       mode: comfyApiBase ? "configured" : "placeholder",
       workflowRegistryVersion: workflowRegistryFile.version,
-      workflowCount: workflowRegistry.length
+      workflowCount: workflowRegistry.length,
+      promptTemplateVersion: promptTemplateFile.version,
+      promptTemplateCount: promptTemplates.length
     });
     return;
   }
@@ -160,6 +214,15 @@ const server = createServer(async (request, response) => {
       version: workflowRegistryFile.version,
       registryPath: workflowRegistryPath,
       workflows: workflowRegistry
+    });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/prompt-templates") {
+    sendJson(response, 200, {
+      version: promptTemplateFile.version,
+      templatePath: promptTemplatePath,
+      templates: promptTemplates
     });
     return;
   }

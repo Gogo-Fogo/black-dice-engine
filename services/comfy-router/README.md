@@ -14,12 +14,14 @@ Current endpoints:
 
 - `GET /health`
 - `GET /api/workflows`
+- `GET /api/prompt-templates`
 - `GET /api/jobs`
 - `POST /api/jobs/prepare`
 
 Registry format:
 
 - Workflows now live in `G:\Workspace\MyTools\Black Dice Engine\comfy-workflows\registry.json`
+- Prompt templates now live in `G:\Workspace\MyTools\Black Dice Engine\prompts\image-prompt-templates.json`
 - Each entry should define:
   - `id`
   - `type`
@@ -31,6 +33,9 @@ Registry format:
   - `workflowPath`
   - `outputCategory`
   - `tags`
+- Each prepared image job should resolve through both:
+  - a workflow entry
+  - a prompt-template entry
 
 Important notes:
 
