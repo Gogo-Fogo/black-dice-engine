@@ -8,6 +8,23 @@ import { networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
+import {
+  initDb,
+  loadTable,
+  saveTable,
+  loadRollLog,
+  saveRollLog,
+  loadEventLog,
+  saveEventLog,
+  loadMediaJobs,
+  saveMediaJobs,
+  loadMemoryEntries,
+  saveMemoryEntries,
+  loadApprovalQueue,
+  saveApprovalQueue,
+  loadAudioCues,
+  saveAudioCues
+} from "./db.js";
 
 type ServiceState = {
   name: string;
@@ -455,7 +472,11 @@ const staleClientThresholdMs = 15000;
 
 const clientSessions = new Map<string, ClientSession>();
 const recentMutationResponses = new Map<string, CachedMutationResponse>();
-const party: Character[] = [
+
+// Initialize SQLite and load persisted state
+initDb();
+
+const defaultParty: Character[] = [
   {
     id: "character-kael",
     name: "Kael",
@@ -520,27 +541,40 @@ const party: Character[] = [
   }
 ];
 
-const rollLog: RollRecord[] = [
-  {
-    id: randomUUID(),
-    actorId: "character-sera",
-    actorName: "Sera",
-    dice: "d20",
-    modifier: 4,
-    rolled: 15,
-    total: 19,
-    note: "Insight",
-    timestamp: new Date().toISOString()
-  }
-];
-const eventLog: TableEventRecord[] = [];
-const approvalQueue: StateEventProposal[] = [];
-const mediaJobs: MediaJob[] = [];
-const assetRecords: AssetRecord[] = [];
-const memoryEntries: MemoryEntry[] = [];
-const aiLogs: AiLogEntry[] = [];
-const errorEvents: ErrorEvent[] = [];
-const audioCueQueue: Array<{
+const loadedParty = loadTable<Character>("party");
+const party: Character[] = loadedParty.length ? loadedParty : defaultParty;
+
+const defaultRoll: RollRecord = {
+  id: randomUUID(),
+  actorId: "character-sera",
+  actorName: "Sera",
+  dice: "d20",
+  modifier: 4,
+  rolled: 15,
+  total: 19,
+  note: "Insight",
+  timestamp: new Date().toISOString()
+};
+
+const loadedRolls = loadRollLog<RollRecord>();
+const rollLog: RollRecord[] = loadedRolls.length ? loadedRolls : [defaultRoll];
+
+const loadedEvents = loadEventLog<TableEventRecord>();
+const eventLog: TableEventRecord[] = loadedEvents;
+
+const loadedApprovals = loadApprovalQueue<StateEventProposal>();
+const approvalQueue: StateEventProposal[] = loadedApprovals;
+
+const loadedMediaJobs = loadMediaJobs<MediaJob>();
+const mediaJobs: MediaJob[] = loadedMediaJobs;
+
+const loadedAssets = loadTable<AssetRecord>("asset_records");
+const assetRecords: AssetRecord[] = loadedAssets;
+
+const loadedMemoryEntries = loadMemoryEntries<MemoryEntry>();
+const memoryEntries: MemoryEntry[] = loadedMemoryEntries;
+
+type AudioCue = {
   id: string;
   kind: string;
   status: "queued" | "playing" | "played" | "skipped";
@@ -554,7 +588,13 @@ const audioCueQueue: Array<{
   notes?: string;
   sceneId?: string;
   createdAt: string;
-}> = [];
+};
+
+const loadedAudioCues = loadAudioCues<AudioCue>();
+const audioCueQueue: AudioCue[] = loadedAudioCues;
+
+const aiLogs: AiLogEntry[] = [];
+const errorEvents: ErrorEvent[] = [];
 
 function recordErrorEvent(entry: Omit<ErrorEvent, "id" | "createdAt">) {
   const event: ErrorEvent = {
@@ -3429,6 +3469,36 @@ setInterval(async () => {
     }
   }
 }, 5000);
+
+function persistState() {
+  try {
+    saveTable("party", party);
+    saveRollLog(rollLog);
+    saveEventLog(eventLog);
+    saveApprovalQueue(approvalQueue);
+    saveMediaJobs(mediaJobs);
+    saveTable("asset_records", assetRecords);
+    saveMemoryEntries(memoryEntries);
+    saveAudioCues(audioCueQueue);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[game-server] Failed to persist state:", message);
+  }
+}
+
+setInterval(persistState, 30000);
+
+process.on("SIGINT", () => {
+  console.log("[game-server] SIGINT received, persisting state...");
+  persistState();
+  process.exit(0);
+});
+
+process.on("SIGTERM", () => {
+  console.log("[game-server] SIGTERM received, persisting state...");
+  persistState();
+  process.exit(0);
+});
 
 server.listen(gameServerPort, host, () => {
   const gmUrl = "http://127.0.0.1:5173";
