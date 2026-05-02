@@ -397,6 +397,21 @@ type SessionSnapshot = {
   mediaJobs: MediaJob[];
   assetRecords: AssetRecord[];
   memoryEntries: MemoryEntry[];
+  audioCueQueue: Array<{
+    id: string;
+    kind: string;
+    status: string;
+    visibility: string;
+    trigger: string;
+    tags: string[];
+    loop: boolean;
+    volume: number;
+    fadeInSeconds: number;
+    fadeOutSeconds: number;
+    notes?: string;
+    sceneId?: string;
+    createdAt: string;
+  }>;
 };
 
 type SocketEnvelope =
@@ -581,6 +596,7 @@ export default function App() {
   const [audioServiceUrl, setAudioServiceUrl] = useState("");
   const [audioStatus, setAudioStatus] = useState("");
   const [errorEvents, setErrorEvents] = useState<ErrorEvent[]>([]);
+  const [audioCuePlayStatus, setAudioCuePlayStatus] = useState("");
 
   async function loadErrorEvents() {
     try {
@@ -1141,6 +1157,31 @@ export default function App() {
       setAudioPlayback(json.playbackState);
     } catch {
       // ignore
+    }
+  }
+
+  async function playAudioCue(cueId: string) {
+    setAudioCuePlayStatus("playing");
+    try {
+      const response = await fetch(`/api/audio-cues/${cueId}/play`, {
+        method: "POST",
+        signal: AbortSignal.timeout(10000)
+      });
+
+      if (!response.ok) {
+        const json = (await response.json()) as { error?: string };
+        setAudioCuePlayStatus(`failed:${json.error ?? "Unknown error"}`);
+        return;
+      }
+
+      const json = (await response.json()) as {
+        cue: Record<string, unknown>;
+        matchedTrack: { filename: string };
+      };
+      setAudioCuePlayStatus(`playing:${String(json.matchedTrack?.filename ?? "track")}`);
+      await loadAudioStatus();
+    } catch {
+      setAudioCuePlayStatus("failed:request");
     }
   }
 
@@ -2274,6 +2315,62 @@ export default function App() {
           ) : (
             <p>Audio service not configured in runtime status.</p>
           )}
+        </article>
+
+        <article className="panel">
+          <div className="panel-header">
+            <h2>Audio Cue Queue</h2>
+            <span>{snapshot?.audioCueQueue.length ?? 0} queued</span>
+          </div>
+          <p className="muted-line">
+            Scene-packet audio cues land here. The GM can trigger playback manually; auto-play on scene
+            change is not wired yet.
+          </p>
+          <div className="memory-entry-list">
+            {snapshot?.audioCueQueue.length ? (
+              snapshot.audioCueQueue.map((cue) => (
+                <div className="memory-entry-card" key={cue.id}>
+                  <div className="memory-entry-header">
+                    <strong>{cue.kind}</strong>
+                    <span className="event-pill event-memory">{cue.status}</span>
+                  </div>
+                  <p>{cue.notes ?? "No notes attached."}</p>
+                  <div className="tag-row">
+                    {cue.tags.map((tag) => (
+                      <span className="tag-chip" key={`${cue.id}-${tag}`}>
+                        {tag}
+                      </span>
+                    ))}
+                    {cue.loop ? <span className="tag-chip">loop</span> : null}
+                    <span className="tag-chip">vol: {Math.round(cue.volume * 100)}%</span>
+                  </div>
+                  <div className="approval-actions">
+                    <button
+                      className="mini-button"
+                      disabled={pendingActionKey !== "" || cue.status === "playing"}
+                      onClick={() => void playAudioCue(cue.id)}
+                      type="button"
+                    >
+                      {cue.status === "playing" ? "Playing" : "Play Cue"}
+                    </button>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p>No audio cues queued yet.</p>
+            )}
+          </div>
+          {audioCuePlayStatus ? (
+            <p className="export-note">
+              {audioCuePlayStatus === "playing"
+                ? "Starting audio cue..."
+                : audioCuePlayStatus.startsWith("playing:")
+                  ? `Playing track: ${audioCuePlayStatus.split(":")[1]}`
+                  : audioCuePlayStatus.startsWith("failed:")
+                    ? `Failed: ${audioCuePlayStatus.slice("failed:".length)}`
+                    : "Audio cue playback updated."}
+            </p>
+          ) : null}
         </article>
 
         <article className="panel">

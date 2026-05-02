@@ -385,6 +385,7 @@ type SessionSnapshot = {
   mediaJobs: MediaJob[];
   assetRecords: AssetRecord[];
   memoryEntries: MemoryEntry[];
+  audioCueQueue: typeof audioCueQueue;
 };
 
 type StateEventRequest =
@@ -539,6 +540,21 @@ const assetRecords: AssetRecord[] = [];
 const memoryEntries: MemoryEntry[] = [];
 const aiLogs: AiLogEntry[] = [];
 const errorEvents: ErrorEvent[] = [];
+const audioCueQueue: Array<{
+  id: string;
+  kind: string;
+  status: "queued" | "playing" | "played" | "skipped";
+  visibility: "gm_only" | "player_visible" | "public_demo";
+  trigger: string;
+  tags: string[];
+  loop: boolean;
+  volume: number;
+  fadeInSeconds: number;
+  fadeOutSeconds: number;
+  notes?: string;
+  sceneId?: string;
+  createdAt: string;
+}> = [];
 
 function recordErrorEvent(entry: Omit<ErrorEvent, "id" | "createdAt">) {
   const event: ErrorEvent = {
@@ -1123,7 +1139,8 @@ function getSessionSnapshot(): SessionSnapshot {
     approvalQueue,
     mediaJobs,
     assetRecords,
-    memoryEntries
+    memoryEntries,
+    audioCueQueue
   };
 }
 
@@ -2564,19 +2581,21 @@ app.post("/api/scene-packet/queue-audio", (request, response) => {
     })
     .map((cue) => ({
       id: typeof cue.id === "string" ? cue.id : `audio-cue-${Date.now().toString(36)}`,
-      kind: cue.kind ?? "ambience",
-      status: "queued",
-      visibility: cue.visibility ?? "gm_only",
-      trigger: cue.trigger ?? "manual",
-      tags: Array.isArray(cue.tags) ? cue.tags : [],
+      kind: String(cue.kind ?? "ambience"),
+      status: "queued" as const,
+      visibility: String(cue.visibility ?? "gm_only") as "gm_only" | "player_visible" | "public_demo",
+      trigger: String(cue.trigger ?? "manual"),
+      tags: Array.isArray(cue.tags) ? cue.tags.map(String) : [],
       loop: Boolean(cue.loop),
       volume: typeof cue.volume === "number" ? cue.volume : 0.7,
       fadeInSeconds: typeof cue.fadeInSeconds === "number" ? cue.fadeInSeconds : 3,
       fadeOutSeconds: typeof cue.fadeOutSeconds === "number" ? cue.fadeOutSeconds : 3,
-      notes: typeof cue.notes === "string" ? cue.notes : undefined
+      notes: typeof cue.notes === "string" ? cue.notes : undefined,
+      createdAt: new Date().toISOString()
     }));
 
   queued.forEach((cue) => {
+    audioCueQueue.unshift(cue);
     recordAiLog({
       kind: "tool_call",
       adapter: "scene_packet",
@@ -2589,6 +2608,7 @@ app.post("/api/scene-packet/queue-audio", (request, response) => {
       }
     });
   });
+  audioCueQueue.splice(24);
 
   response.json({
     ok: true,
@@ -2597,6 +2617,88 @@ app.post("/api/scene-packet/queue-audio", (request, response) => {
     validation,
     sessionSnapshot: publishSessionState()
   });
+});
+
+app.get("/api/audio-cues", (_request, response) => {
+  response.json({
+    cues: audioCueQueue
+  });
+});
+
+app.post("/api/audio-cues/:cueId/play", async (request, response) => {
+  const { cueId } = request.params;
+  const cue = audioCueQueue.find((c) => c.id === cueId);
+
+  if (!cue) {
+    response.status(404).json({ error: "Audio cue not found" });
+    return;
+  }
+
+  if (!audioServiceEndpoint) {
+    response.status(503).json({ error: "Audio service not configured" });
+    return;
+  }
+
+  // Find a matching track by tags (simple first-match strategy)
+  try {
+    const libraryRes = await fetch(`${audioServiceEndpoint}/api/library`, {
+      signal: AbortSignal.timeout(5000)
+    });
+
+    if (!libraryRes.ok) {
+      throw new Error("Failed to fetch audio library");
+    }
+
+    const library = (await libraryRes.json()) as { tracks: Array<{ id: string; tags: string[]; kind: string }> };
+    const matchingTrack = library.tracks.find((track) => {
+      const trackTags = new Set(track.tags.map((t) => t.toLowerCase()));
+      return cue.tags.some((tag) => trackTags.has(tag.toLowerCase()));
+    });
+
+    if (!matchingTrack) {
+      response.status(404).json({
+        error: "No matching audio track found for cue tags",
+        cue,
+        availableTracks: library.tracks.length
+      });
+      return;
+    }
+
+    const playRes = await fetch(`${audioServiceEndpoint}/api/play`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        trackId: matchingTrack.id,
+        loop: cue.loop,
+        volume: cue.volume
+      }),
+      signal: AbortSignal.timeout(5000)
+    });
+
+    if (!playRes.ok) {
+      throw new Error(`Audio service play failed: ${playRes.status}`);
+    }
+
+    cue.status = "playing";
+
+    response.json({
+      ok: true,
+      cue,
+      matchedTrack: matchingTrack
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    recordErrorEvent({
+      severity: "error",
+      service: "audio-service",
+      summary: `Failed to play audio cue ${cueId}`,
+      message,
+      recoveryHint: "Check that the audio service is running and that tracks with matching tags exist in the library.",
+      visibility: "gm_only",
+      correlationId: cueId
+    });
+    response.status(502).json({ error: message, cue });
+  }
 });
 
 app.get("/api/ai-logs", (_request, response) => {
