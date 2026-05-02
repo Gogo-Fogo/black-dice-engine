@@ -146,8 +146,8 @@ Goal: make failures visible and recoverable before adding heavier integrations.
 - [x] Add reconnect/resume flow.
 - [ ] Add local table PIN/session token strategy for QR join.
 - [x] Add idempotency keys for rolls and submitted actions.
-- [ ] Add error event log with visibility labels.
-- [ ] Add degraded-mode behavior for unavailable LLM, ComfyUI, audio, and import services.
+- [x] Add error event log with visibility labels.
+- [x] Add degraded-mode behavior for unavailable LLM, ComfyUI, audio, and import services.
 - [ ] Add manual backup placeholder.
 - [ ] Add session-start and session-end backup plan.
 - [ ] Add role/permission checks for GM, player, spectator, AI, and admin.

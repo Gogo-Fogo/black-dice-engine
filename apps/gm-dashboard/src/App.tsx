@@ -230,6 +230,19 @@ type AiLogEntry = {
   details: Record<string, unknown>;
 };
 
+type ErrorEvent = {
+  id: string;
+  severity: "warning" | "error" | "critical";
+  service: string;
+  summary: string;
+  message: string;
+  recoveryHint: string;
+  visibility: "gm_only" | "player_visible" | "public_demo";
+  createdAt: string;
+  resolvedAt?: string;
+  correlationId?: string;
+};
+
 type MediaJob = {
   id: string;
   campaignId: string;
@@ -567,6 +580,18 @@ export default function App() {
   const [audioPlayback, setAudioPlayback] = useState<PlaybackState | null>(null);
   const [audioServiceUrl, setAudioServiceUrl] = useState("");
   const [audioStatus, setAudioStatus] = useState("");
+  const [errorEvents, setErrorEvents] = useState<ErrorEvent[]>([]);
+
+  async function loadErrorEvents() {
+    try {
+      const response = await fetch("/api/error-events");
+      if (!response.ok) return;
+      const json = (await response.json()) as { events: ErrorEvent[] };
+      setErrorEvents(json.events);
+    } catch {
+      // ignore
+    }
+  }
 
   async function exportSessionSummary() {
     setExportStatus("exporting");
@@ -1173,6 +1198,7 @@ export default function App() {
       setSnapshot(snapshotJson);
       setCleanupReport(cleanupJson.report);
       await loadAiLogs();
+      await loadErrorEvents();
     }
 
     void load();
@@ -2565,6 +2591,38 @@ export default function App() {
               ))
             ) : (
               <p>No AI activity logged yet.</p>
+            )}
+          </div>
+        </article>
+
+        <article className="panel panel-wide">
+          <div className="panel-header">
+            <h2>Error Log</h2>
+            <span>{errorEvents.length} recent events</span>
+          </div>
+          <p className="muted-line">
+            These are service failures, degraded states, and recoverable errors the runtime detected. They are
+            GM-only so players do not see system problems during a session.
+          </p>
+          <div className="event-log">
+            {errorEvents.length ? (
+              errorEvents.map((entry) => (
+                <div className="event-row" key={entry.id}>
+                  <div>
+                    <strong>{entry.summary}</strong>
+                    <p>{entry.message}</p>
+                    <p className="helper-note">{entry.recoveryHint}</p>
+                  </div>
+                  <div className="event-meta">
+                    <span className={`event-pill ${entry.severity === "critical" ? "event-validation" : entry.severity === "error" ? "event-state" : "event-memory"}`}>
+                      {entry.severity} · {entry.service}
+                    </span>
+                    <small>{formatTime(entry.createdAt)}</small>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p>No errors logged. Services are running cleanly.</p>
             )}
           </div>
         </article>

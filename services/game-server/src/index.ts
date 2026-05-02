@@ -240,6 +240,19 @@ type AiLogEntry = {
   details: Record<string, unknown>;
 };
 
+type ErrorEvent = {
+  id: string;
+  severity: "warning" | "error" | "critical";
+  service: string;
+  summary: string;
+  message: string;
+  recoveryHint: string;
+  visibility: "gm_only" | "player_visible" | "public_demo";
+  createdAt: string;
+  resolvedAt?: string;
+  correlationId?: string;
+};
+
 type MediaJob = {
   id: string;
   campaignId: string;
@@ -525,6 +538,18 @@ const mediaJobs: MediaJob[] = [];
 const assetRecords: AssetRecord[] = [];
 const memoryEntries: MemoryEntry[] = [];
 const aiLogs: AiLogEntry[] = [];
+const errorEvents: ErrorEvent[] = [];
+
+function recordErrorEvent(entry: Omit<ErrorEvent, "id" | "createdAt">) {
+  const event: ErrorEvent = {
+    id: randomUUID(),
+    createdAt: new Date().toISOString(),
+    ...entry
+  };
+  errorEvents.unshift(event);
+  errorEvents.splice(24);
+  return event;
+}
 
 function recordAiLog(entry: Omit<AiLogEntry, "id" | "createdAt">) {
   const logEntry: AiLogEntry = {
@@ -2508,6 +2533,12 @@ app.get("/api/ai-logs", (_request, response) => {
   });
 });
 
+app.get("/api/error-events", (_request, response) => {
+  response.json({
+    events: errorEvents
+  });
+});
+
 app.get("/api/media-jobs", (_request, response) => {
   response.json({
     jobs: mediaJobs
@@ -2634,6 +2665,15 @@ app.post("/api/media-jobs/:jobId/start", async (request, response) => {
       job.status = "failed";
       job.completedAt = new Date().toISOString();
       job.error = `ComfyUI routing failed: ${message}`;
+      recordErrorEvent({
+        severity: "error",
+        service: "comfy-router",
+        summary: `Media job ${job.id} failed to submit to ComfyUI`,
+        message,
+        recoveryHint: "Check that ComfyUI is running and that BDE_COMFY_ROUTER_ENDPOINT is correct. If ComfyUI is offline, media jobs can still be driven manually.",
+        visibility: "gm_only",
+        correlationId: job.id
+      });
       response.status(200).json({
         ok: true,
         job,
@@ -3201,8 +3241,17 @@ setInterval(async () => {
       } else if (json.status === "failed") {
         finalizeMediaJobAsFailed(job, json.error || "ComfyUI job failed", "ComfyUI Router");
       }
-    } catch {
-      // Ignore polling errors for individual jobs
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      recordErrorEvent({
+        severity: "warning",
+        service: "comfy-router",
+        summary: `Polling failed for job ${job.id}`,
+        message,
+        recoveryHint: "ComfyUI may be restarting or the router may be temporarily unreachable. Polling will retry automatically.",
+        visibility: "gm_only",
+        correlationId: job.id
+      });
     }
   }
 }, 5000);
