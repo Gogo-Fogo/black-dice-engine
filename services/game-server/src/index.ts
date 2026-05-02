@@ -1744,7 +1744,7 @@ function buildScenePacket(): ScenePacket {
         status: "requested",
         prompt:
           "Dark fantasy gate at night, wet stone, black sand drifting in lanternlight, looming watchtower above, tense local reveal shot",
-        workflowId: "scene-reveal-placeholder",
+        workflowId: "scene-reveal",
         metadata: {
           shotType: "location_reveal"
         }
@@ -1845,7 +1845,7 @@ function buildCharacterVisualCanonJob(character: Character): MediaJob {
     prompt: `Character visual canon pack for ${character.name}, ${character.classLabel}, ${distinctiveFeatures}, grounded dark fantasy, consistent costume language, repeatable silhouette, no text, no watermark.`,
     negativePrompt:
       "text, watermark, celebrity likeness, copyrighted character design, inconsistent anatomy, duplicate limbs, modern clothing, mismatched faces.",
-    workflowId: "character-visual-canon-placeholder",
+    workflowId: "character-visual-canon",
     runWhen: "manual",
     createdAt: new Date().toISOString(),
     settings: {
