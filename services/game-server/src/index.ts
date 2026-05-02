@@ -230,6 +230,27 @@ type AiLogEntry = {
   details: Record<string, unknown>;
 };
 
+type MediaJob = {
+  id: string;
+  campaignId: string;
+  sceneId?: string;
+  type: "image" | "video" | "audio" | "upscale" | "interpolation";
+  status: "draft" | "queued" | "running" | "generated" | "failed" | "rejected" | "archived";
+  priority: "low" | "normal" | "high" | "session_break";
+  visibility: "gm_only" | "player_visible" | "public_demo";
+  prompt?: string;
+  negativePrompt?: string;
+  workflowId?: string;
+  linkedAssetId?: string;
+  runWhen: "now" | "background" | "session_break" | "manual";
+  outputPath?: string;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  error?: string;
+  settings: Record<string, unknown>;
+};
+
 type StateEventProposal = {
   id: string;
   createdAt: string;
@@ -286,6 +307,7 @@ type SessionSnapshot = {
   rollLog: RollRecord[];
   eventLog: TableEventRecord[];
   approvalQueue: StateEventProposal[];
+  mediaJobs: MediaJob[];
   memoryEntries: MemoryEntry[];
 };
 
@@ -431,6 +453,7 @@ const rollLog: RollRecord[] = [
 ];
 const eventLog: TableEventRecord[] = [];
 const approvalQueue: StateEventProposal[] = [];
+const mediaJobs: MediaJob[] = [];
 const memoryEntries: MemoryEntry[] = [];
 const aiLogs: AiLogEntry[] = [];
 
@@ -677,6 +700,13 @@ function getRuntimeStatus(): RuntimeStatus {
         message: `${rollLog.length} roll(s) in memory`
       },
       {
+        name: "media-queue",
+        status: mediaJobs.some((job) => job.status === "running") ? "degraded" : "ok",
+        message: mediaJobs.length
+          ? `${mediaJobs.filter((job) => job.status === "queued").length} queued / ${mediaJobs.length} tracked`
+          : "No media jobs queued yet"
+      },
+      {
         name: "local-model-adapter",
         status: localModelEndpoint ? "degraded" : "unknown",
         message: localModelEndpoint
@@ -740,6 +770,7 @@ function getSessionSnapshot(): SessionSnapshot {
     rollLog,
     eventLog,
     approvalQueue,
+    mediaJobs,
     memoryEntries
   };
 }
@@ -1286,6 +1317,61 @@ function buildScenePacket(): ScenePacket {
         notes: "Hold this under exploration until the next reveal or combat escalation."
       }
     ]
+  };
+}
+
+function buildMediaJobFromScenePacketRequest(
+  request: Record<string, unknown>,
+  packet: ScenePacket
+): MediaJob | null {
+  const type =
+    request.kind === "image" ||
+    request.kind === "video" ||
+    request.kind === "audio" ||
+    request.kind === "upscale" ||
+    request.kind === "interpolation"
+      ? request.kind
+      : null;
+  const visibility =
+    request.visibility === "gm_only" ||
+    request.visibility === "player_visible" ||
+    request.visibility === "public_demo"
+      ? request.visibility
+      : "gm_only";
+  const prompt = typeof request.prompt === "string" ? request.prompt : "";
+  const negativePrompt =
+    typeof request.negativePrompt === "string" ? request.negativePrompt : undefined;
+  const workflowId = typeof request.workflowId === "string" ? request.workflowId : undefined;
+  const linkedAssetId =
+    typeof request.linkedAssetId === "string" ? request.linkedAssetId : undefined;
+  const metadata =
+    typeof request.metadata === "object" && request.metadata !== null
+      ? (request.metadata as Record<string, unknown>)
+      : {};
+
+  if (!type || !prompt) {
+    return null;
+  }
+
+  return {
+    id: randomUUID(),
+    campaignId: packet.campaignId,
+    sceneId: packet.id,
+    type,
+    status: "queued",
+    priority: "normal",
+    visibility,
+    prompt,
+    negativePrompt,
+    workflowId,
+    linkedAssetId,
+    runWhen: type === "video" ? "session_break" : "background",
+    createdAt: new Date().toISOString(),
+    settings: {
+      ...metadata,
+      sourceRequestId: typeof request.id === "string" ? request.id : null,
+      sceneTitle: packet.sceneTitle
+    }
   };
 }
 
@@ -1851,9 +1937,74 @@ app.post("/api/scene-packet/queue-proposals", (request, response) => {
   });
 });
 
+app.post("/api/scene-packet/queue-media", (request, response) => {
+  const body = request.body as Partial<ScenePacket>;
+
+  if (!Array.isArray(body.mediaRequests)) {
+    response.status(400).json({
+      error: "mediaRequests array is required"
+    });
+    return;
+  }
+
+  const packet = body as ScenePacket;
+  const validation = validateScenePacket(packet);
+
+  if (!validation.ok) {
+    recordAiLog({
+      kind: "validation_failure",
+      adapter: "scene_packet",
+      correlationId: packet.id || "scene-packet-media",
+      summary: "Scene-packet media queue blocked by validation failure",
+      details: {
+        errors: validation.errors
+      }
+    });
+    response.status(400).json({
+      error: "Scene packet failed validation",
+      validation
+    });
+    return;
+  }
+
+  const queued = packet.mediaRequests
+    .map((entry) => buildMediaJobFromScenePacketRequest(entry, packet))
+    .filter((entry): entry is MediaJob => Boolean(entry));
+
+  queued.forEach((job) => {
+    mediaJobs.unshift(job);
+    recordAiLog({
+      kind: "tool_call",
+      adapter: "scene_packet",
+      correlationId: packet.id,
+      summary: `Queued ${job.type} media job for ${packet.sceneTitle}`,
+      details: {
+        mediaJobId: job.id,
+        workflowId: job.workflowId ?? null,
+        runWhen: job.runWhen,
+        visibility: job.visibility
+      }
+    });
+  });
+  mediaJobs.splice(12);
+
+  response.json({
+    ok: true,
+    queuedCount: queued.length,
+    validation,
+    sessionSnapshot: publishSessionState()
+  });
+});
+
 app.get("/api/ai-logs", (_request, response) => {
   response.json({
     logs: aiLogs
+  });
+});
+
+app.get("/api/media-jobs", (_request, response) => {
+  response.json({
+    jobs: mediaJobs
   });
 });
 

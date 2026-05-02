@@ -116,6 +116,19 @@ body {
   min-height: 22px;
 }
 
+.helper-note {
+  margin: 0;
+  color: #cdbb96;
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.secondary-action {
+  margin-top: 0;
+  background: linear-gradient(135deg, #3b3120 0%, #221b11 100%);
+  color: #f7ebd2;
+}
+
 .scene-packet-block {
   display: grid;
   gap: 14px;

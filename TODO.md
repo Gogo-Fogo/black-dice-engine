@@ -107,7 +107,7 @@ Goal: make AI output structured, reviewable, and grounded in campaign state.
 
 Goal: route scene images through local ComfyUI without blocking gameplay.
 
-- [ ] Add media job queue model.
+- [x] Add media job queue model.
 - [ ] Add ComfyUI router service scaffold.
 - [ ] Add workflow registry format.
 - [ ] Add image prompt templates for scenes, portraits, items, and locations.

@@ -221,6 +221,27 @@ type AiLogEntry = {
   details: Record<string, unknown>;
 };
 
+type MediaJob = {
+  id: string;
+  campaignId: string;
+  sceneId?: string;
+  type: "image" | "video" | "audio" | "upscale" | "interpolation";
+  status: "draft" | "queued" | "running" | "generated" | "failed" | "rejected" | "archived";
+  priority: "low" | "normal" | "high" | "session_break";
+  visibility: "gm_only" | "player_visible" | "public_demo";
+  prompt?: string;
+  negativePrompt?: string;
+  workflowId?: string;
+  linkedAssetId?: string;
+  runWhen: "now" | "background" | "session_break" | "manual";
+  outputPath?: string;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  error?: string;
+  settings: Record<string, unknown>;
+};
+
 type StateEventProposal = {
   id: string;
   createdAt: string;
@@ -277,6 +298,7 @@ type SessionSnapshot = {
   rollLog: RollRecord[];
   eventLog: TableEventRecord[];
   approvalQueue: StateEventProposal[];
+  mediaJobs: MediaJob[];
   memoryEntries: MemoryEntry[];
 };
 
@@ -373,6 +395,10 @@ function formatMemoryKind(value: MemoryEntry["kind"]) {
   return value.replace(/_/g, " ");
 }
 
+function formatMediaJobType(value: MediaJob["type"]) {
+  return value.replace(/_/g, " ");
+}
+
 function formatSimpleLabel(value: string) {
   return value.replace(/_/g, " ");
 }
@@ -435,6 +461,7 @@ export default function App() {
   const [scenePacket, setScenePacket] = useState<ScenePacket | null>(null);
   const [scenePacketStatus, setScenePacketStatus] = useState("");
   const [scenePacketValidation, setScenePacketValidation] = useState<ScenePacketValidation | null>(null);
+  const [mediaQueueStatus, setMediaQueueStatus] = useState("");
   const [memoryEntryStatus, setMemoryEntryStatus] = useState("");
   const [memoryEntryExportPath, setMemoryEntryExportPath] = useState("");
   const [localModelDraft, setLocalModelDraft] = useState<LocalModelAdapterDraft | null>(null);
@@ -525,6 +552,42 @@ export default function App() {
       setSnapshot(json.sessionSnapshot);
       setScenePacketValidation(json.validation);
       setScenePacketStatus(`queued:${json.queuedCount}`);
+    } finally {
+      setPendingActionKey("");
+    }
+  }
+
+  async function queueScenePacketMediaJobs() {
+    if (!scenePacket) {
+      return;
+    }
+
+    setPendingActionKey("scene-packet-media");
+    setMediaQueueStatus("queueing");
+    try {
+      const response = await fetch("/api/scene-packet/queue-media", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(scenePacket)
+      });
+
+      if (!response.ok) {
+        setMediaQueueStatus("failed");
+        return;
+      }
+
+      const json = (await response.json()) as {
+        sessionSnapshot: SessionSnapshot;
+        queuedCount: number;
+        validation: ScenePacketValidation;
+      };
+      setSnapshot(json.sessionSnapshot);
+      setScenePacketValidation(json.validation);
+      setMediaQueueStatus(`queued:${json.queuedCount}`);
+    } catch {
+      setMediaQueueStatus("failed");
     } finally {
       setPendingActionKey("");
     }
@@ -1320,6 +1383,10 @@ export default function App() {
             <div className="scene-packet-block">
               <strong>{scenePacket.sceneTitle}</strong>
               <p>{scenePacket.summary}</p>
+              <p className="helper-note">
+                Use in order: generate the packet, queue any risky state or media work you want to keep, then
+                run the local/director drafts against that packet.
+              </p>
               <div className="packet-meta-grid">
                 <div>
                   <span>Beats</span>
@@ -1379,10 +1446,67 @@ export default function App() {
               >
                 Queue Proposed State Events
               </button>
+              <button
+                className="export-button secondary-action"
+                disabled={
+                  pendingActionKey !== "" ||
+                  !scenePacket.mediaRequests.length ||
+                  scenePacketValidation?.ok === false
+                }
+                onClick={() => void queueScenePacketMediaJobs()}
+                type="button"
+              >
+                Queue Media Jobs
+              </button>
+              {mediaQueueStatus ? (
+                <p className="export-note">
+                  {mediaQueueStatus === "queueing"
+                    ? "Queueing media jobs..."
+                    : mediaQueueStatus.startsWith("queued:")
+                      ? `${mediaQueueStatus.split(":")[1]} media job(s) added to the queue.`
+                      : "Media jobs failed to queue."}
+                </p>
+              ) : null}
             </div>
           ) : (
             <p>No scene packet generated yet.</p>
           )}
+        </article>
+
+        <article className="panel">
+          <div className="panel-header">
+            <h2>Media Job Queue</h2>
+            <span>{snapshot?.mediaJobs.length ?? 0} tracked</span>
+          </div>
+          <p className="muted-line">
+            These jobs are the async visual or audio work hanging off scene packets. They are local queue entries
+            for now, not a full ComfyUI execution pipeline yet.
+          </p>
+          <div className="memory-entry-list">
+            {snapshot?.mediaJobs.length ? (
+              snapshot.mediaJobs.map((job) => (
+                <div className="memory-entry-card" key={job.id}>
+                  <div className="memory-entry-header">
+                    <strong>{formatMediaJobType(job.type)}</strong>
+                    <span className="event-pill event-memory">{job.status}</span>
+                  </div>
+                  <p>{job.prompt ?? "No prompt attached."}</p>
+                  <div className="memory-entry-meta">
+                    <span>{formatVisibilityLabel(job.visibility)}</span>
+                    <span>{job.priority}</span>
+                    <span>{job.runWhen}</span>
+                    <span>{formatTime(job.createdAt)}</span>
+                  </div>
+                  <div className="tag-row">
+                    {job.workflowId ? <span className="tag-chip">workflow: {job.workflowId}</span> : null}
+                    {job.sceneId ? <span className="tag-chip">scene: {job.sceneId}</span> : null}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p>No queued media jobs yet.</p>
+            )}
+          </div>
         </article>
 
         <article className="panel">
