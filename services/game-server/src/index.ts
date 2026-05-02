@@ -798,6 +798,45 @@ app.use(cors());
 app.use(express.json());
 app.use("/player", express.static(playerCompanionDistDir));
 
+function extractRoleFromRequest(request: express.Request): ClientSession["role"] {
+  const headerRole = request.headers["x-bde-role"];
+  const queryRole = request.query.role;
+  let raw: string;
+
+  if (typeof headerRole === "string") {
+    raw = headerRole;
+  } else if (typeof queryRole === "string") {
+    raw = queryRole;
+  } else if (Array.isArray(queryRole) && typeof queryRole[0] === "string") {
+    raw = queryRole[0];
+  } else {
+    raw = "spectator";
+  }
+
+  const normalized = raw.toLowerCase().trim();
+
+  if (["gm", "player", "spectator", "ai", "admin"].includes(normalized)) {
+    return normalized as ClientSession["role"];
+  }
+
+  return "spectator";
+}
+
+function requireRole(...allowed: ClientSession["role"][]) {
+  return (request: express.Request, response: express.Response, next: express.NextFunction) => {
+    const role = extractRoleFromRequest(request);
+
+    if (!allowed.includes(role)) {
+      response.status(403).json({
+        error: `This action requires one of these roles: ${allowed.join(", ")}. Your role is ${role}.`
+      });
+      return;
+    }
+
+    next();
+  };
+}
+
 function getMediaPressure() {
   const runningJobs = mediaJobs.filter((job) => job.status === "running");
   const queuedJobs = mediaJobs.filter((job) => job.status === "queued");
@@ -2295,7 +2334,7 @@ app.get("/api/session-summary.md", (_request, response) => {
   response.send(markdown);
 });
 
-app.get("/api/scene-packet", (_request, response) => {
+app.get("/api/scene-packet", requireRole("gm", "admin"), (_request, response) => {
   const packet = buildScenePacket();
   recordAiLog({
     kind: "input_packet",
@@ -2315,7 +2354,7 @@ app.get("/api/scene-packet", (_request, response) => {
   });
 });
 
-app.post("/api/local-model/draft", (request, response) => {
+app.post("/api/local-model/draft", requireRole("gm", "admin"), (request, response) => {
   const body = request.body as { packet?: ScenePacket } | undefined;
   const packet = body?.packet ?? buildScenePacket();
   const validation = validateScenePacket(packet);
@@ -2368,7 +2407,7 @@ app.post("/api/local-model/draft", (request, response) => {
   });
 });
 
-app.post("/api/director-mode/draft", (request, response) => {
+app.post("/api/director-mode/draft", requireRole("gm", "admin"), (request, response) => {
   const body = request.body as { packet?: ScenePacket } | undefined;
   const packet = body?.packet ?? buildScenePacket();
   const validation = validateScenePacket(packet);
@@ -2420,7 +2459,7 @@ app.post("/api/director-mode/draft", (request, response) => {
   });
 });
 
-app.post("/api/memory-entries", (_request, response) => {
+app.post("/api/memory-entries", requireRole("gm", "admin"), (_request, response) => {
   const { entry, exportPath } = buildMemoryEntry();
   memoryEntries.unshift(entry);
   memoryEntries.splice(8);
@@ -2449,7 +2488,7 @@ app.post("/api/memory-entries", (_request, response) => {
   });
 });
 
-app.post("/api/scene-packet/queue-proposals", (request, response) => {
+app.post("/api/scene-packet/queue-proposals", requireRole("gm", "admin"), (request, response) => {
   const body = request.body as Partial<ScenePacket>;
 
   if (!Array.isArray(body.proposedStateEvents)) {
@@ -2525,7 +2564,7 @@ app.post("/api/scene-packet/queue-proposals", (request, response) => {
   });
 });
 
-app.post("/api/scene-packet/queue-media", (request, response) => {
+app.post("/api/scene-packet/queue-media", requireRole("gm", "admin"), (request, response) => {
   const body = request.body as Partial<ScenePacket>;
 
   if (!Array.isArray(body.mediaRequests)) {
@@ -2584,7 +2623,7 @@ app.post("/api/scene-packet/queue-media", (request, response) => {
   });
 });
 
-app.post("/api/scene-packet/queue-audio", (request, response) => {
+app.post("/api/scene-packet/queue-audio", requireRole("gm", "admin"), (request, response) => {
   const body = request.body as Partial<ScenePacket>;
 
   if (!Array.isArray(body.audioCues)) {
@@ -2659,14 +2698,14 @@ app.post("/api/scene-packet/queue-audio", (request, response) => {
   });
 });
 
-app.get("/api/audio-cues", (_request, response) => {
+app.get("/api/audio-cues", requireRole("gm", "admin", "player"), (_request, response) => {
   response.json({
     cues: audioCueQueue
   });
 });
 
-app.post("/api/audio-cues/:cueId/play", async (request, response) => {
-  const { cueId } = request.params;
+app.post("/api/audio-cues/:cueId/play", requireRole("gm", "admin"), async (request, response) => {
+  const cueId = String(request.params.cueId);
   const cue = audioCueQueue.find((c) => c.id === cueId);
 
   if (!cue) {
@@ -2741,19 +2780,19 @@ app.post("/api/audio-cues/:cueId/play", async (request, response) => {
   }
 });
 
-app.get("/api/ai-logs", (_request, response) => {
+app.get("/api/ai-logs", requireRole("gm", "admin"), (_request, response) => {
   response.json({
     logs: aiLogs
   });
 });
 
-app.get("/api/error-events", (_request, response) => {
+app.get("/api/error-events", requireRole("gm", "admin"), (_request, response) => {
   response.json({
     events: errorEvents
   });
 });
 
-app.get("/api/media-jobs", (_request, response) => {
+app.get("/api/media-jobs", requireRole("gm", "admin"), (_request, response) => {
   response.json({
     jobs: mediaJobs
   });
@@ -2765,14 +2804,14 @@ app.get("/api/assets", (_request, response) => {
   });
 });
 
-app.get("/api/media-cleanup-report", (_request, response) => {
+app.get("/api/media-cleanup-report", requireRole("gm", "admin"), (_request, response) => {
   response.json({
     report: buildCleanupReport()
   });
 });
 
-app.post("/api/characters/:characterId/visual-canon-job", (request, response) => {
-  const character = resolveCharacter(request.params.characterId);
+app.post("/api/characters/:characterId/visual-canon-job", requireRole("gm", "admin"), (request, response) => {
+  const character = resolveCharacter(String(request.params.characterId));
 
   if (!character) {
     response.status(404).json({
@@ -2804,7 +2843,7 @@ app.post("/api/characters/:characterId/visual-canon-job", (request, response) =>
   });
 });
 
-app.post("/api/media-jobs/:jobId/start", async (request, response) => {
+app.post("/api/media-jobs/:jobId/start", requireRole("gm", "admin"), async (request, response) => {
   const { jobId } = request.params;
   const job = mediaJobs.find((entry) => entry.id === jobId);
 
@@ -2941,7 +2980,7 @@ app.post("/api/media-jobs/:jobId/start", async (request, response) => {
   });
 });
 
-app.post("/api/media-jobs/:jobId/fail", (request, response) => {
+app.post("/api/media-jobs/:jobId/fail", requireRole("gm", "admin"), (request, response) => {
   const { jobId } = request.params;
   const job = mediaJobs.find((entry) => entry.id === jobId);
 
@@ -2966,7 +3005,7 @@ app.post("/api/media-jobs/:jobId/fail", (request, response) => {
   });
 });
 
-app.post("/api/media-jobs/:jobId/mark-generated", (request, response) => {
+app.post("/api/media-jobs/:jobId/mark-generated", requireRole("gm", "admin"), (request, response) => {
   const { jobId } = request.params;
   const job = mediaJobs.find((entry) => entry.id === jobId);
 
@@ -2986,11 +3025,11 @@ app.post("/api/media-jobs/:jobId/mark-generated", (request, response) => {
   });
 });
 
-app.get("/api/state-event-queue", (_request, response) => {
+app.get("/api/state-event-queue", requireRole("gm", "admin"), (_request, response) => {
   response.json(approvalQueue);
 });
 
-app.post("/api/state-events/propose", (request, response) => {
+app.post("/api/state-events/propose", requireRole("gm", "player", "admin"), (request, response) => {
   const body = request.body as Partial<StateEventRequest> & {
     submittedBy?: { id?: string; kind?: string; label?: string };
   };
@@ -3045,8 +3084,8 @@ app.post("/api/state-events/propose", (request, response) => {
   response.status(201).json(result);
 });
 
-app.post("/api/state-events/:proposalId/approve", (request, response) => {
-  const proposalIndex = approvalQueue.findIndex((entry) => entry.id === request.params.proposalId);
+app.post("/api/state-events/:proposalId/approve", requireRole("gm", "admin"), (request, response) => {
+  const proposalIndex = approvalQueue.findIndex((entry) => entry.id === String(request.params.proposalId));
 
   if (proposalIndex === -1) {
     response.status(404).json({
@@ -3086,8 +3125,8 @@ app.post("/api/state-events/:proposalId/approve", (request, response) => {
   });
 });
 
-app.post("/api/state-events/:proposalId/reject", (request, response) => {
-  const proposalIndex = approvalQueue.findIndex((entry) => entry.id === request.params.proposalId);
+app.post("/api/state-events/:proposalId/reject", requireRole("gm", "admin"), (request, response) => {
+  const proposalIndex = approvalQueue.findIndex((entry) => entry.id === String(request.params.proposalId));
 
   if (proposalIndex === -1) {
     response.status(404).json({
@@ -3119,7 +3158,7 @@ app.post("/api/state-events/:proposalId/reject", (request, response) => {
   });
 });
 
-app.post("/api/state-events", (request, response) => {
+app.post("/api/state-events", requireRole("gm", "admin"), (request, response) => {
   const body = request.body as Partial<StateEventRequest>;
   const requestId = typeof body.requestId === "string" ? body.requestId.trim() : "";
 
@@ -3148,7 +3187,7 @@ app.post("/api/state-events", (request, response) => {
   response.status(applied.statusCode).json(applied.body);
 });
 
-app.post("/api/claim-character", (request, response) => {
+app.post("/api/claim-character", requireRole("player", "gm", "admin"), (request, response) => {
   const clientId = typeof request.body.clientId === "string" ? request.body.clientId.trim() : "";
   const characterId = typeof request.body.characterId === "string" ? request.body.characterId.trim() : "";
   const requestId = typeof request.body.requestId === "string" ? request.body.requestId.trim() : "";
@@ -3226,7 +3265,7 @@ app.post("/api/claim-character", (request, response) => {
   response.json(result);
 });
 
-app.post("/api/release-character", (request, response) => {
+app.post("/api/release-character", requireRole("player", "gm", "admin"), (request, response) => {
   const clientId = typeof request.body.clientId === "string" ? request.body.clientId.trim() : "";
   const requestId = typeof request.body.requestId === "string" ? request.body.requestId.trim() : "";
 
@@ -3282,7 +3321,7 @@ app.post("/api/release-character", (request, response) => {
   response.json(result);
 });
 
-app.post("/api/rolls", (request, response) => {
+app.post("/api/rolls", requireRole("player", "gm", "admin"), (request, response) => {
   const actorId = typeof request.body.actorId === "string" ? request.body.actorId : "";
   const actorName = typeof request.body.actorName === "string" ? request.body.actorName : "";
   const requestId = typeof request.body.requestId === "string" ? request.body.requestId.trim() : "";

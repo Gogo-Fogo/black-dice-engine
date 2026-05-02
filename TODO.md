@@ -150,7 +150,7 @@ Goal: make failures visible and recoverable before adding heavier integrations.
 - [x] Add degraded-mode behavior for unavailable LLM, ComfyUI, audio, and import services.
 - [x] Add manual backup placeholder.
 - [x] Add session-start and session-end backup plan.
-- [ ] Add role/permission checks for GM, player, spectator, AI, and admin.
+- [x] Add role/permission checks for GM, player, spectator, AI, and admin.
 
 ### Milestone 1.0: First Portfolio Demo
 
