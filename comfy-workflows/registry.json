@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "workflows": [
+    {
+      "id": "scene-reveal-placeholder",
+      "type": "image",
+      "label": "Scene Reveal Placeholder",
+      "description": "First-pass scene still for a location reveal or moody exploration beat.",
+      "runWhen": "background",
+      "visibility": "player_visible",
+      "promptTemplateId": "scene-reveal",
+      "workflowPath": "PLACEHOLDER.txt",
+      "outputCategory": "scenes",
+      "tags": ["scene", "location", "lantern-gate"]
+    },
+    {
+      "id": "portrait-variant-placeholder",
+      "type": "image",
+      "label": "Portrait Variant Placeholder",
+      "description": "Prep-time portrait variant or character visual-canon pass.",
+      "runWhen": "manual",
+      "visibility": "gm_only",
+      "promptTemplateId": "portrait-variant",
+      "workflowPath": "PLACEHOLDER.txt",
+      "outputCategory": "portraits",
+      "tags": ["portrait", "character-creation", "visual-canon"]
+    },
+    {
+      "id": "cinematic-boss-intro-placeholder",
+      "type": "video",
+      "label": "Boss Intro Placeholder",
+      "description": "Session-break cinematic clip scaffold for major reveals.",
+      "runWhen": "session_break",
+      "visibility": "player_visible",
+      "promptTemplateId": "boss-intro",
+      "workflowPath": "PLACEHOLDER.txt",
+      "outputCategory": "cinematics",
+      "tags": ["boss", "cinematic", "video"]
+    }
+  ]
+}

@@ -17,6 +17,21 @@ Current endpoints:
 - `GET /api/jobs`
 - `POST /api/jobs/prepare`
 
+Registry format:
+
+- Workflows now live in `G:\Workspace\MyTools\Black Dice Engine\comfy-workflows\registry.json`
+- Each entry should define:
+  - `id`
+  - `type`
+  - `label`
+  - `description`
+  - `runWhen`
+  - `visibility`
+  - `promptTemplateId`
+  - `workflowPath`
+  - `outputCategory`
+  - `tags`
+
 Important notes:
 
 - This service is still a scaffold, not a full ComfyUI executor.

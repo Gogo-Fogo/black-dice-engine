@@ -1,4 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 type WorkflowDefinition = {
   id: string;
@@ -6,6 +9,11 @@ type WorkflowDefinition = {
   label: string;
   description: string;
   runWhen: "background" | "session_break" | "manual";
+  visibility: "gm_only" | "player_visible" | "public_demo";
+  promptTemplateId: string;
+  workflowPath: string;
+  outputCategory: string;
+  tags: string[];
 };
 
 type PreparedJob = {
@@ -25,30 +33,27 @@ const host = process.env.BDE_HOST ?? "0.0.0.0";
 const port = Number(process.env.BDE_COMFY_ROUTER_PORT ?? 4320);
 const comfyApiBase = process.env.BDE_COMFY_API_BASE?.trim() || "";
 const comfyOutputRoot = process.env.BDE_COMFY_OUTPUT_ROOT?.trim() || "";
+const currentDir = dirname(fileURLToPath(import.meta.url));
+const workflowRegistryPath = join(currentDir, "../../../comfy-workflows/registry.json");
 
-const workflowRegistry: WorkflowDefinition[] = [
-  {
-    id: "scene-reveal-placeholder",
-    type: "image",
-    label: "Scene Reveal Placeholder",
-    description: "First-pass scene still for a location reveal or moody exploration beat.",
-    runWhen: "background"
-  },
-  {
-    id: "portrait-variant-placeholder",
-    type: "image",
-    label: "Portrait Variant Placeholder",
-    description: "Prep-time portrait variant or character visual-canon pass.",
-    runWhen: "manual"
-  },
-  {
-    id: "cinematic-boss-intro-placeholder",
-    type: "video",
-    label: "Boss Intro Placeholder",
-    description: "Session-break cinematic clip scaffold for major reveals.",
-    runWhen: "session_break"
+type WorkflowRegistryFile = {
+  version: number;
+  workflows: WorkflowDefinition[];
+};
+
+function loadWorkflowRegistry() {
+  const raw = readFileSync(workflowRegistryPath, "utf8");
+  const parsed = JSON.parse(raw) as WorkflowRegistryFile;
+
+  if (!Array.isArray(parsed.workflows)) {
+    throw new Error("Workflow registry is missing a workflows array.");
   }
-];
+
+  return parsed;
+}
+
+const workflowRegistryFile = loadWorkflowRegistry();
+const workflowRegistry = workflowRegistryFile.workflows;
 
 const preparedJobs: PreparedJob[] = [];
 
@@ -143,13 +148,17 @@ const server = createServer(async (request, response) => {
       ok: true,
       service: "comfy-router",
       port,
-      mode: comfyApiBase ? "configured" : "placeholder"
+      mode: comfyApiBase ? "configured" : "placeholder",
+      workflowRegistryVersion: workflowRegistryFile.version,
+      workflowCount: workflowRegistry.length
     });
     return;
   }
 
   if (request.method === "GET" && url.pathname === "/api/workflows") {
     sendJson(response, 200, {
+      version: workflowRegistryFile.version,
+      registryPath: workflowRegistryPath,
       workflows: workflowRegistry
     });
     return;
