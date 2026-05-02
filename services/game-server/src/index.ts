@@ -197,6 +197,29 @@ type LocalModelAdapterDraft = {
   };
 };
 
+type DirectorModeAdapterDraft = {
+  adapter: {
+    mode: "placeholder";
+    provider: "chatgpt_director";
+    enabled: boolean;
+    model: string | null;
+  };
+  request: {
+    scenePacketId: string;
+    sceneTitle: string;
+    promptPreview: string;
+    contextSummary: string;
+    memoryEntryCount: number;
+    pendingApprovalCount: number;
+  };
+  response: {
+    directorGuidance: string;
+    revealPlan: string[];
+    canonizationNotes: string[];
+    escalationWarning: string | null;
+  };
+};
+
 type StateEventProposal = {
   id: string;
   createdAt: string;
@@ -301,12 +324,14 @@ const host = process.env.BDE_HOST ?? "0.0.0.0";
 const gameServerPort = Number(process.env.BDE_GAME_SERVER_PORT ?? 4310);
 const playerCompanionPort = Number(process.env.BDE_PLAYER_COMPANION_PORT ?? 4311);
 const localModelEndpoint = process.env.BDE_LOCAL_MODEL_ENDPOINT?.trim() || "";
+const directorModeModel = process.env.BDE_DIRECTOR_MODE_MODEL?.trim() || "";
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const playerCompanionDistDir = join(currentDir, "../../../apps/player-companion/dist");
 const sessionSummaryExportDir = join(currentDir, "../../../_exports/session-summaries");
 const memoryEntryExportDir = join(currentDir, "../../../_exports/memory-entries");
 const sampleCampaignDir = join(currentDir, "../../../campaigns/sample-campaign");
 const gmSystemPromptPath = join(currentDir, "../../../prompts/gm-system-prompt.md");
+const directorPromptPath = join(currentDir, "../../../prompts/director-prompt.md");
 
 const app = express();
 const server = createServer(app);
@@ -624,6 +649,13 @@ function getRuntimeStatus(): RuntimeStatus {
         message: localModelEndpoint
           ? `Placeholder adapter ready for ${localModelEndpoint}`
           : "No local model endpoint configured yet; placeholder mode only"
+      },
+      {
+        name: "director-mode-adapter",
+        status: directorModeModel ? "degraded" : "unknown",
+        message: directorModeModel
+          ? `Placeholder director ready for ${directorModeModel}`
+          : "No director model configured yet; placeholder mode only"
       }
     ],
     clients,
@@ -1246,6 +1278,7 @@ function buildLocalModelAdapterDraft(scenePacket: ScenePacket): LocalModelAdapte
     scenePacket.beats.find((beat) => beat.kind === "choice")?.text ??
     "Offer a meaningful player choice before resolving the scene.";
 
+  const queuedPacketEvents = scenePacket.proposedStateEvents.length;
   return {
     adapter: {
       mode: "placeholder",
@@ -1276,8 +1309,61 @@ function buildLocalModelAdapterDraft(scenePacket: ScenePacket): LocalModelAdapte
       suggestedNextBeat:
         scenePacket.beats.find((beat) => beat.kind === "consequence")?.text ??
         "Escalate with a consequence only after the players commit to an approach.",
-      riskyStateChangeWarning: scenePacket.proposedStateEvents.length
-        ? "This draft includes proposed state changes that should stay in the GM approval queue until reviewed."
+      riskyStateChangeWarning: queuedPacketEvents
+        ? `${queuedPacketEvents} proposed state change(s) are attached to this packet. Keep them in the GM approval flow before treating them as canon. Current approval queue: ${snapshot.approvalQueue.length}.`
+        : null
+    }
+  };
+}
+
+function buildDirectorModeAdapterDraft(scenePacket: ScenePacket): DirectorModeAdapterDraft {
+  const snapshot = getSessionSnapshot();
+  const promptPreview = readFileSync(directorPromptPath, "utf8")
+    .split(/\r?\n/)
+    .filter((line) => line.trim())
+    .slice(0, 8)
+    .join(" ");
+  const matchedFactTexts = snapshot.activeSceneContext.facts.map((fact) => fact.text).slice(0, 2);
+  const unresolvedApprovals = snapshot.approvalQueue.length;
+
+  return {
+    adapter: {
+      mode: "placeholder",
+      provider: "chatgpt_director",
+      enabled: Boolean(directorModeModel),
+      model: directorModeModel || null
+    },
+    request: {
+      scenePacketId: scenePacket.id,
+      sceneTitle: scenePacket.sceneTitle,
+      promptPreview,
+      contextSummary: [
+        `Campaign: ${snapshot.campaignTitle}`,
+        `Scene: ${snapshot.currentScene}`,
+        `Tone: ${snapshot.activeSceneContext.tone.join(", ")}`,
+        matchedFactTexts.length ? `Matched facts: ${matchedFactTexts.join(" | ")}` : "Matched facts: none"
+      ].join(" || "),
+      memoryEntryCount: snapshot.memoryEntries.length,
+      pendingApprovalCount: unresolvedApprovals
+    },
+    response: {
+      directorGuidance:
+        "Keep the next beat focused on the watch-station tension, reinforce the coastal survival tone, and avoid resolving the deeper signal mystery in a single turn.",
+      revealPlan: [
+        "Let the table confirm whether the tower mechanism or the bell rope is the immediate point of interest.",
+        "Hold the wider cause of the signal disturbance until after a player-led investigation beat.",
+        "Use a small consequence before any major reveal if the party pushes the ascent recklessly."
+      ],
+      canonizationNotes: [
+        snapshot.memoryEntries.length
+          ? "Use the latest memory entries as the first canonization source before inventing fresh summary text."
+          : "No saved memory entries exist yet; canonization will rely on current table state only.",
+        unresolvedApprovals
+          ? "Do not canonize pending approval outcomes as settled history."
+          : "No pending approval outcomes are currently blocking canonization."
+      ],
+      escalationWarning: unresolvedApprovals
+        ? `${unresolvedApprovals} approval item(s) are still unresolved, so director-mode guidance should avoid assuming those outcomes are permanent.`
         : null
     }
   };
@@ -1527,6 +1613,26 @@ app.post("/api/local-model/draft", (request, response) => {
     ok: true,
     validation,
     draft: buildLocalModelAdapterDraft(packet)
+  });
+});
+
+app.post("/api/director-mode/draft", (request, response) => {
+  const body = request.body as { packet?: ScenePacket } | undefined;
+  const packet = body?.packet ?? buildScenePacket();
+  const validation = validateScenePacket(packet);
+
+  if (!validation.ok) {
+    response.status(400).json({
+      error: "Scene packet failed validation",
+      validation
+    });
+    return;
+  }
+
+  response.json({
+    ok: true,
+    validation,
+    draft: buildDirectorModeAdapterDraft(packet)
   });
 });
 

@@ -100,7 +100,7 @@ Goal: make AI output structured, reviewable, and grounded in campaign state.
 - [x] Add memory-entry creation after scenes.
 - [x] Add campaign bible and active-scene context injection.
 - [x] Add local model adapter placeholder.
-- [ ] Add optional ChatGPT/director-mode adapter placeholder.
+- [x] Add optional ChatGPT/director-mode adapter placeholder.
 - [ ] Add logging for AI input packets, output packets, tool calls, and validation failures.
 
 ### Milestone 0.6: Local Media Pipeline

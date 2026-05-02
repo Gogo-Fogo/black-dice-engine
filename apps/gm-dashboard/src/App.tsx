@@ -188,6 +188,29 @@ type LocalModelAdapterDraft = {
   };
 };
 
+type DirectorModeAdapterDraft = {
+  adapter: {
+    mode: "placeholder";
+    provider: "chatgpt_director";
+    enabled: boolean;
+    model: string | null;
+  };
+  request: {
+    scenePacketId: string;
+    sceneTitle: string;
+    promptPreview: string;
+    contextSummary: string;
+    memoryEntryCount: number;
+    pendingApprovalCount: number;
+  };
+  response: {
+    directorGuidance: string;
+    revealPlan: string[];
+    canonizationNotes: string[];
+    escalationWarning: string | null;
+  };
+};
+
 type StateEventProposal = {
   id: string;
   createdAt: string;
@@ -406,6 +429,8 @@ export default function App() {
   const [memoryEntryExportPath, setMemoryEntryExportPath] = useState("");
   const [localModelDraft, setLocalModelDraft] = useState<LocalModelAdapterDraft | null>(null);
   const [localModelStatus, setLocalModelStatus] = useState("");
+  const [directorDraft, setDirectorDraft] = useState<DirectorModeAdapterDraft | null>(null);
+  const [directorStatus, setDirectorStatus] = useState("");
 
   async function exportSessionSummary() {
     setExportStatus("exporting");
@@ -550,6 +575,38 @@ export default function App() {
       setLocalModelStatus("ready");
     } catch {
       setLocalModelStatus("failed");
+    } finally {
+      setPendingActionKey("");
+    }
+  }
+
+  async function runDirectorModeDraft() {
+    setPendingActionKey("director-mode-draft");
+    setDirectorStatus("running");
+
+    try {
+      const response = await fetch("/api/director-mode/draft", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(scenePacket ? { packet: scenePacket } : {})
+      });
+
+      if (!response.ok) {
+        setDirectorStatus("failed");
+        return;
+      }
+
+      const json = (await response.json()) as {
+        draft: DirectorModeAdapterDraft;
+        validation: ScenePacketValidation;
+      };
+      setDirectorDraft(json.draft);
+      setScenePacketValidation(json.validation);
+      setDirectorStatus("ready");
+    } catch {
+      setDirectorStatus("failed");
     } finally {
       setPendingActionKey("");
     }
@@ -1426,6 +1483,83 @@ export default function App() {
             </div>
           ) : (
             <p>No local-model draft run yet.</p>
+          )}
+        </article>
+
+        <article className="panel">
+          <div className="panel-header">
+            <h2>Director Mode Adapter</h2>
+            <span>{directorDraft?.adapter.mode ?? "placeholder"}</span>
+          </div>
+          <button
+            className="export-button"
+            disabled={pendingActionKey !== ""}
+            onClick={() => void runDirectorModeDraft()}
+            type="button"
+          >
+            Run Director Mode Draft
+          </button>
+          {directorStatus ? (
+            <p className="export-note">
+              {directorStatus === "running"
+                ? "Preparing director-mode draft..."
+                : directorStatus === "ready"
+                  ? directorDraft?.adapter.enabled
+                    ? `Placeholder director contract built for ${directorDraft.adapter.model}`
+                    : "Placeholder director contract built with no director model configured yet."
+                  : "Director-mode draft failed."}
+            </p>
+          ) : null}
+          {directorDraft ? (
+            <div className="context-block">
+              <div className="packet-meta-grid">
+                <div>
+                  <span>Scene Packet</span>
+                  <strong>{directorDraft.request.sceneTitle}</strong>
+                </div>
+                <div>
+                  <span>Memory / Approvals</span>
+                  <strong>
+                    {directorDraft.request.memoryEntryCount} / {directorDraft.request.pendingApprovalCount}
+                  </strong>
+                </div>
+              </div>
+              <div className="context-row">
+                <strong>Prompt Preview</strong>
+                <p>{directorDraft.request.promptPreview}</p>
+              </div>
+              <div className="context-row">
+                <strong>Context Summary</strong>
+                <p>{directorDraft.request.contextSummary}</p>
+              </div>
+              <div className="context-row">
+                <strong>Director Guidance</strong>
+                <p>{directorDraft.response.directorGuidance}</p>
+              </div>
+              <div className="context-list">
+                {directorDraft.response.revealPlan.map((step) => (
+                  <div className="context-row" key={step}>
+                    <strong>Reveal Plan</strong>
+                    <p>{step}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="context-list">
+                {directorDraft.response.canonizationNotes.map((note) => (
+                  <div className="context-row" key={note}>
+                    <strong>Canonization Note</strong>
+                    <p>{note}</p>
+                  </div>
+                ))}
+              </div>
+              {directorDraft.response.escalationWarning ? (
+                <div className="validation-list">
+                  <p>{directorDraft.response.escalationWarning}</p>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <p>No director-mode draft run yet.</p>
           )}
         </article>
 
