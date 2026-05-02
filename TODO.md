@@ -137,19 +137,19 @@ Goal: add music, ambience, and stingers without slowing live play.
 
 Goal: make failures visible and recoverable before adding heavier integrations.
 
-- [ ] Add runtime service scaffold.
-- [ ] Add `/health` endpoint.
-- [ ] Add runtime status object.
-- [ ] Add service health checks for game server, dice, state, memory, media, audio, and model adapters.
-- [ ] Add GM dashboard status strip.
+- [x] Add runtime service scaffold.
+- [x] Add `/health` endpoint.
+- [x] Add runtime status object.
+- [x] Add service health checks for game server, dice, state, memory, media, audio, and model adapters.
+- [x] Add GM dashboard status strip.
 - [x] Add player client heartbeat.
 - [x] Add reconnect/resume flow.
-- [ ] Add local table PIN/session token strategy for QR join.
+- [x] Add local table PIN/session token strategy for QR join.
 - [x] Add idempotency keys for rolls and submitted actions.
 - [x] Add error event log with visibility labels.
 - [x] Add degraded-mode behavior for unavailable LLM, ComfyUI, audio, and import services.
-- [ ] Add manual backup placeholder.
-- [ ] Add session-start and session-end backup plan.
+- [x] Add manual backup placeholder.
+- [x] Add session-start and session-end backup plan.
 - [ ] Add role/permission checks for GM, player, spectator, AI, and admin.
 
 ### Milestone 1.0: First Portfolio Demo

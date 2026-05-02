@@ -12,6 +12,7 @@
     "dev:comfy": "npm --workspace services/comfy-router run dev",
     "dev:gm": "npm --workspace apps/gm-dashboard run dev",
     "dev:player": "npm --workspace apps/player-companion run dev",
+    "dev:runtime": "npm --workspace services/runtime-service run dev",
     "dev:server": "npm --workspace services/game-server run dev",
     "lint": "npm run lint --workspaces --if-present"
   },
