@@ -1609,6 +1609,10 @@ export default function App() {
             <h2>Approval Queue</h2>
             <span>{snapshot?.approvalQueue.length ?? 0} waiting</span>
           </div>
+          <p className="muted-line">
+            Risky state changes land here before they become canon. Approve to apply them to the table, or reject
+            to discard them.
+          </p>
           <div className="approval-list">
             {snapshot?.approvalQueue.length ? (
               snapshot.approvalQueue.map((proposal) => (
@@ -1650,6 +1654,10 @@ export default function App() {
             <h2>Scene Packet Draft</h2>
             <span>{scenePacket ? scenePacket.visibility : "not generated"}</span>
           </div>
+          <p className="muted-line">
+            This is the working scene bundle for AI and media tools. Start here, then branch into approval,
+            narration, director planning, or queued media.
+          </p>
           <button className="export-button" onClick={() => void loadScenePacket()} type="button">
             Generate Scene Packet
           </button>
@@ -1669,8 +1677,9 @@ export default function App() {
               <strong>{scenePacket.sceneTitle}</strong>
               <p>{scenePacket.summary}</p>
               <p className="helper-note">
-                Use in order: generate the packet, queue any risky state or media work you want to keep, then
-                run the local/director drafts against that packet.
+                Suggested order: 1) Generate the packet. 2) Queue risky state or media work you want to keep. 3)
+                Run Local Model Draft for moment-to-moment narration. 4) Run Director Mode Draft for pacing,
+                reveals, and canon notes. 5) Create a memory entry when the scene settles.
               </p>
               <div className="packet-meta-grid">
                 <div>
@@ -1773,7 +1782,8 @@ export default function App() {
           </div>
           <p className="muted-line">
             These jobs are the async visual or audio work hanging off scene packets. They are local queue entries
-            for now, not a full ComfyUI execution pipeline yet.
+            for now, not a full ComfyUI execution pipeline yet. Start/Fail/Record are still manual simulation
+            controls in this prototype.
           </p>
           <div className="memory-entry-list">
             {snapshot?.mediaJobs.length ? (
@@ -1891,7 +1901,8 @@ export default function App() {
           </div>
           <p className="muted-line">
             These records keep prompts, workflows, and intended local output paths in runtime state while the
-            actual files stay outside Git.
+            actual files stay outside Git. Think of this as the campaign's memory of what art exists, not the art
+            files themselves.
           </p>
           <div className="memory-entry-list">
             {snapshot?.assetRecords.length ? (
@@ -2030,6 +2041,10 @@ export default function App() {
             <h2>Memory Entry Drafts</h2>
             <span>{snapshot?.memoryEntries.length ?? 0} saved</span>
           </div>
+          <p className="muted-line">
+            Use this after a scene settles. It turns the current table state and recent events into a reusable
+            campaign-memory artifact.
+          </p>
           <button
             className="export-button"
             disabled={pendingActionKey !== ""}
@@ -2085,6 +2100,10 @@ export default function App() {
             <h2>Local Model Adapter</h2>
             <span>{localModelDraft?.adapter.mode ?? "placeholder"}</span>
           </div>
+          <p className="muted-line">
+            This is the fast narrator lane. Use it to preview moment-to-moment scene narration built from the
+            current packet.
+          </p>
           <button
             className="export-button"
             disabled={pendingActionKey !== ""}
@@ -2159,6 +2178,10 @@ export default function App() {
             <h2>Director Mode Adapter</h2>
             <span>{directorDraft?.adapter.mode ?? "placeholder"}</span>
           </div>
+          <p className="muted-line">
+            This is the higher-level planning lane. Use it for pacing, reveal order, canon notes, and scene
+            escalation rather than line-by-line narration.
+          </p>
           <button
             className="export-button"
             disabled={pendingActionKey !== ""}
@@ -2236,6 +2259,10 @@ export default function App() {
             <h2>AI Activity Log</h2>
             <span>{aiLogs.length} recent entries</span>
           </div>
+          <p className="muted-line">
+            This log shows what the AI-facing runtime prepared, validated, queued, or refused. It is mainly for
+            debugging and trust-building while we wire the real adapters in.
+          </p>
           <div className="event-log">
             {aiLogs.length ? (
               aiLogs.map((entry) => (
