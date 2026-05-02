@@ -31,6 +31,12 @@ type RuntimeStatus = {
     playerLabel: string | null;
     claimedCharacterName: string | null;
   }>;
+  mediaPressure: {
+    level: "low" | "elevated" | "high";
+    summary: string;
+    reasons: string[];
+    blockedJobTypes: MediaJob["type"][];
+  };
   warnings: string[];
 };
 
@@ -669,6 +675,72 @@ app.use(cors());
 app.use(express.json());
 app.use("/player", express.static(playerCompanionDistDir));
 
+function getMediaPressure() {
+  const runningJobs = mediaJobs.filter((job) => job.status === "running");
+  const queuedJobs = mediaJobs.filter((job) => job.status === "queued");
+  const failedJobs = mediaJobs.filter((job) => job.status === "failed");
+  const heavyTypes = new Set<MediaJob["type"]>(["video", "upscale", "interpolation"]);
+  const runningHeavyCount = runningJobs.filter((job) => heavyTypes.has(job.type)).length;
+  const queuedHeavyCount = queuedJobs.filter((job) => heavyTypes.has(job.type)).length;
+  const reasons: string[] = [];
+  const blocked = new Set<MediaJob["type"]>();
+  let level: "low" | "elevated" | "high" = "low";
+
+  if (runningHeavyCount > 0) {
+    reasons.push("A heavy media job is already running.");
+    level = "elevated";
+    blocked.add("video");
+    blocked.add("upscale");
+    blocked.add("interpolation");
+  }
+
+  if (runningJobs.length >= 2) {
+    reasons.push("Two or more media jobs are already running.");
+    level = "high";
+    blocked.add("image");
+    blocked.add("video");
+    blocked.add("upscale");
+    blocked.add("interpolation");
+  }
+
+  if (queuedJobs.length >= 5) {
+    reasons.push("The media queue already has five or more waiting jobs.");
+    level = level === "high" ? "high" : "elevated";
+    blocked.add("video");
+    blocked.add("upscale");
+    blocked.add("interpolation");
+  }
+
+  if (queuedHeavyCount >= 2) {
+    reasons.push("There are already multiple expensive jobs waiting in the queue.");
+    level = level === "high" ? "high" : "elevated";
+    blocked.add("video");
+    blocked.add("upscale");
+    blocked.add("interpolation");
+  }
+
+  if (failedJobs.length >= 3) {
+    reasons.push("Several media jobs have failed recently; the pipeline may be unstable.");
+    if (level === "low") {
+      level = "elevated";
+    }
+  }
+
+  const summary =
+    level === "high"
+      ? "Media pressure is high. Keep expensive jobs paused until running work clears."
+      : level === "elevated"
+        ? "Media pressure is elevated. Be careful about starting more expensive jobs."
+        : "Media pressure looks safe for another job.";
+
+  return {
+    level,
+    summary,
+    reasons,
+    blockedJobTypes: Array.from(blocked)
+  };
+}
+
 function getRuntimeStatus(): RuntimeStatus {
   const now = new Date().toISOString();
   const nowMs = Date.now();
@@ -692,10 +764,12 @@ function getRuntimeStatus(): RuntimeStatus {
     })
     .sort((left, right) => left.role.localeCompare(right.role) || left.connectedAt.localeCompare(right.connectedAt));
   const staleCount = clients.filter((client) => client.status === "stale").length;
+  const mediaPressure = getMediaPressure();
+  const warnings = [...mediaPressure.reasons];
 
   return {
     id: "runtime-main",
-    status: staleCount > 0 ? "degraded" : "ok",
+    status: staleCount > 0 || mediaPressure.level !== "low" ? "degraded" : "ok",
     mode: "fast",
     updatedAt: now,
     services: [
@@ -722,10 +796,15 @@ function getRuntimeStatus(): RuntimeStatus {
       },
       {
         name: "media-queue",
-        status: mediaJobs.some((job) => job.status === "running") ? "degraded" : "ok",
+        status: mediaPressure.level === "high" ? "degraded" : mediaJobs.some((job) => job.status === "running") ? "degraded" : "ok",
         message: mediaJobs.length
-          ? `${mediaJobs.filter((job) => job.status === "queued").length} queued / ${mediaJobs.length} tracked`
+          ? `${mediaJobs.filter((job) => job.status === "queued").length} queued / ${mediaJobs.filter((job) => job.status === "running").length} running / ${mediaJobs.length} tracked`
           : "No media jobs queued yet"
+      },
+      {
+        name: "resource-pressure",
+        status: mediaPressure.level === "high" ? "degraded" : mediaPressure.level === "elevated" ? "degraded" : "ok",
+        message: mediaPressure.summary
       },
       {
         name: "asset-metadata",
@@ -757,7 +836,8 @@ function getRuntimeStatus(): RuntimeStatus {
       }
     ],
     clients,
-    warnings: []
+    mediaPressure,
+    warnings
   };
 }
 
@@ -2102,6 +2182,17 @@ app.post("/api/media-jobs/:jobId/start", (request, response) => {
     return;
   }
 
+  const mediaPressure = getMediaPressure();
+
+  if (mediaPressure.blockedJobTypes.includes(job.type)) {
+    response.status(409).json({
+      error: `Starting ${job.type} jobs is blocked by current resource pressure.`,
+      pressure: mediaPressure,
+      runtimeStatus: getRuntimeStatus()
+    });
+    return;
+  }
+
   job.status = "running";
   job.startedAt = new Date().toISOString();
   job.completedAt = undefined;
@@ -2138,6 +2229,7 @@ app.post("/api/media-jobs/:jobId/start", (request, response) => {
   response.json({
     ok: true,
     job,
+    runtimeStatus: getRuntimeStatus(),
     sessionSnapshot: publishSessionState()
   });
 });

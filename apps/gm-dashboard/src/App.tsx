@@ -22,6 +22,12 @@ type RuntimeStatus = {
     playerLabel: string | null;
     claimedCharacterName: string | null;
   }>;
+  mediaPressure?: {
+    level: "low" | "elevated" | "high";
+    summary: string;
+    reasons: string[];
+    blockedJobTypes: MediaJob["type"][];
+  };
   warnings?: string[];
 };
 
@@ -653,6 +659,26 @@ export default function App() {
       });
 
       if (!response.ok) {
+        try {
+          const json = (await response.json()) as {
+            error?: string;
+            pressure?: RuntimeStatus["mediaPressure"];
+            runtimeStatus?: RuntimeStatus;
+          };
+          if (json.runtimeStatus) {
+            setRuntime(json.runtimeStatus);
+          }
+          if (json.pressure?.summary) {
+            setMediaQueueStatus(`blocked:${json.pressure.summary}`);
+            return;
+          }
+          if (json.error) {
+            setMediaQueueStatus(`blocked:${json.error}`);
+            return;
+          }
+        } catch {
+          // fall through to generic failure below
+        }
         setMediaQueueStatus("failed");
         return;
       }
@@ -660,8 +686,12 @@ export default function App() {
       const json = (await response.json()) as {
         sessionSnapshot: SessionSnapshot;
         job: MediaJob;
+        runtimeStatus?: RuntimeStatus;
       };
       setSnapshot(json.sessionSnapshot);
+      if (json.runtimeStatus) {
+        setRuntime(json.runtimeStatus);
+      }
       setMediaQueueStatus(`started:${json.job.id}`);
     } catch {
       setMediaQueueStatus("failed");
@@ -1080,6 +1110,40 @@ export default function App() {
             </span>
           </div>
           <p className="muted-line">Mode: {runtime?.mode ?? "offline"}</p>
+          {runtime?.mediaPressure ? (
+            <div className="scene-packet-block">
+              <div className="panel-header">
+                <h3>Media Pressure</h3>
+                <span className={`pill pill-${runtime.mediaPressure.level === "low" ? "ok" : "degraded"}`}>
+                  {runtime.mediaPressure.level}
+                </span>
+              </div>
+              <p className="helper-note">{runtime.mediaPressure.summary}</p>
+              {runtime.mediaPressure.blockedJobTypes.length ? (
+                <div className="tag-row">
+                  {runtime.mediaPressure.blockedJobTypes.map((type) => (
+                    <span className="tag-chip" key={type}>
+                      blocked: {formatMediaJobType(type)}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              {runtime.mediaPressure.reasons.length ? (
+                <div className="validation-list">
+                  {runtime.mediaPressure.reasons.map((reason) => (
+                    <p key={reason}>{reason}</p>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {runtime?.warnings?.length ? (
+            <div className="validation-list">
+              {runtime.warnings.map((warning) => (
+                <p key={warning}>{warning}</p>
+              ))}
+            </div>
+          ) : null}
           <ul className="service-list">
             {runtime?.services.map((service) => (
               <li key={service.name}>
@@ -1673,6 +1737,8 @@ export default function App() {
                   ? "Marking media job as failed..."
                   : mediaQueueStatus === "recording"
                     ? "Recording generated media metadata..."
+                    : mediaQueueStatus.startsWith("blocked:")
+                      ? mediaQueueStatus.slice("blocked:".length)
                     : mediaQueueStatus.startsWith("started:")
                       ? `Media job ${mediaQueueStatus.split(":")[1]} is now running.`
                       : mediaQueueStatus.startsWith("failed-job:")
