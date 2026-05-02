@@ -63,7 +63,7 @@ type RollRecord = {
 
 type TableEventRecord = {
   id: string;
-  category: "roll" | "state" | "claim" | "memory";
+  category: "roll" | "state" | "claim" | "memory" | "media";
   type:
     | "roll_recorded"
     | "hp_changed"
@@ -74,7 +74,10 @@ type TableEventRecord = {
     | "character_released"
     | "proposal_approved"
     | "proposal_rejected"
-    | "memory_entry_created";
+    | "memory_entry_created"
+    | "media_job_started"
+    | "media_job_failed"
+    | "media_metadata_recorded";
   actor: {
     id: string;
     kind: "gm" | "player" | "system" | "ai_assistant";
@@ -417,6 +420,10 @@ function formatAssetKind(value: AssetRecord["kind"]) {
   return value.replace(/_/g, " ");
 }
 
+function formatMediaJobStatus(value: MediaJob["status"]) {
+  return value.replace(/_/g, " ");
+}
+
 function formatSimpleLabel(value: string) {
   return value.replace(/_/g, " ");
 }
@@ -630,6 +637,64 @@ export default function App() {
       };
       setSnapshot(json.sessionSnapshot);
       setMediaQueueStatus(`generated:${json.asset.id}`);
+    } catch {
+      setMediaQueueStatus("failed");
+    } finally {
+      setPendingActionKey("");
+    }
+  }
+
+  async function startMediaJob(jobId: string) {
+    setPendingActionKey(`media-start-${jobId}`);
+    setMediaQueueStatus("starting");
+    try {
+      const response = await fetch(`/api/media-jobs/${jobId}/start`, {
+        method: "POST"
+      });
+
+      if (!response.ok) {
+        setMediaQueueStatus("failed");
+        return;
+      }
+
+      const json = (await response.json()) as {
+        sessionSnapshot: SessionSnapshot;
+        job: MediaJob;
+      };
+      setSnapshot(json.sessionSnapshot);
+      setMediaQueueStatus(`started:${json.job.id}`);
+    } catch {
+      setMediaQueueStatus("failed");
+    } finally {
+      setPendingActionKey("");
+    }
+  }
+
+  async function failMediaJob(jobId: string) {
+    setPendingActionKey(`media-failed-${jobId}`);
+    setMediaQueueStatus("failing");
+    try {
+      const response = await fetch(`/api/media-jobs/${jobId}/fail`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          error: "Marked failed from GM dashboard."
+        })
+      });
+
+      if (!response.ok) {
+        setMediaQueueStatus("failed");
+        return;
+      }
+
+      const json = (await response.json()) as {
+        sessionSnapshot: SessionSnapshot;
+        job: MediaJob;
+      };
+      setSnapshot(json.sessionSnapshot);
+      setMediaQueueStatus(`failed-job:${json.job.id}`);
     } catch {
       setMediaQueueStatus("failed");
     } finally {
@@ -1532,7 +1597,7 @@ export default function App() {
                 <div className="memory-entry-card" key={job.id}>
                   <div className="memory-entry-header">
                     <strong>{formatMediaJobType(job.type)}</strong>
-                    <span className="event-pill event-memory">{job.status}</span>
+                    <span className="event-pill event-memory">{formatMediaJobStatus(job.status)}</span>
                   </div>
                   <p>{job.prompt ?? "No prompt attached."}</p>
                   <div className="memory-entry-meta">
@@ -1541,14 +1606,53 @@ export default function App() {
                     <span>{job.runWhen}</span>
                     <span>{formatTime(job.createdAt)}</span>
                   </div>
+                  <div className="memory-entry-meta">
+                    <span>{job.startedAt ? `started ${formatTime(job.startedAt)}` : "not started"}</span>
+                    <span>{job.completedAt ? `completed ${formatTime(job.completedAt)}` : "not completed"}</span>
+                  </div>
                   <div className="tag-row">
                     {job.workflowId ? <span className="tag-chip">workflow: {job.workflowId}</span> : null}
                     {job.sceneId ? <span className="tag-chip">scene: {job.sceneId}</span> : null}
                   </div>
+                  {job.error ? <p className="export-note">Last error: {job.error}</p> : null}
                   <div className="approval-actions">
                     <button
                       className="mini-button"
-                      disabled={pendingActionKey !== "" || job.status === "generated"}
+                      disabled={
+                        pendingActionKey !== "" ||
+                        job.status === "running" ||
+                        job.status === "generated" ||
+                        job.status === "archived" ||
+                        job.status === "rejected"
+                      }
+                      onClick={() => void startMediaJob(job.id)}
+                      type="button"
+                    >
+                      {job.status === "failed" ? "Retry Job" : "Start Job"}
+                    </button>
+                    <button
+                      className="mini-button"
+                      disabled={
+                        pendingActionKey !== "" ||
+                        job.status === "failed" ||
+                        job.status === "generated" ||
+                        job.status === "archived" ||
+                        job.status === "rejected"
+                      }
+                      onClick={() => void failMediaJob(job.id)}
+                      type="button"
+                    >
+                      Mark Failed
+                    </button>
+                    <button
+                      className="mini-button"
+                      disabled={
+                        pendingActionKey !== "" ||
+                        job.status === "generated" ||
+                        job.status === "failed" ||
+                        job.status === "archived" ||
+                        job.status === "rejected"
+                      }
                       onClick={() => void markMediaJobGenerated(job.id)}
                       type="button"
                     >
@@ -1563,15 +1667,23 @@ export default function App() {
           </div>
           {mediaQueueStatus ? (
             <p className="export-note">
-              {mediaQueueStatus === "recording"
-                ? "Recording generated media metadata..."
-                : mediaQueueStatus.startsWith("generated:")
-                  ? `Stored asset metadata as ${mediaQueueStatus.split(":")[1]}.`
-                  : mediaQueueStatus.startsWith("queued:")
-                    ? `${mediaQueueStatus.split(":")[1]} media job(s) added to the queue.`
-                    : mediaQueueStatus === "queueing"
-                      ? "Queueing media jobs..."
-                      : "Media metadata update failed."}
+              {mediaQueueStatus === "starting"
+                ? "Starting media job..."
+                : mediaQueueStatus === "failing"
+                  ? "Marking media job as failed..."
+                  : mediaQueueStatus === "recording"
+                    ? "Recording generated media metadata..."
+                    : mediaQueueStatus.startsWith("started:")
+                      ? `Media job ${mediaQueueStatus.split(":")[1]} is now running.`
+                      : mediaQueueStatus.startsWith("failed-job:")
+                        ? `Media job ${mediaQueueStatus.split(":")[1]} was marked failed.`
+                        : mediaQueueStatus.startsWith("generated:")
+                          ? `Stored asset metadata as ${mediaQueueStatus.split(":")[1]}.`
+                          : mediaQueueStatus.startsWith("queued:")
+                            ? `${mediaQueueStatus.split(":")[1]} media job(s) added to the queue.`
+                            : mediaQueueStatus === "queueing"
+                              ? "Queueing media jobs..."
+                              : "Media metadata update failed."}
             </p>
           ) : null}
         </article>

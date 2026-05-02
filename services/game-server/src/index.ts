@@ -72,7 +72,7 @@ type RollRecord = {
 
 type TableEventRecord = {
   id: string;
-  category: "roll" | "state" | "claim" | "memory";
+  category: "roll" | "state" | "claim" | "memory" | "media";
   type:
     | "roll_recorded"
     | "hp_changed"
@@ -83,7 +83,10 @@ type TableEventRecord = {
     | "character_released"
     | "proposal_approved"
     | "proposal_rejected"
-    | "memory_entry_created";
+    | "memory_entry_created"
+    | "media_job_started"
+    | "media_job_failed"
+    | "media_metadata_recorded";
   actor: {
     id: string;
     kind: "gm" | "player" | "system" | "ai_assistant";
@@ -2088,6 +2091,112 @@ app.get("/api/assets", (_request, response) => {
   });
 });
 
+app.post("/api/media-jobs/:jobId/start", (request, response) => {
+  const { jobId } = request.params;
+  const job = mediaJobs.find((entry) => entry.id === jobId);
+
+  if (!job) {
+    response.status(404).json({
+      error: "Media job not found"
+    });
+    return;
+  }
+
+  job.status = "running";
+  job.startedAt = new Date().toISOString();
+  job.completedAt = undefined;
+  job.error = undefined;
+
+  recordTableEvent({
+    category: "media",
+    type: "media_job_started",
+    actor: {
+      id: "gm-dashboard",
+      kind: "gm",
+      label: "GM Dashboard"
+    },
+    visibility: job.visibility,
+    summary: `${job.type} media job started.`,
+    payload: {
+      mediaJobId: job.id,
+      workflowId: job.workflowId ?? null,
+      sceneId: job.sceneId ?? null
+    }
+  });
+
+  recordAiLog({
+    kind: "tool_call",
+    adapter: "scene_packet",
+    correlationId: job.sceneId ?? job.id,
+    summary: `Started ${job.type} media job`,
+    details: {
+      mediaJobId: job.id,
+      workflowId: job.workflowId ?? null
+    }
+  });
+
+  response.json({
+    ok: true,
+    job,
+    sessionSnapshot: publishSessionState()
+  });
+});
+
+app.post("/api/media-jobs/:jobId/fail", (request, response) => {
+  const { jobId } = request.params;
+  const job = mediaJobs.find((entry) => entry.id === jobId);
+
+  if (!job) {
+    response.status(404).json({
+      error: "Media job not found"
+    });
+    return;
+  }
+
+  const requestedError =
+    typeof request.body?.error === "string" && request.body.error.trim()
+      ? request.body.error.trim()
+      : "Marked failed from GM dashboard.";
+
+  job.status = "failed";
+  job.completedAt = new Date().toISOString();
+  job.error = requestedError;
+
+  recordTableEvent({
+    category: "media",
+    type: "media_job_failed",
+    actor: {
+      id: "gm-dashboard",
+      kind: "gm",
+      label: "GM Dashboard"
+    },
+    visibility: job.visibility,
+    summary: `${job.type} media job failed.`,
+    payload: {
+      mediaJobId: job.id,
+      workflowId: job.workflowId ?? null,
+      error: requestedError
+    }
+  });
+
+  recordAiLog({
+    kind: "tool_call",
+    adapter: "scene_packet",
+    correlationId: job.sceneId ?? job.id,
+    summary: `Marked ${job.type} media job as failed`,
+    details: {
+      mediaJobId: job.id,
+      error: requestedError
+    }
+  });
+
+  response.json({
+    ok: true,
+    job,
+    sessionSnapshot: publishSessionState()
+  });
+});
+
 app.post("/api/media-jobs/:jobId/mark-generated", (request, response) => {
   const { jobId } = request.params;
   const job = mediaJobs.find((entry) => entry.id === jobId);
@@ -2100,8 +2209,12 @@ app.post("/api/media-jobs/:jobId/mark-generated", (request, response) => {
   }
 
   job.status = "generated";
+  if (!job.startedAt) {
+    job.startedAt = new Date().toISOString();
+  }
   job.completedAt = new Date().toISOString();
   job.outputPath = buildAssetLocalPath(job);
+  job.error = undefined;
 
   const existing = assetRecords.find((entry) => entry.metadata.mediaJobId === job.id);
   const assetRecord = existing ?? createAssetRecordFromMediaJob(job);
@@ -2124,6 +2237,23 @@ app.post("/api/media-jobs/:jobId/mark-generated", (request, response) => {
       settings: job.settings
     };
   }
+
+  recordTableEvent({
+    category: "media",
+    type: "media_metadata_recorded",
+    actor: {
+      id: "gm-dashboard",
+      kind: "gm",
+      label: "GM Dashboard"
+    },
+    visibility: job.visibility,
+    summary: `${job.type} media metadata recorded.`,
+    payload: {
+      mediaJobId: job.id,
+      assetId: assetRecord.id,
+      localPath: assetRecord.localPath ?? null
+    }
+  });
 
   recordAiLog({
     kind: "tool_call",
