@@ -251,6 +251,19 @@ type MediaJob = {
   settings: Record<string, unknown>;
 };
 
+type AssetRecord = {
+  id: string;
+  campaignId: string;
+  sceneId?: string;
+  kind: "image" | "video" | "audio" | "map" | "handout";
+  visibility: "gm_only" | "player_visible" | "public_demo";
+  status: "requested" | "approved" | "queued" | "generated" | "rejected" | "failed";
+  prompt?: string;
+  workflowId?: string;
+  localPath?: string;
+  metadata: Record<string, unknown>;
+};
+
 type StateEventProposal = {
   id: string;
   createdAt: string;
@@ -308,6 +321,7 @@ type SessionSnapshot = {
   eventLog: TableEventRecord[];
   approvalQueue: StateEventProposal[];
   mediaJobs: MediaJob[];
+  assetRecords: AssetRecord[];
   memoryEntries: MemoryEntry[];
 };
 
@@ -356,6 +370,8 @@ const host = process.env.BDE_HOST ?? "0.0.0.0";
 const gameServerPort = Number(process.env.BDE_GAME_SERVER_PORT ?? 4310);
 const playerCompanionPort = Number(process.env.BDE_PLAYER_COMPANION_PORT ?? 4311);
 const comfyRouterEndpoint = process.env.BDE_COMFY_ROUTER_ENDPOINT?.trim() || "";
+const mediaOutputRoot =
+  process.env.BDE_MEDIA_OUTPUT_ROOT?.trim() || "G:\\AI-DM\\04_assets\\generated";
 const localModelEndpoint = process.env.BDE_LOCAL_MODEL_ENDPOINT?.trim() || "";
 const directorModeModel = process.env.BDE_DIRECTOR_MODE_MODEL?.trim() || "";
 const currentDir = dirname(fileURLToPath(import.meta.url));
@@ -455,6 +471,7 @@ const rollLog: RollRecord[] = [
 const eventLog: TableEventRecord[] = [];
 const approvalQueue: StateEventProposal[] = [];
 const mediaJobs: MediaJob[] = [];
+const assetRecords: AssetRecord[] = [];
 const memoryEntries: MemoryEntry[] = [];
 const aiLogs: AiLogEntry[] = [];
 
@@ -708,6 +725,13 @@ function getRuntimeStatus(): RuntimeStatus {
           : "No media jobs queued yet"
       },
       {
+        name: "asset-metadata",
+        status: assetRecords.some((asset) => asset.status === "failed") ? "degraded" : "ok",
+        message: assetRecords.length
+          ? `${assetRecords.filter((asset) => asset.status === "generated").length} generated / ${assetRecords.length} tracked`
+          : "No media metadata recorded yet"
+      },
+      {
         name: "comfy-router",
         status: comfyRouterEndpoint ? "degraded" : "unknown",
         message: comfyRouterEndpoint
@@ -779,6 +803,7 @@ function getSessionSnapshot(): SessionSnapshot {
     eventLog,
     approvalQueue,
     mediaJobs,
+    assetRecords,
     memoryEntries
   };
 }
@@ -1379,6 +1404,47 @@ function buildMediaJobFromScenePacketRequest(
       ...metadata,
       sourceRequestId: typeof request.id === "string" ? request.id : null,
       sceneTitle: packet.sceneTitle
+    }
+  };
+}
+
+function buildAssetLocalPath(job: MediaJob) {
+  const extension =
+    job.type === "image"
+      ? "png"
+      : job.type === "video"
+        ? "mp4"
+        : job.type === "audio"
+          ? "mp3"
+          : "bin";
+
+  return join(mediaOutputRoot, job.campaignId, `${job.id}.${extension}`);
+}
+
+function createAssetRecordFromMediaJob(job: MediaJob): AssetRecord {
+  const now = new Date().toISOString();
+
+  return {
+    id: `asset-${job.id}`,
+    campaignId: job.campaignId,
+    sceneId: job.sceneId,
+    kind:
+      job.type === "image" || job.type === "video" || job.type === "audio"
+        ? job.type
+        : "handout",
+    visibility: job.visibility,
+    status: "generated",
+    prompt: job.prompt,
+    workflowId: job.workflowId,
+    localPath: buildAssetLocalPath(job),
+    metadata: {
+      mediaJobId: job.id,
+      generatedAt: now,
+      runWhen: job.runWhen,
+      priority: job.priority,
+      negativePrompt: job.negativePrompt ?? null,
+      linkedAssetId: job.linkedAssetId ?? null,
+      settings: job.settings
     }
   };
 }
@@ -2013,6 +2079,68 @@ app.get("/api/ai-logs", (_request, response) => {
 app.get("/api/media-jobs", (_request, response) => {
   response.json({
     jobs: mediaJobs
+  });
+});
+
+app.get("/api/assets", (_request, response) => {
+  response.json({
+    assets: assetRecords
+  });
+});
+
+app.post("/api/media-jobs/:jobId/mark-generated", (request, response) => {
+  const { jobId } = request.params;
+  const job = mediaJobs.find((entry) => entry.id === jobId);
+
+  if (!job) {
+    response.status(404).json({
+      error: "Media job not found"
+    });
+    return;
+  }
+
+  job.status = "generated";
+  job.completedAt = new Date().toISOString();
+  job.outputPath = buildAssetLocalPath(job);
+
+  const existing = assetRecords.find((entry) => entry.metadata.mediaJobId === job.id);
+  const assetRecord = existing ?? createAssetRecordFromMediaJob(job);
+
+  if (!existing) {
+    assetRecords.unshift(assetRecord);
+    assetRecords.splice(16);
+  } else {
+    existing.status = "generated";
+    existing.localPath = job.outputPath;
+    existing.prompt = job.prompt;
+    existing.workflowId = job.workflowId;
+    existing.metadata = {
+      ...existing.metadata,
+      generatedAt: job.completedAt ?? new Date().toISOString(),
+      runWhen: job.runWhen,
+      priority: job.priority,
+      negativePrompt: job.negativePrompt ?? null,
+      linkedAssetId: job.linkedAssetId ?? null,
+      settings: job.settings
+    };
+  }
+
+  recordAiLog({
+    kind: "tool_call",
+    adapter: "scene_packet",
+    correlationId: job.sceneId ?? job.id,
+    summary: `Recorded generated media metadata for ${job.type} job`,
+    details: {
+      mediaJobId: job.id,
+      assetId: assetRecord.id,
+      localPath: assetRecord.localPath ?? null
+    }
+  });
+
+  response.json({
+    ok: true,
+    asset: assetRecord,
+    sessionSnapshot: publishSessionState()
   });
 });
 

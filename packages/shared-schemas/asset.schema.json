@@ -12,6 +12,9 @@
     "campaignId": {
       "type": "string"
     },
+    "sceneId": {
+      "type": "string"
+    },
     "kind": {
       "type": "string",
       "enum": ["image", "video", "audio", "map", "handout"]

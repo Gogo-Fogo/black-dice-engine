@@ -111,7 +111,7 @@ Goal: route scene images through local ComfyUI without blocking gameplay.
 - [x] Add ComfyUI router service scaffold.
 - [x] Add workflow registry format.
 - [x] Add image prompt templates for scenes, portraits, items, and locations.
-- [ ] Store generated media metadata in state while keeping actual files outside Git.
+- [x] Store generated media metadata in state while keeping actual files outside Git.
 - [ ] Add async image job status updates to GM dashboard.
 - [ ] Add cleanup policy for drafts, temp frames, failed jobs, and final assets.
 - [ ] Add resource pressure checks before starting expensive media jobs.

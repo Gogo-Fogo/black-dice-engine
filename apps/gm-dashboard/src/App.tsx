@@ -242,6 +242,19 @@ type MediaJob = {
   settings: Record<string, unknown>;
 };
 
+type AssetRecord = {
+  id: string;
+  campaignId: string;
+  sceneId?: string;
+  kind: "image" | "video" | "audio" | "map" | "handout";
+  visibility: "gm_only" | "player_visible" | "public_demo";
+  status: "requested" | "approved" | "queued" | "generated" | "rejected" | "failed";
+  prompt?: string;
+  workflowId?: string;
+  localPath?: string;
+  metadata: Record<string, unknown>;
+};
+
 type StateEventProposal = {
   id: string;
   createdAt: string;
@@ -299,6 +312,7 @@ type SessionSnapshot = {
   eventLog: TableEventRecord[];
   approvalQueue: StateEventProposal[];
   mediaJobs: MediaJob[];
+  assetRecords: AssetRecord[];
   memoryEntries: MemoryEntry[];
 };
 
@@ -396,6 +410,10 @@ function formatMemoryKind(value: MemoryEntry["kind"]) {
 }
 
 function formatMediaJobType(value: MediaJob["type"]) {
+  return value.replace(/_/g, " ");
+}
+
+function formatAssetKind(value: AssetRecord["kind"]) {
   return value.replace(/_/g, " ");
 }
 
@@ -586,6 +604,32 @@ export default function App() {
       setSnapshot(json.sessionSnapshot);
       setScenePacketValidation(json.validation);
       setMediaQueueStatus(`queued:${json.queuedCount}`);
+    } catch {
+      setMediaQueueStatus("failed");
+    } finally {
+      setPendingActionKey("");
+    }
+  }
+
+  async function markMediaJobGenerated(jobId: string) {
+    setPendingActionKey(`media-generated-${jobId}`);
+    setMediaQueueStatus("recording");
+    try {
+      const response = await fetch(`/api/media-jobs/${jobId}/mark-generated`, {
+        method: "POST"
+      });
+
+      if (!response.ok) {
+        setMediaQueueStatus("failed");
+        return;
+      }
+
+      const json = (await response.json()) as {
+        sessionSnapshot: SessionSnapshot;
+        asset: AssetRecord;
+      };
+      setSnapshot(json.sessionSnapshot);
+      setMediaQueueStatus(`generated:${json.asset.id}`);
     } catch {
       setMediaQueueStatus("failed");
     } finally {
@@ -1501,10 +1545,68 @@ export default function App() {
                     {job.workflowId ? <span className="tag-chip">workflow: {job.workflowId}</span> : null}
                     {job.sceneId ? <span className="tag-chip">scene: {job.sceneId}</span> : null}
                   </div>
+                  <div className="approval-actions">
+                    <button
+                      className="mini-button"
+                      disabled={pendingActionKey !== "" || job.status === "generated"}
+                      onClick={() => void markMediaJobGenerated(job.id)}
+                      type="button"
+                    >
+                      {job.status === "generated" ? "Metadata Recorded" : "Record Generated Metadata"}
+                    </button>
+                  </div>
                 </div>
               ))
             ) : (
               <p>No queued media jobs yet.</p>
+            )}
+          </div>
+          {mediaQueueStatus ? (
+            <p className="export-note">
+              {mediaQueueStatus === "recording"
+                ? "Recording generated media metadata..."
+                : mediaQueueStatus.startsWith("generated:")
+                  ? `Stored asset metadata as ${mediaQueueStatus.split(":")[1]}.`
+                  : mediaQueueStatus.startsWith("queued:")
+                    ? `${mediaQueueStatus.split(":")[1]} media job(s) added to the queue.`
+                    : mediaQueueStatus === "queueing"
+                      ? "Queueing media jobs..."
+                      : "Media metadata update failed."}
+            </p>
+          ) : null}
+        </article>
+
+        <article className="panel">
+          <div className="panel-header">
+            <h2>Generated Media Metadata</h2>
+            <span>{snapshot?.assetRecords.length ?? 0} tracked</span>
+          </div>
+          <p className="muted-line">
+            These records keep prompts, workflows, and intended local output paths in runtime state while the
+            actual files stay outside Git.
+          </p>
+          <div className="memory-entry-list">
+            {snapshot?.assetRecords.length ? (
+              snapshot.assetRecords.map((asset) => (
+                <div className="memory-entry-card" key={asset.id}>
+                  <div className="memory-entry-header">
+                    <strong>{formatAssetKind(asset.kind)}</strong>
+                    <span className="event-pill event-memory">{asset.status}</span>
+                  </div>
+                  <p>{asset.prompt ?? "No prompt attached."}</p>
+                  <div className="memory-entry-meta">
+                    <span>{formatVisibilityLabel(asset.visibility)}</span>
+                    <span>{asset.workflowId ?? "no workflow"}</span>
+                    <span>{asset.localPath ?? "no local path"}</span>
+                  </div>
+                  <div className="tag-row">
+                    {asset.sceneId ? <span className="tag-chip">scene: {asset.sceneId}</span> : null}
+                    <span className="tag-chip">asset: {asset.id}</span>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p>No generated media metadata recorded yet.</p>
             )}
           </div>
         </article>
