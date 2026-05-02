@@ -3,26 +3,39 @@ echo ==========================================
 echo Black Dice Engine - Session Startup
 echo ==========================================
 echo.
+echo IMPORTANT: Close any existing Black Dice Engine
+echo windows before running this script.
+echo.
+echo Press any key to continue...
+pause > nul
 
 cd /d "G:\Workspace\MyTools\Black Dice Engine"
 
-echo [1/4] Starting ComfyUI... (wait for it to load)
+echo [1/5] Building player companion...
+npm run build --workspace apps/player-companion > nul 2>&1
+
+echo [2/5] Starting ComfyUI... (takes ~30 seconds)
 start "ComfyUI" cmd /c "cd /d G:\AI_Tools\ComfyUI_windows_portable && run_nvidia_gpu.bat"
 
-echo [2/4] Starting Game Server...
+echo [3/5] Starting Game Server...
 start "Game Server" cmd /c "npm run dev:server"
 
-echo [3/4] Starting Audio Service...
+echo [4/5] Starting Audio Service...
 start "Audio Service" cmd /c "npm run dev:audio"
 
-echo [4/4] Starting GM Dashboard...
+echo [5/5] Starting GM Dashboard...
 start "GM Dashboard" cmd /c "npm run dev:gm"
 
 echo.
 echo ==========================================
-echo All services starting in separate windows.
+echo All services are starting in separate windows.
 echo.
-echo Wait 30 seconds for ComfyUI to fully load.
-echo Then open: http://localhost:5173
+echo 1. Wait 30 seconds for ComfyUI to fully load.
+echo 2. Open the GM dashboard:
+echo    http://localhost:5173
+echo.
+echo Players should join via the QR code shown
+echo in the GM dashboard, or visit:
+echo    http://YOUR_PC_IP:4310/player/
 echo ==========================================
 pause
