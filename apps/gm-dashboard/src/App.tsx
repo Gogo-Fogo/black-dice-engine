@@ -234,7 +234,7 @@ type MediaJob = {
   id: string;
   campaignId: string;
   sceneId?: string;
-  type: "image" | "video" | "audio" | "upscale" | "interpolation";
+  type: "image" | "video" | "audio" | "upscale" | "interpolation" | "visual_canon";
   status: "draft" | "queued" | "running" | "generated" | "failed" | "rejected" | "archived";
   priority: "low" | "normal" | "high" | "session_break";
   visibility: "gm_only" | "player_visible" | "public_demo";
@@ -685,6 +685,33 @@ export default function App() {
       setSnapshot(json.sessionSnapshot);
       setScenePacketValidation(json.validation);
       setMediaQueueStatus(`queued:${json.queuedCount}`);
+      await loadCleanupReport({ silent: true });
+    } catch {
+      setMediaQueueStatus("failed");
+    } finally {
+      setPendingActionKey("");
+    }
+  }
+
+  async function queueCharacterVisualCanonJob(characterId: string) {
+    setPendingActionKey(`visual-canon-${characterId}`);
+    setMediaQueueStatus("queueing-visual-canon");
+    try {
+      const response = await fetch(`/api/characters/${characterId}/visual-canon-job`, {
+        method: "POST"
+      });
+
+      if (!response.ok) {
+        setMediaQueueStatus("failed");
+        return;
+      }
+
+      const json = (await response.json()) as {
+        sessionSnapshot: SessionSnapshot;
+        job: MediaJob;
+      };
+      setSnapshot(json.sessionSnapshot);
+      setMediaQueueStatus(`visual-canon:${json.job.id}`);
       await loadCleanupReport({ silent: true });
     } catch {
       setMediaQueueStatus("failed");
@@ -1564,6 +1591,14 @@ export default function App() {
                 <p className="claim-note">
                   {character.claimedByLabel ? `Claimed by ${character.claimedByLabel}` : "Unclaimed"}
                 </p>
+                <button
+                  className="mini-button secondary-button"
+                  disabled={pendingActionKey !== ""}
+                  onClick={() => void queueCharacterVisualCanonJob(character.id)}
+                  type="button"
+                >
+                  Queue Visual Canon Job
+                </button>
               </div>
             )) ?? <p>No party state yet.</p>}
           </div>
@@ -1708,12 +1743,20 @@ export default function App() {
               >
                 Queue Media Jobs
               </button>
-              {mediaQueueStatus === "queueing" || mediaQueueStatus.startsWith("queued:") || mediaQueueStatus === "failed" ? (
+              {mediaQueueStatus === "queueing" ||
+              mediaQueueStatus.startsWith("queued:") ||
+              mediaQueueStatus === "queueing-visual-canon" ||
+              mediaQueueStatus.startsWith("visual-canon:") ||
+              mediaQueueStatus === "failed" ? (
                 <p className="export-note">
                   {mediaQueueStatus === "queueing"
                     ? "Queueing media jobs..."
                     : mediaQueueStatus.startsWith("queued:")
                       ? `${mediaQueueStatus.split(":")[1]} media job(s) added to the queue.`
+                      : mediaQueueStatus === "queueing-visual-canon"
+                        ? "Queueing character visual-canon job..."
+                        : mediaQueueStatus.startsWith("visual-canon:")
+                          ? `Character visual-canon job ${mediaQueueStatus.split(":")[1]} added to the queue.`
                       : "Media jobs failed to queue."}
                 </p>
               ) : null}
@@ -1754,6 +1797,16 @@ export default function App() {
                   <div className="tag-row">
                     {job.workflowId ? <span className="tag-chip">workflow: {job.workflowId}</span> : null}
                     {job.sceneId ? <span className="tag-chip">scene: {job.sceneId}</span> : null}
+                    {job.settings?.subjectName ? (
+                      <span className="tag-chip">subject: {String(job.settings.subjectName)}</span>
+                    ) : null}
+                    {Array.isArray(job.settings?.variantSet)
+                      ? job.settings.variantSet.map((variant) => (
+                          <span className="tag-chip" key={`${job.id}-${String(variant)}`}>
+                            view: {String(variant).replace(/_/g, " ")}
+                          </span>
+                        ))
+                      : null}
                   </div>
                   {job.error ? <p className="export-note">Last error: {job.error}</p> : null}
                   <div className="approval-actions">

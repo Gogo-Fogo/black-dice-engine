@@ -115,7 +115,7 @@ Goal: route scene images through local ComfyUI without blocking gameplay.
 - [x] Add async image job status updates to GM dashboard.
 - [x] Add cleanup policy for drafts, temp frames, failed jobs, and final assets.
 - [x] Add resource pressure checks before starting expensive media jobs.
-- [ ] Add character visual-canon job type for portrait variants, turnaround sheets, and accepted reference packs.
+- [x] Add character visual-canon job type for portrait variants, turnaround sheets, and accepted reference packs.
 
 ### Milestone 0.7: Local Audio Pipeline
 

@@ -243,7 +243,7 @@ type MediaJob = {
   id: string;
   campaignId: string;
   sceneId?: string;
-  type: "image" | "video" | "audio" | "upscale" | "interpolation";
+  type: "image" | "video" | "audio" | "upscale" | "interpolation" | "visual_canon";
   status: "draft" | "queued" | "running" | "generated" | "failed" | "rejected" | "archived";
   priority: "low" | "normal" | "high" | "session_break";
   visibility: "gm_only" | "player_visible" | "public_demo";
@@ -736,6 +736,7 @@ function getMediaPressure() {
     reasons.push("Two or more media jobs are already running.");
     level = "high";
     blocked.add("image");
+    blocked.add("visual_canon");
     blocked.add("video");
     blocked.add("upscale");
     blocked.add("interpolation");
@@ -1644,7 +1645,8 @@ function buildMediaJobFromScenePacketRequest(
     request.kind === "video" ||
     request.kind === "audio" ||
     request.kind === "upscale" ||
-    request.kind === "interpolation"
+    request.kind === "interpolation" ||
+    request.kind === "visual_canon"
       ? request.kind
       : null;
   const visibility =
@@ -1690,9 +1692,44 @@ function buildMediaJobFromScenePacketRequest(
   };
 }
 
+function buildCharacterVisualCanonJob(character: Character): MediaJob {
+  const distinctiveFeatures = [
+    character.classLabel,
+    character.inventory[0]?.name ? `carries ${character.inventory[0].name}` : null,
+    character.conditions[0] ? `currently marked by ${character.conditions[0]}` : null,
+    character.notes[0] ?? null
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(", ");
+
+  return {
+    id: randomUUID(),
+    campaignId: sampleCampaignContext.campaignBible.id,
+    sceneId: undefined,
+    type: "visual_canon",
+    status: "queued",
+    priority: "low",
+    visibility: "gm_only",
+    prompt: `Character visual canon pack for ${character.name}, ${character.classLabel}, ${distinctiveFeatures}, grounded dark fantasy, consistent costume language, repeatable silhouette, no text, no watermark.`,
+    negativePrompt:
+      "text, watermark, celebrity likeness, copyrighted character design, inconsistent anatomy, duplicate limbs, modern clothing, mismatched faces.",
+    workflowId: "character-visual-canon-placeholder",
+    runWhen: "manual",
+    createdAt: new Date().toISOString(),
+    settings: {
+      subjectCharacterId: character.id,
+      subjectName: character.name,
+      classLabel: character.classLabel,
+      variantSet: ["portrait", "front", "three_quarter", "profile", "back", "expression_sheet"],
+      outputIntent: "accepted_reference_pack",
+      canonStatus: "unreviewed"
+    }
+  };
+}
+
 function buildAssetLocalPath(job: MediaJob) {
   const extension =
-    job.type === "image"
+    job.type === "image" || job.type === "visual_canon"
       ? "png"
       : job.type === "video"
         ? "mp4"
@@ -1713,7 +1750,9 @@ function createAssetRecordFromMediaJob(job: MediaJob): AssetRecord {
     kind:
       job.type === "image" || job.type === "video" || job.type === "audio"
         ? job.type
-        : "handout",
+        : job.type === "visual_canon"
+          ? "image"
+          : "handout",
     visibility: job.visibility,
     status: "generated",
     prompt: job.prompt,
@@ -2373,6 +2412,39 @@ app.get("/api/assets", (_request, response) => {
 app.get("/api/media-cleanup-report", (_request, response) => {
   response.json({
     report: buildCleanupReport()
+  });
+});
+
+app.post("/api/characters/:characterId/visual-canon-job", (request, response) => {
+  const character = resolveCharacter(request.params.characterId);
+
+  if (!character) {
+    response.status(404).json({
+      error: "Character not found"
+    });
+    return;
+  }
+
+  const job = buildCharacterVisualCanonJob(character);
+  mediaJobs.unshift(job);
+  mediaJobs.splice(12);
+
+  recordAiLog({
+    kind: "tool_call",
+    adapter: "scene_packet",
+    correlationId: character.id,
+    summary: `Queued visual-canon job for ${character.name}`,
+    details: {
+      mediaJobId: job.id,
+      workflowId: job.workflowId ?? null,
+      variantSet: job.settings.variantSet
+    }
+  });
+
+  response.json({
+    ok: true,
+    job,
+    sessionSnapshot: publishSessionState()
   });
 });
 

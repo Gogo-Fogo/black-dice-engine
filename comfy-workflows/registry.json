@@ -26,6 +26,18 @@
       "tags": ["portrait", "character-creation", "visual-canon"]
     },
     {
+      "id": "character-visual-canon-placeholder",
+      "type": "image",
+      "label": "Character Visual Canon Placeholder",
+      "description": "Prep-time turnaround and reference-pack workflow for locking a recurring character's accepted look.",
+      "runWhen": "manual",
+      "visibility": "gm_only",
+      "promptTemplateId": "character-visual-canon",
+      "workflowPath": "PLACEHOLDER.txt",
+      "outputCategory": "visual-canon",
+      "tags": ["character", "visual-canon", "turnaround", "reference-pack"]
+    },
+    {
       "id": "location-study-placeholder",
       "type": "image",
       "label": "Location Study Placeholder",

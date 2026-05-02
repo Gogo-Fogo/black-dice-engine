@@ -30,6 +30,21 @@
       ]
     },
     {
+      "id": "character-visual-canon",
+      "category": "portrait",
+      "label": "Character Visual Canon",
+      "purpose": "Prep-time turnaround sheet and accepted reference pack for keeping recurring characters visually consistent across scenes.",
+      "positiveTemplate": "Character reference pack for {subject_name}, {role}, {distinctive_features}, {wardrobe_anchor}, {style_goal}, six-view turnaround sheet with portrait, front, three-quarter, profile, back, and expression sheet, grounded dark fantasy rendering, consistent silhouette, consistent facial features, consistent costume motifs, no text, no watermark.",
+      "negativeTemplate": "text, watermark, celebrity likeness, copyrighted character design, mismatched costume details, inconsistent face, extra limbs, duplicated views, distorted hands, modern fashion branding.",
+      "requiredFields": ["subject_name", "role", "distinctive_features", "wardrobe_anchor", "style_goal"],
+      "defaultVisibility": "gm_only",
+      "safetyNotes": [
+        "Avoid real player likenesses unless explicitly approved.",
+        "Keep the accepted reference pack stable once a player chooses a canon version.",
+        "Do not expose GM-only alternate forms or hidden narrative twists in player-facing references."
+      ]
+    },
+    {
       "id": "location-study",
       "category": "location",
       "label": "Location Study",
