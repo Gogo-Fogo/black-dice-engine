@@ -249,6 +249,8 @@ type MediaJob = {
   completedAt?: string;
   error?: string;
   settings: Record<string, unknown>;
+  comfyRouterJobId?: string;
+  comfyPromptId?: string;
 };
 
 type AssetRecord = {
@@ -1781,9 +1783,8 @@ export default function App() {
             <span>{snapshot?.mediaJobs.length ?? 0} tracked</span>
           </div>
           <p className="muted-line">
-            These jobs are the async visual or audio work hanging off scene packets. They are local queue entries
-            for now, not a full ComfyUI execution pipeline yet. Start/Fail/Record are still manual simulation
-            controls in this prototype.
+            Jobs auto-submit to ComfyUI when the router is configured. If ComfyUI is offline or the router is
+            unconfigured, Start/Fail/Record remain manual overrides.
           </p>
           <div className="memory-entry-list">
             {snapshot?.mediaJobs.length ? (
@@ -1807,6 +1808,9 @@ export default function App() {
                   <div className="tag-row">
                     {job.workflowId ? <span className="tag-chip">workflow: {job.workflowId}</span> : null}
                     {job.sceneId ? <span className="tag-chip">scene: {job.sceneId}</span> : null}
+                    {job.comfyPromptId ? (
+                      <span className="tag-chip">comfy: {job.comfyPromptId.slice(0, 8)}…</span>
+                    ) : null}
                     {job.settings?.subjectName ? (
                       <span className="tag-chip">subject: {String(job.settings.subjectName)}</span>
                     ) : null}

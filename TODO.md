@@ -116,6 +116,8 @@ Goal: route scene images through local ComfyUI without blocking gameplay.
 - [x] Add cleanup policy for drafts, temp frames, failed jobs, and final assets.
 - [x] Add resource pressure checks before starting expensive media jobs.
 - [x] Add character visual-canon job type for portrait variants, turnaround sheets, and accepted reference packs.
+- [x] Add real ComfyUI workflow submission and polling via comfy-router.
+- [x] Add auto-finalization of running media jobs when ComfyUI completes.
 
 ### Milestone 0.7: Local Audio Pipeline
 

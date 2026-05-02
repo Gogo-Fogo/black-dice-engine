@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 type WorkflowDefinition = {
   id: string;
-  type: "image" | "video" | "audio" | "upscale" | "interpolation";
+  type: "image" | "video" | "audio" | "upscale" | "interpolation" | "visual_canon";
   label: string;
   description: string;
   runWhen: "background" | "session_break" | "manual";
@@ -28,18 +28,23 @@ type PromptTemplateDefinition = {
   safetyNotes: string[];
 };
 
-type PreparedJob = {
+type TrackedJob = {
   id: string;
   workflowId: string;
   promptTemplateId: string;
   type: WorkflowDefinition["type"];
-  status: "prepared";
+  status: "prepared" | "submitted" | "running" | "completed" | "failed";
   prompt: string;
   negativePrompt?: string;
   outputRoot: string | null;
   readyForComfySubmission: boolean;
   warnings: string[];
   createdAt: string;
+  comfyPromptId?: string;
+  outputs?: Record<string, unknown>;
+  error?: string;
+  submittedAt?: string;
+  completedAt?: string;
 };
 
 const host = process.env.BDE_HOST ?? "0.0.0.0";
@@ -87,7 +92,7 @@ const workflowRegistry = workflowRegistryFile.workflows;
 const promptTemplateFile = loadPromptTemplates();
 const promptTemplates = promptTemplateFile.templates;
 
-const preparedJobs: PreparedJob[] = [];
+const trackedJobs: TrackedJob[] = [];
 
 function sendJson(response: ServerResponse, statusCode: number, body: unknown) {
   response.statusCode = statusCode;
@@ -159,13 +164,17 @@ function prepareJob(payload: Record<string, unknown>) {
     warnings.push("No BDE_COMFY_OUTPUT_ROOT configured yet; output destination is not locked.");
   }
 
+  if (workflow.workflowPath === "PLACEHOLDER.txt") {
+    warnings.push("Workflow path is still a placeholder; ComfyUI submission will be blocked until a real workflow JSON is provided.");
+  }
+
   if (workflow.visibility !== promptTemplate.defaultVisibility) {
     warnings.push(
       `Workflow visibility (${workflow.visibility}) differs from template default visibility (${promptTemplate.defaultVisibility}).`
     );
   }
 
-  const job: PreparedJob = {
+  const job: TrackedJob = {
     id: typeof payload.id === "string" && payload.id ? payload.id : `media-job-${Date.now().toString(36)}`,
     workflowId: workflow.id,
     promptTemplateId: promptTemplate.id,
@@ -174,13 +183,13 @@ function prepareJob(payload: Record<string, unknown>) {
     prompt,
     negativePrompt: negativePrompt || promptTemplate.negativeTemplate,
     outputRoot: comfyOutputRoot || null,
-    readyForComfySubmission: Boolean(comfyApiBase && comfyOutputRoot),
+    readyForComfySubmission: Boolean(comfyApiBase && comfyOutputRoot && workflow.workflowPath !== "PLACEHOLDER.txt"),
     warnings,
     createdAt: new Date().toISOString()
   };
 
-  preparedJobs.unshift(job);
-  preparedJobs.splice(12);
+  trackedJobs.unshift(job);
+  trackedJobs.splice(24);
 
   return {
     ok: true as const,
@@ -190,6 +199,108 @@ function prepareJob(payload: Record<string, unknown>) {
       job
     }
   };
+}
+
+async function submitJobToComfy(job: TrackedJob): Promise<{ ok: boolean; error?: string; comfyPromptId?: string }> {
+  if (!comfyApiBase) {
+    return { ok: false, error: "ComfyUI API base is not configured (BDE_COMFY_API_BASE)." };
+  }
+
+  const workflow = workflowRegistry.find((entry) => entry.id === job.workflowId);
+  if (!workflow) {
+    return { ok: false, error: "Workflow not found in registry." };
+  }
+
+  if (workflow.workflowPath === "PLACEHOLDER.txt") {
+    return { ok: false, error: "Workflow is still a placeholder; provide a real ComfyUI workflow JSON file." };
+  }
+
+  let workflowJson: Record<string, unknown>;
+  try {
+    const workflowFullPath = join(dirname(workflowRegistryPath), workflow.workflowPath);
+    const raw = readFileSync(workflowFullPath, "utf8");
+    workflowJson = JSON.parse(raw) as Record<string, unknown>;
+  } catch (err) {
+    return { ok: false, error: `Failed to load workflow JSON: ${err instanceof Error ? err.message : String(err)}` };
+  }
+
+  // Replace prompt placeholders inside the serialized workflow JSON
+  const serialized = JSON.stringify(workflowJson)
+    .replaceAll("{{positivePrompt}}", job.prompt)
+    .replaceAll("{{negativePrompt}}", job.negativePrompt || "");
+  workflowJson = JSON.parse(serialized) as Record<string, unknown>;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const res = await fetch(`${comfyApiBase}/prompt`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: workflowJson, client_id: job.id }),
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) {
+      const text = await res.text();
+      return { ok: false, error: `ComfyUI returned ${res.status}: ${text}` };
+    }
+
+    const data = (await res.json()) as { prompt_id: string };
+    return { ok: true, comfyPromptId: data.prompt_id };
+  } catch (err) {
+    clearTimeout(timeout);
+    return { ok: false, error: `ComfyUI request failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
+}
+
+async function pollComfyStatus(job: TrackedJob): Promise<{ status: TrackedJob["status"]; outputs?: Record<string, unknown>; error?: string }> {
+  if (!comfyApiBase || !job.comfyPromptId) {
+    return { status: job.status };
+  }
+
+  try {
+    const res = await fetch(`${comfyApiBase}/history/${job.comfyPromptId}`, {
+      signal: AbortSignal.timeout(8000)
+    });
+
+    if (!res.ok) {
+      return { status: job.status, error: `ComfyUI history returned ${res.status}` };
+    }
+
+    const data = (await res.json()) as Record<string, unknown>;
+    const entry = data[job.comfyPromptId] as Record<string, unknown> | undefined;
+
+    if (!entry) {
+      // Job is still in-flight
+      return { status: job.status === "prepared" ? "prepared" : "running" };
+    }
+
+    const outputs = entry.outputs as Record<string, unknown> | undefined;
+    const statusInfo = entry.status as Record<string, unknown> | undefined;
+    const completed = statusInfo?.completed as boolean | undefined;
+    const executionError = statusInfo?.execution_error as Record<string, unknown> | undefined;
+
+    if (executionError) {
+      return {
+        status: "failed",
+        error: String(executionError.exception_message || "ComfyUI execution error")
+      };
+    }
+
+    if (outputs && Object.keys(outputs).length > 0) {
+      return { status: "completed", outputs };
+    }
+
+    if (completed === false) {
+      return { status: "running" };
+    }
+
+    return { status: "completed", outputs: outputs ?? {} };
+  } catch (err) {
+    return { status: job.status, error: `Polling failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
 }
 
 const server = createServer(async (request, response) => {
@@ -229,7 +340,40 @@ const server = createServer(async (request, response) => {
 
   if (request.method === "GET" && url.pathname === "/api/jobs") {
     sendJson(response, 200, {
-      jobs: preparedJobs
+      jobs: trackedJobs
+    });
+    return;
+  }
+
+  if (request.method === "GET" && /^\/api\/jobs\/[^/]+\/status$/.test(url.pathname)) {
+    const jobId = url.pathname.split("/")[3];
+    const job = trackedJobs.find((entry) => entry.id === jobId);
+
+    if (!job) {
+      sendJson(response, 404, { error: "Job not found" });
+      return;
+    }
+
+    const pollResult = await pollComfyStatus(job);
+
+    // Update local tracked state if ComfyUI progressed
+    if (pollResult.status === "completed" && job.status !== "completed") {
+      job.status = "completed";
+      job.completedAt = new Date().toISOString();
+      job.outputs = pollResult.outputs;
+    } else if (pollResult.status === "failed" && job.status !== "failed") {
+      job.status = "failed";
+      job.completedAt = new Date().toISOString();
+      job.error = pollResult.error;
+    } else if (pollResult.status === "running" && job.status === "submitted") {
+      job.status = "running";
+    }
+
+    sendJson(response, 200, {
+      ok: true,
+      job,
+      comfyStatus: pollResult.status,
+      error: pollResult.error ?? null
     });
     return;
   }
@@ -252,6 +396,37 @@ const server = createServer(async (request, response) => {
         error: "Invalid JSON body"
       });
     }
+    return;
+  }
+
+  if (request.method === "POST" && /^\/api\/jobs\/[^/]+\/submit$/.test(url.pathname)) {
+    const jobId = url.pathname.split("/")[3];
+    const job = trackedJobs.find((entry) => entry.id === jobId);
+
+    if (!job) {
+      sendJson(response, 404, { error: "Job not found" });
+      return;
+    }
+
+    if (job.status !== "prepared") {
+      sendJson(response, 409, { error: "Job is not in prepared state", job });
+      return;
+    }
+
+    const submitResult = await submitJobToComfy(job);
+
+    if (!submitResult.ok) {
+      job.status = "failed";
+      job.error = submitResult.error;
+      job.completedAt = new Date().toISOString();
+      sendJson(response, 502, { error: submitResult.error, job });
+      return;
+    }
+
+    job.status = "submitted";
+    job.comfyPromptId = submitResult.comfyPromptId;
+    job.submittedAt = new Date().toISOString();
+    sendJson(response, 200, { ok: true, job });
     return;
   }
 

@@ -258,6 +258,8 @@ type MediaJob = {
   completedAt?: string;
   error?: string;
   settings: Record<string, unknown>;
+  comfyRouterJobId?: string;
+  comfyPromptId?: string;
 };
 
 type AssetRecord = {
@@ -1015,9 +1017,9 @@ function getRuntimeStatus(): RuntimeStatus {
       },
       {
         name: "comfy-router",
-        status: comfyRouterEndpoint ? "degraded" : "unknown",
+        status: comfyRouterEndpoint ? "ok" : "unknown",
         message: comfyRouterEndpoint
-          ? `Placeholder router expected at ${comfyRouterEndpoint}`
+          ? `Router configured at ${comfyRouterEndpoint}; submits to ComfyUI when workflow files are present`
           : "No comfy-router endpoint configured yet; media queue remains internal only"
       },
       {
@@ -1770,6 +1772,106 @@ function createAssetRecordFromMediaJob(job: MediaJob): AssetRecord {
   };
 }
 
+function finalizeMediaJobAsGenerated(job: MediaJob, actorLabel = "GM Dashboard") {
+  if (!job.startedAt) {
+    job.startedAt = new Date().toISOString();
+  }
+  job.status = "generated";
+  job.completedAt = new Date().toISOString();
+  job.outputPath = buildAssetLocalPath(job);
+  job.error = undefined;
+
+  const existing = assetRecords.find((entry) => entry.metadata.mediaJobId === job.id);
+  const assetRecord = existing ?? createAssetRecordFromMediaJob(job);
+
+  if (!existing) {
+    assetRecords.unshift(assetRecord);
+    assetRecords.splice(16);
+  } else {
+    existing.status = "generated";
+    existing.localPath = job.outputPath;
+    existing.prompt = job.prompt;
+    existing.workflowId = job.workflowId;
+    existing.metadata = {
+      ...existing.metadata,
+      generatedAt: job.completedAt ?? new Date().toISOString(),
+      runWhen: job.runWhen,
+      priority: job.priority,
+      negativePrompt: job.negativePrompt ?? null,
+      linkedAssetId: job.linkedAssetId ?? null,
+      settings: job.settings
+    };
+  }
+
+  recordTableEvent({
+    category: "media",
+    type: "media_metadata_recorded",
+    actor: {
+      id: "gm-dashboard",
+      kind: "gm",
+      label: actorLabel
+    },
+    visibility: job.visibility,
+    summary: `${job.type} media metadata recorded.`,
+    payload: {
+      mediaJobId: job.id,
+      assetId: assetRecord.id,
+      localPath: assetRecord.localPath ?? null
+    }
+  });
+
+  recordAiLog({
+    kind: "tool_call",
+    adapter: "scene_packet",
+    correlationId: job.sceneId ?? job.id,
+    summary: `Recorded generated media metadata for ${job.type} job`,
+    details: {
+      mediaJobId: job.id,
+      assetId: assetRecord.id,
+      localPath: assetRecord.localPath ?? null
+    }
+  });
+
+  publishSessionState();
+  return assetRecord;
+}
+
+function finalizeMediaJobAsFailed(job: MediaJob, error: string, actorLabel = "GM Dashboard") {
+  job.status = "failed";
+  job.completedAt = new Date().toISOString();
+  job.error = error;
+
+  recordTableEvent({
+    category: "media",
+    type: "media_job_failed",
+    actor: {
+      id: "gm-dashboard",
+      kind: "gm",
+      label: actorLabel
+    },
+    visibility: job.visibility,
+    summary: `${job.type} media job failed.`,
+    payload: {
+      mediaJobId: job.id,
+      workflowId: job.workflowId ?? null,
+      error
+    }
+  });
+
+  recordAiLog({
+    kind: "tool_call",
+    adapter: "scene_packet",
+    correlationId: job.sceneId ?? job.id,
+    summary: `Marked ${job.type} media job as failed`,
+    details: {
+      mediaJobId: job.id,
+      error
+    }
+  });
+
+  publishSessionState();
+}
+
 function buildLocalModelAdapterDraft(scenePacket: ScenePacket): LocalModelAdapterDraft {
   const snapshot = getSessionSnapshot();
   const promptPreview = readFileSync(gmSystemPromptPath, "utf8")
@@ -2448,7 +2550,7 @@ app.post("/api/characters/:characterId/visual-canon-job", (request, response) =>
   });
 });
 
-app.post("/api/media-jobs/:jobId/start", (request, response) => {
+app.post("/api/media-jobs/:jobId/start", async (request, response) => {
   const { jobId } = request.params;
   const job = mediaJobs.find((entry) => entry.id === jobId);
 
@@ -2470,10 +2572,73 @@ app.post("/api/media-jobs/:jobId/start", (request, response) => {
     return;
   }
 
-  job.status = "running";
-  job.startedAt = new Date().toISOString();
-  job.completedAt = undefined;
-  job.error = undefined;
+  // If comfy-router is configured, attempt real submission
+  if (comfyRouterEndpoint) {
+    try {
+      const prepareRes = await fetch(`${comfyRouterEndpoint}/api/jobs/prepare`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          id: job.id,
+          workflowId: job.workflowId,
+          prompt: job.prompt,
+          negativePrompt: job.negativePrompt,
+          type: job.type
+        }),
+        signal: AbortSignal.timeout(10000)
+      });
+
+      if (!prepareRes.ok) {
+        const text = await prepareRes.text();
+        throw new Error(`Prepare failed: ${prepareRes.status} ${text}`);
+      }
+
+      const prepareJson = await prepareRes.json() as { job?: { id: string } };
+      const preparedJobId = prepareJson.job?.id;
+
+      if (!preparedJobId) {
+        throw new Error("Prepare response missing job id");
+      }
+
+      const submitRes = await fetch(`${comfyRouterEndpoint}/api/jobs/${preparedJobId}/submit`, {
+        method: "POST",
+        signal: AbortSignal.timeout(15000)
+      });
+
+      if (!submitRes.ok) {
+        const text = await submitRes.text();
+        throw new Error(`Submit failed: ${submitRes.status} ${text}`);
+      }
+
+      const submitJson = await submitRes.json() as { job?: { comfyPromptId?: string } };
+
+      job.comfyRouterJobId = preparedJobId;
+      job.comfyPromptId = submitJson.job?.comfyPromptId;
+      job.status = "running";
+      job.startedAt = new Date().toISOString();
+      job.completedAt = undefined;
+      job.error = undefined;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      job.status = "failed";
+      job.completedAt = new Date().toISOString();
+      job.error = `ComfyUI routing failed: ${message}`;
+      response.status(200).json({
+        ok: true,
+        job,
+        runtimeStatus: getRuntimeStatus(),
+        sessionSnapshot: publishSessionState()
+      });
+      return;
+    }
+  } else {
+    job.status = "running";
+    job.startedAt = new Date().toISOString();
+    job.completedAt = undefined;
+    job.error = undefined;
+  }
 
   recordTableEvent({
     category: "media",
@@ -2488,7 +2653,8 @@ app.post("/api/media-jobs/:jobId/start", (request, response) => {
     payload: {
       mediaJobId: job.id,
       workflowId: job.workflowId ?? null,
-      sceneId: job.sceneId ?? null
+      sceneId: job.sceneId ?? null,
+      comfyPromptId: job.comfyPromptId ?? null
     }
   });
 
@@ -2499,7 +2665,8 @@ app.post("/api/media-jobs/:jobId/start", (request, response) => {
     summary: `Started ${job.type} media job`,
     details: {
       mediaJobId: job.id,
-      workflowId: job.workflowId ?? null
+      workflowId: job.workflowId ?? null,
+      comfyPromptId: job.comfyPromptId ?? null
     }
   });
 
@@ -2527,37 +2694,7 @@ app.post("/api/media-jobs/:jobId/fail", (request, response) => {
       ? request.body.error.trim()
       : "Marked failed from GM dashboard.";
 
-  job.status = "failed";
-  job.completedAt = new Date().toISOString();
-  job.error = requestedError;
-
-  recordTableEvent({
-    category: "media",
-    type: "media_job_failed",
-    actor: {
-      id: "gm-dashboard",
-      kind: "gm",
-      label: "GM Dashboard"
-    },
-    visibility: job.visibility,
-    summary: `${job.type} media job failed.`,
-    payload: {
-      mediaJobId: job.id,
-      workflowId: job.workflowId ?? null,
-      error: requestedError
-    }
-  });
-
-  recordAiLog({
-    kind: "tool_call",
-    adapter: "scene_packet",
-    correlationId: job.sceneId ?? job.id,
-    summary: `Marked ${job.type} media job as failed`,
-    details: {
-      mediaJobId: job.id,
-      error: requestedError
-    }
-  });
+  finalizeMediaJobAsFailed(job, requestedError);
 
   response.json({
     ok: true,
@@ -2577,64 +2714,7 @@ app.post("/api/media-jobs/:jobId/mark-generated", (request, response) => {
     return;
   }
 
-  job.status = "generated";
-  if (!job.startedAt) {
-    job.startedAt = new Date().toISOString();
-  }
-  job.completedAt = new Date().toISOString();
-  job.outputPath = buildAssetLocalPath(job);
-  job.error = undefined;
-
-  const existing = assetRecords.find((entry) => entry.metadata.mediaJobId === job.id);
-  const assetRecord = existing ?? createAssetRecordFromMediaJob(job);
-
-  if (!existing) {
-    assetRecords.unshift(assetRecord);
-    assetRecords.splice(16);
-  } else {
-    existing.status = "generated";
-    existing.localPath = job.outputPath;
-    existing.prompt = job.prompt;
-    existing.workflowId = job.workflowId;
-    existing.metadata = {
-      ...existing.metadata,
-      generatedAt: job.completedAt ?? new Date().toISOString(),
-      runWhen: job.runWhen,
-      priority: job.priority,
-      negativePrompt: job.negativePrompt ?? null,
-      linkedAssetId: job.linkedAssetId ?? null,
-      settings: job.settings
-    };
-  }
-
-  recordTableEvent({
-    category: "media",
-    type: "media_metadata_recorded",
-    actor: {
-      id: "gm-dashboard",
-      kind: "gm",
-      label: "GM Dashboard"
-    },
-    visibility: job.visibility,
-    summary: `${job.type} media metadata recorded.`,
-    payload: {
-      mediaJobId: job.id,
-      assetId: assetRecord.id,
-      localPath: assetRecord.localPath ?? null
-    }
-  });
-
-  recordAiLog({
-    kind: "tool_call",
-    adapter: "scene_packet",
-    correlationId: job.sceneId ?? job.id,
-    summary: `Recorded generated media metadata for ${job.type} job`,
-    details: {
-      mediaJobId: job.id,
-      assetId: assetRecord.id,
-      localPath: assetRecord.localPath ?? null
-    }
-  });
+  const assetRecord = finalizeMediaJobAsGenerated(job);
 
   response.json({
     ok: true,
@@ -3080,6 +3160,43 @@ setInterval(() => {
     }
   }
 }, 60000);
+
+// Poll comfy-router for running media jobs and auto-finalize them
+setInterval(async () => {
+  if (!comfyRouterEndpoint) {
+    return;
+  }
+
+  for (const job of mediaJobs) {
+    if (job.status !== "running" || !job.comfyRouterJobId) {
+      continue;
+    }
+
+    try {
+      const res = await fetch(`${comfyRouterEndpoint}/api/jobs/${job.comfyRouterJobId}/status`, {
+        signal: AbortSignal.timeout(8000)
+      });
+
+      if (!res.ok) {
+        continue;
+      }
+
+      const json = await res.json() as {
+        status: string;
+        outputs?: Record<string, unknown>;
+        error?: string;
+      };
+
+      if (json.status === "completed") {
+        finalizeMediaJobAsGenerated(job, "ComfyUI Router");
+      } else if (json.status === "failed") {
+        finalizeMediaJobAsFailed(job, json.error || "ComfyUI job failed", "ComfyUI Router");
+      }
+    } catch {
+      // Ignore polling errors for individual jobs
+    }
+  }
+}, 5000);
 
 server.listen(gameServerPort, host, () => {
   const gmUrl = "http://127.0.0.1:5173";
