@@ -1669,7 +1669,15 @@ export default function App() {
             <span>Queue risky state changes for approval</span>
           </label>
           <div className="party-list">
-            {snapshot?.party.map((character) => (
+            {snapshot?.party
+              .slice()
+              .sort((a, b) => {
+                const ai = a.initiative ?? -1;
+                const bi = b.initiative ?? -1;
+                if (ai !== bi) return bi - ai;
+                return a.name.localeCompare(b.name);
+              })
+              .map((character) => (
               <div key={character.id} className="party-card">
                 <div>
                   <h3>{character.name}</h3>
