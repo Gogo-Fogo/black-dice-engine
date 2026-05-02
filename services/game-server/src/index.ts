@@ -64,6 +64,7 @@ type Character = {
   classLabel: string;
   hp: { current: number; max: number };
   armorClass: number;
+  initiative: number | null;
   conditions: string[];
   resources: Array<{
     id: string;
@@ -111,7 +112,8 @@ type TableEventRecord = {
     | "memory_entry_created"
     | "media_job_started"
     | "media_job_failed"
-    | "media_metadata_recorded";
+    | "media_metadata_recorded"
+    | "initiative_set";
   actor: {
     id: string;
     kind: "gm" | "player" | "system" | "ai_assistant";
@@ -431,6 +433,12 @@ type StateEventRequest =
       resourceId: string;
       value: number;
       requestId?: string;
+    }
+  | {
+      type: "initiative_set";
+      characterId: string;
+      value: number;
+      requestId?: string;
     };
 
 type ClientSession = {
@@ -484,6 +492,7 @@ const defaultParty: Character[] = [
     classLabel: "Rogue 3",
     hp: { current: 22, max: 30 },
     armorClass: 15,
+    initiative: null,
     conditions: ["Alert", "Uninjured stride"],
     resources: [
       { id: "resource-hit-dice", label: "Hit Dice", current: 3, max: 3 },
@@ -504,6 +513,7 @@ const defaultParty: Character[] = [
     classLabel: "Cleric 3",
     hp: { current: 27, max: 27 },
     armorClass: 18,
+    initiative: null,
     conditions: ["Blessed ward"],
     resources: [
       { id: "resource-spell-slots-1", label: "Spell Slots I", current: 4, max: 4 },
@@ -525,6 +535,7 @@ const defaultParty: Character[] = [
     classLabel: "Wizard 3",
     hp: { current: 14, max: 18 },
     armorClass: 12,
+    initiative: null,
     conditions: ["Fatigued"],
     resources: [
       { id: "resource-spell-slots-1", label: "Spell Slots I", current: 2, max: 4 },
@@ -1436,6 +1447,44 @@ function applyStateEvent(event: StateEventRequest, actorLabel = "GM Dashboard") 
         previous,
         current: resource.current,
         max: resource.max
+      }
+    });
+    return {
+      ok: true as const,
+      statusCode: 200,
+      body: {
+        ok: true,
+        sessionSnapshot: publishSessionState()
+      }
+    };
+  }
+
+  if (event.type === "initiative_set") {
+    if (typeof event.value !== "number" || Number.isNaN(event.value)) {
+      return {
+        ok: false as const,
+        statusCode: 400,
+        body: {
+          error: "Numeric value is required for initiative"
+        }
+      };
+    }
+
+    character.initiative = event.value;
+    recordTableEvent({
+      category: "state",
+      type: "initiative_set",
+      actor: {
+        id: "gm-dashboard",
+        kind: "gm",
+        label: actorLabel
+      },
+      visibility: "player_visible",
+      summary: `${character.name} initiative set to ${event.value}`,
+      payload: {
+        characterId: character.id,
+        characterName: character.name,
+        initiative: event.value
       }
     });
     return {

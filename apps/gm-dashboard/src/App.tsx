@@ -49,6 +49,7 @@ type Character = {
   classLabel: string;
   hp: { current: number; max: number };
   armorClass: number;
+  initiative: number | null;
   conditions: string[];
   resources: Array<{
     id: string;
@@ -471,6 +472,12 @@ type StateEventRequest =
       resourceId: string;
       value: number;
       requestId: string;
+    }
+  | {
+      type: "initiative_set";
+      characterId: string;
+      value: number;
+      requestId: string;
     };
 
 type StateEventDraft =
@@ -493,6 +500,11 @@ type StateEventDraft =
       type: "resource_set";
       characterId: string;
       resourceId: string;
+      value: number;
+    }
+  | {
+      type: "initiative_set";
+      characterId: string;
       value: number;
     };
 
@@ -534,6 +546,11 @@ function formatMediaJobStatus(value: MediaJob["status"]) {
 
 function formatSimpleLabel(value: string) {
   return value.replace(/_/g, " ");
+}
+
+function formatInitiative(value: number | null) {
+  if (value === null) return "--";
+  return `Init ${value}`;
 }
 
 function createRequestId() {
@@ -1663,6 +1680,27 @@ export default function App() {
                     HP {character.hp.current}/{character.hp.max}
                   </span>
                   <span>AC {character.armorClass}</span>
+                  <span>{formatInitiative(character.initiative)}</span>
+                </div>
+                <div className="initiative-row">
+                  <input
+                    className="initiative-input"
+                    type="number"
+                    value={character.initiative ?? ""}
+                    onChange={(event) => {
+                      const value = event.target.value ? Number(event.target.value) : null;
+                      void submitStateEvent(
+                        {
+                          type: "initiative_set",
+                          characterId: character.id,
+                          value: value ?? 0
+                        },
+                        `init:${character.id}:${value}`,
+                        `init-${character.id}`
+                      );
+                    }}
+                    placeholder="Init"
+                  />
                 </div>
                 <div className="tag-row">
                   {character.conditions.length > 0 ? (

@@ -378,6 +378,32 @@ body {
   color: #f0dcaf;
 }
 
+.initiative-row {
+  margin-top: 6px;
+}
+
+.initiative-input {
+  width: 80px;
+  padding: 4px 8px;
+  border: 1px solid rgba(216, 175, 80, 0.25);
+  background: rgba(15, 15, 20, 0.8);
+  color: #d8af50;
+  border-radius: 4px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.initiative-input::placeholder {
+  color: #5a5544;
+  opacity: 1;
+}
+
+.initiative-input:focus {
+  border-color: rgba(216, 175, 80, 0.6);
+  outline: none;
+}
+
 .tag-row {
   display: flex;
   flex-wrap: wrap;

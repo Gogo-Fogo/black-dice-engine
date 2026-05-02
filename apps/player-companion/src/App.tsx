@@ -18,6 +18,7 @@ type Character = {
   classLabel: string;
   hp: { current: number; max: number };
   armorClass: number;
+  initiative: number | null;
   conditions: string[];
   resources: Array<{
     id: string;
