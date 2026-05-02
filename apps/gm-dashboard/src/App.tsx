@@ -253,6 +253,28 @@ type MediaJob = {
   comfyPromptId?: string;
 };
 
+type AudioTrack = {
+  id: string;
+  filename: string;
+  relativePath: string;
+  localPath: string;
+  urlPath: string;
+  kind: "music" | "ambience" | "stinger" | "unknown";
+  tags: string[];
+  durationSeconds?: number;
+  notes?: string;
+};
+
+type PlaybackState = {
+  status: "idle" | "playing" | "paused";
+  currentTrackId: string | null;
+  volume: number;
+  muted: boolean;
+  loop: boolean;
+  startedAt: string | null;
+  pausedAt: string | null;
+};
+
 type AssetRecord = {
   id: string;
   campaignId: string;
@@ -541,6 +563,10 @@ export default function App() {
   const [directorDraft, setDirectorDraft] = useState<DirectorModeAdapterDraft | null>(null);
   const [directorStatus, setDirectorStatus] = useState("");
   const [aiLogs, setAiLogs] = useState<AiLogEntry[]>([]);
+  const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
+  const [audioPlayback, setAudioPlayback] = useState<PlaybackState | null>(null);
+  const [audioServiceUrl, setAudioServiceUrl] = useState("");
+  const [audioStatus, setAudioStatus] = useState("");
 
   async function exportSessionSummary() {
     setExportStatus("exporting");
@@ -941,6 +967,121 @@ export default function App() {
     }
   }
 
+  async function loadAudioLibrary() {
+    if (!audioServiceUrl) return;
+    try {
+      const response = await fetch(`${audioServiceUrl}/api/library`, {
+        signal: AbortSignal.timeout(5000)
+      });
+      if (!response.ok) return;
+      const json = (await response.json()) as { tracks: AudioTrack[] };
+      setAudioTracks(json.tracks);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function loadAudioStatus() {
+    if (!audioServiceUrl) return;
+    try {
+      const response = await fetch(`${audioServiceUrl}/api/status`, {
+        signal: AbortSignal.timeout(5000)
+      });
+      if (!response.ok) return;
+      const json = (await response.json()) as { playbackState: PlaybackState };
+      setAudioPlayback(json.playbackState);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function playAudioTrack(trackId: string, loop = false) {
+    if (!audioServiceUrl) return;
+    setAudioStatus("playing");
+    try {
+      const response = await fetch(`${audioServiceUrl}/api/play`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trackId, loop }),
+        signal: AbortSignal.timeout(5000)
+      });
+      if (!response.ok) {
+        setAudioStatus("failed");
+        return;
+      }
+      const json = (await response.json()) as { playbackState: PlaybackState };
+      setAudioPlayback(json.playbackState);
+      setAudioStatus("ready");
+    } catch {
+      setAudioStatus("failed");
+    }
+  }
+
+  async function pauseAudio() {
+    if (!audioServiceUrl) return;
+    try {
+      const response = await fetch(`${audioServiceUrl}/api/pause`, {
+        method: "POST",
+        signal: AbortSignal.timeout(5000)
+      });
+      if (!response.ok) return;
+      const json = (await response.json()) as { playbackState: PlaybackState };
+      setAudioPlayback(json.playbackState);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function stopAudio() {
+    if (!audioServiceUrl) return;
+    try {
+      const response = await fetch(`${audioServiceUrl}/api/stop`, {
+        method: "POST",
+        signal: AbortSignal.timeout(5000)
+      });
+      if (!response.ok) return;
+      const json = (await response.json()) as { playbackState: PlaybackState };
+      setAudioPlayback(json.playbackState);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function setAudioVolume(volume: number) {
+    if (!audioServiceUrl) return;
+    try {
+      const response = await fetch(`${audioServiceUrl}/api/volume`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ volume }),
+        signal: AbortSignal.timeout(5000)
+      });
+      if (!response.ok) return;
+      const json = (await response.json()) as { playbackState: PlaybackState };
+      setAudioPlayback(json.playbackState);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function toggleAudioMute() {
+    if (!audioServiceUrl || !audioPlayback) return;
+    const next = !audioPlayback.muted;
+    try {
+      const response = await fetch(`${audioServiceUrl}/api/mute`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ muted: next }),
+        signal: AbortSignal.timeout(5000)
+      });
+      if (!response.ok) return;
+      const json = (await response.json()) as { playbackState: PlaybackState };
+      setAudioPlayback(json.playbackState);
+    } catch {
+      // ignore
+    }
+  }
+
   async function submitStateEvent(
     event: StateEventDraft,
     fingerprint: string,
@@ -1040,6 +1181,26 @@ export default function App() {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    const audioService = runtime?.services.find((s) => s.name === "audio-service");
+    const message = audioService?.message ?? "";
+    const match = message.match(/https?:\/\/[^\s]+/);
+    const nextUrl = match ? match[0] : "";
+    if (nextUrl && nextUrl !== audioServiceUrl) {
+      setAudioServiceUrl(nextUrl);
+    }
+  }, [runtime, audioServiceUrl]);
+
+  useEffect(() => {
+    if (!audioServiceUrl) return;
+    void loadAudioLibrary();
+    void loadAudioStatus();
+    const interval = window.setInterval(() => {
+      void loadAudioStatus();
+    }, 3000);
+    return () => window.clearInterval(interval);
+  }, [audioServiceUrl]);
 
   useEffect(() => {
     let mounted = true;
@@ -1896,6 +2057,123 @@ export default function App() {
                               : "Media metadata update failed."}
             </p>
           ) : null}
+        </article>
+
+        <article className="panel">
+          <div className="panel-header">
+            <h2>Audio Library</h2>
+            <span>{audioTracks.length} tracks</span>
+          </div>
+          <p className="muted-line">
+            Browse the local audio library by kind. Playback controls the host audio service state; the GM
+            dashboard is the default playback source.
+          </p>
+          {audioServiceUrl ? (
+            <div>
+              <div className="panel-header">
+                <h3>Now Playing</h3>
+                <span className={`pill pill-${audioPlayback?.status === "playing" ? "ok" : "degraded"}`}>
+                  {audioPlayback?.status ?? "idle"}
+                </span>
+              </div>
+              {audioPlayback?.currentTrackId ? (
+                <div className="context-row">
+                  <strong>
+                    {audioTracks.find((t) => t.id === audioPlayback.currentTrackId)?.filename ?? "Unknown track"}
+                  </strong>
+                  <p>
+                    Volume: {Math.round((audioPlayback?.volume ?? 0) * 100)}%
+                    {audioPlayback?.muted ? " · muted" : ""}
+                    {audioPlayback?.loop ? " · looping" : ""}
+                  </p>
+                </div>
+              ) : (
+                <p className="muted-line">No track selected.</p>
+              )}
+              <div className="quick-action-row">
+                <button
+                  className="mini-button"
+                  disabled={!audioPlayback?.currentTrackId}
+                  onClick={() => void pauseAudio()}
+                  type="button"
+                >
+                  Pause
+                </button>
+                <button
+                  className="mini-button"
+                  disabled={audioPlayback?.status === "idle"}
+                  onClick={() => void stopAudio()}
+                  type="button"
+                >
+                  Stop
+                </button>
+                <button
+                  className="mini-button"
+                  disabled={audioPlayback?.status === "idle"}
+                  onClick={() => void toggleAudioMute()}
+                  type="button"
+                >
+                  {audioPlayback?.muted ? "Unmute" : "Mute"}
+                </button>
+              </div>
+              <div className="quick-action-row">
+                <button className="mini-button" onClick={() => void setAudioVolume(0.2)} type="button">
+                  Vol 20%
+                </button>
+                <button className="mini-button" onClick={() => void setAudioVolume(0.5)} type="button">
+                  Vol 50%
+                </button>
+                <button className="mini-button" onClick={() => void setAudioVolume(0.8)} type="button">
+                  Vol 80%
+                </button>
+                <button className="mini-button" onClick={() => void setAudioVolume(1.0)} type="button">
+                  Vol 100%
+                </button>
+              </div>
+              <div>
+                <p className="detail-label">Tracks</p>
+                <div className="memory-entry-list">
+                  {audioTracks.length ? (
+                    audioTracks.map((track) => (
+                      <div className="memory-entry-card" key={track.id}>
+                        <div className="memory-entry-header">
+                          <strong>{track.filename}</strong>
+                          <span className="event-pill event-memory">{track.kind}</span>
+                        </div>
+                        <div className="tag-row">
+                          {track.tags.map((tag) => (
+                            <span className="tag-chip" key={`${track.id}-${tag}`}>
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                        <div className="approval-actions">
+                          <button
+                            className="mini-button"
+                            onClick={() => void playAudioTrack(track.id, false)}
+                            type="button"
+                          >
+                            Play
+                          </button>
+                          <button
+                            className="mini-button"
+                            onClick={() => void playAudioTrack(track.id, true)}
+                            type="button"
+                          >
+                            Loop
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p>No audio tracks found in library.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p>Audio service not configured in runtime status.</p>
+          )}
         </article>
 
         <article className="panel">

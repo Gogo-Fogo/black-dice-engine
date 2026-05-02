@@ -422,6 +422,7 @@ const mediaOutputRoot =
   process.env.BDE_MEDIA_OUTPUT_ROOT?.trim() || "G:\\AI-DM\\04_assets\\generated";
 const localModelEndpoint = process.env.BDE_LOCAL_MODEL_ENDPOINT?.trim() || "";
 const directorModeModel = process.env.BDE_DIRECTOR_MODE_MODEL?.trim() || "";
+const audioServiceEndpoint = process.env.BDE_AUDIO_SERVICE_ENDPOINT?.trim() || "";
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const playerCompanionDistDir = join(currentDir, "../../../apps/player-companion/dist");
 const sessionSummaryExportDir = join(currentDir, "../../../_exports/session-summaries");
@@ -1035,6 +1036,13 @@ function getRuntimeStatus(): RuntimeStatus {
         message: directorModeModel
           ? `Placeholder director ready for ${directorModeModel}`
           : "No director model configured yet; placeholder mode only"
+      },
+      {
+        name: "audio-service",
+        status: audioServiceEndpoint ? "ok" : "unknown",
+        message: audioServiceEndpoint
+          ? `Audio service configured at ${audioServiceEndpoint}`
+          : "No audio service endpoint configured yet"
       }
     ],
     clients,

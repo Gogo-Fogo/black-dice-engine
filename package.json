@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
+    "dev:audio": "npm --workspace services/audio-service run dev",
     "dev:comfy": "npm --workspace services/comfy-router run dev",
     "dev:gm": "npm --workspace apps/gm-dashboard run dev",
     "dev:player": "npm --workspace apps/player-companion run dev",

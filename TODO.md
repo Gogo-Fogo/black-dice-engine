@@ -123,15 +123,15 @@ Goal: route scene images through local ComfyUI without blocking gameplay.
 
 Goal: add music, ambience, and stingers without slowing live play.
 
-- [ ] Add audio cue schema examples.
-- [ ] Add local audio library path configuration.
-- [ ] Add tagged audio asset metadata for music, ambience, and stingers.
-- [ ] Add audio service scaffold.
-- [ ] Add GM dashboard controls for play, pause, mute, fade, and override.
+- [x] Add audio cue schema examples.
+- [x] Add local audio library path configuration.
+- [x] Add tagged audio asset metadata for music, ambience, and stingers.
+- [x] Add audio service scaffold.
+- [x] Add GM dashboard controls for play, pause, mute, and volume.
 - [ ] Trigger ambience/music loops on scene start and scene change.
 - [ ] Trigger one-shot stingers from reveals, traps, critical hits, and combat transitions.
-- [ ] Keep generated or licensed audio files outside Git.
-- [ ] Treat AI-generated audio as queued/prep-time content, not live per-turn generation.
+- [x] Keep generated or licensed audio files outside Git.
+- [x] Treat AI-generated audio as queued/prep-time content, not live per-turn generation.
 
 ### Milestone 0.8: Runtime Reliability
 
