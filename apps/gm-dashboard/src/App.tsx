@@ -746,6 +746,43 @@ export default function App() {
     }
   }
 
+  async function queueScenePacketAudioCues() {
+    if (!scenePacket) {
+      return;
+    }
+
+    setPendingActionKey("scene-packet-audio");
+    setMediaQueueStatus("queueing-audio");
+    try {
+      const response = await fetch("/api/scene-packet/queue-audio", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(scenePacket)
+      });
+
+      if (!response.ok) {
+        setMediaQueueStatus("failed");
+        return;
+      }
+
+      const json = (await response.json()) as {
+        sessionSnapshot: SessionSnapshot;
+        queuedCount: number;
+        cues: Array<Record<string, unknown>>;
+        validation: ScenePacketValidation;
+      };
+      setSnapshot(json.sessionSnapshot);
+      setScenePacketValidation(json.validation);
+      setMediaQueueStatus(`queued-audio:${json.queuedCount}`);
+    } catch {
+      setMediaQueueStatus("failed");
+    } finally {
+      setPendingActionKey("");
+    }
+  }
+
   async function queueCharacterVisualCanonJob(characterId: string) {
     setPendingActionKey(`visual-canon-${characterId}`);
     setMediaQueueStatus("queueing-visual-canon");
@@ -1941,10 +1978,43 @@ export default function App() {
               >
                 Queue Media Jobs
               </button>
+              <button
+                className="export-button secondary-action"
+                disabled={
+                  pendingActionKey !== "" ||
+                  !scenePacket.audioCues.length ||
+                  scenePacketValidation?.ok === false
+                }
+                onClick={() => void queueScenePacketAudioCues()}
+                type="button"
+              >
+                Queue Audio Cues
+              </button>
+              {scenePacket.audioCues.length ? (
+                <div className="packet-beat-list">
+                  {scenePacket.audioCues.map((cue, index) => (
+                    <div className="packet-beat" key={`${scenePacket.id}-audio-${index}`}>
+                      <span className="event-pill event-memory">{String(cue.kind ?? "audio")}</span>
+                      <p>
+                        {String(cue.notes ?? "Suggested audio cue")}
+                        {Array.isArray(cue.tags) && cue.tags.length ? (
+                          <span className="tag-row" style={{ marginLeft: 8 }}>
+                            {cue.tags.map((tag: string) => (
+                              <span className="tag-chip" key={tag}>{tag}</span>
+                            ))}
+                          </span>
+                        ) : null}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               {mediaQueueStatus === "queueing" ||
               mediaQueueStatus.startsWith("queued:") ||
               mediaQueueStatus === "queueing-visual-canon" ||
               mediaQueueStatus.startsWith("visual-canon:") ||
+              mediaQueueStatus === "queueing-audio" ||
+              mediaQueueStatus.startsWith("queued-audio:") ||
               mediaQueueStatus === "failed" ? (
                 <p className="export-note">
                   {mediaQueueStatus === "queueing"
@@ -1955,6 +2025,10 @@ export default function App() {
                         ? "Queueing character visual-canon job..."
                         : mediaQueueStatus.startsWith("visual-canon:")
                           ? `Character visual-canon job ${mediaQueueStatus.split(":")[1]} added to the queue.`
+                          : mediaQueueStatus === "queueing-audio"
+                            ? "Queueing audio cues..."
+                            : mediaQueueStatus.startsWith("queued-audio:")
+                              ? `${mediaQueueStatus.split(":")[1]} audio cue(s) added to the queue.`
                       : "Media jobs failed to queue."}
                 </p>
               ) : null}

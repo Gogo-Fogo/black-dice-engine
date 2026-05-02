@@ -128,8 +128,8 @@ Goal: add music, ambience, and stingers without slowing live play.
 - [x] Add tagged audio asset metadata for music, ambience, and stingers.
 - [x] Add audio service scaffold.
 - [x] Add GM dashboard controls for play, pause, mute, and volume.
-- [ ] Trigger ambience/music loops on scene start and scene change.
-- [ ] Trigger one-shot stingers from reveals, traps, critical hits, and combat transitions.
+- [x] Trigger ambience/music loops on scene start and scene change.
+- [x] Trigger one-shot stingers from reveals, traps, critical hits, and combat transitions.
 - [x] Keep generated or licensed audio files outside Git.
 - [x] Treat AI-generated audio as queued/prep-time content, not live per-turn generation.
 

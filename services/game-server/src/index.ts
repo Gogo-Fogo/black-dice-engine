@@ -2527,6 +2527,78 @@ app.post("/api/scene-packet/queue-media", (request, response) => {
   });
 });
 
+app.post("/api/scene-packet/queue-audio", (request, response) => {
+  const body = request.body as Partial<ScenePacket>;
+
+  if (!Array.isArray(body.audioCues)) {
+    response.status(400).json({
+      error: "audioCues array is required"
+    });
+    return;
+  }
+
+  const packet = body as ScenePacket;
+  const validation = validateScenePacket(packet);
+
+  if (!validation.ok) {
+    recordAiLog({
+      kind: "validation_failure",
+      adapter: "scene_packet",
+      correlationId: packet.id || "scene-packet-audio",
+      summary: "Scene-packet audio queue blocked by validation failure",
+      details: {
+        errors: validation.errors
+      }
+    });
+    response.status(400).json({
+      error: "Scene packet failed validation",
+      validation
+    });
+    return;
+  }
+
+  const queued = packet.audioCues
+    .filter((cue) => {
+      const status = typeof cue.status === "string" ? cue.status : "";
+      return status === "suggested" || status === "approved";
+    })
+    .map((cue) => ({
+      id: typeof cue.id === "string" ? cue.id : `audio-cue-${Date.now().toString(36)}`,
+      kind: cue.kind ?? "ambience",
+      status: "queued",
+      visibility: cue.visibility ?? "gm_only",
+      trigger: cue.trigger ?? "manual",
+      tags: Array.isArray(cue.tags) ? cue.tags : [],
+      loop: Boolean(cue.loop),
+      volume: typeof cue.volume === "number" ? cue.volume : 0.7,
+      fadeInSeconds: typeof cue.fadeInSeconds === "number" ? cue.fadeInSeconds : 3,
+      fadeOutSeconds: typeof cue.fadeOutSeconds === "number" ? cue.fadeOutSeconds : 3,
+      notes: typeof cue.notes === "string" ? cue.notes : undefined
+    }));
+
+  queued.forEach((cue) => {
+    recordAiLog({
+      kind: "tool_call",
+      adapter: "scene_packet",
+      correlationId: packet.id,
+      summary: `Queued ${cue.kind} audio cue for ${packet.sceneTitle}`,
+      details: {
+        audioCueId: cue.id,
+        trigger: cue.trigger,
+        tags: cue.tags
+      }
+    });
+  });
+
+  response.json({
+    ok: true,
+    queuedCount: queued.length,
+    cues: queued,
+    validation,
+    sessionSnapshot: publishSessionState()
+  });
+});
+
 app.get("/api/ai-logs", (_request, response) => {
   response.json({
     logs: aiLogs
