@@ -610,6 +610,10 @@ body {
   background: rgba(42, 27, 46, 0.76);
 }
 
+.event-validation {
+  background: rgba(87, 33, 33, 0.82);
+}
+
 @media (max-width: 980px) {
   .hero-panel,
   .dashboard-grid {

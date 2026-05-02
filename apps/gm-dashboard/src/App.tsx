@@ -211,6 +211,16 @@ type DirectorModeAdapterDraft = {
   };
 };
 
+type AiLogEntry = {
+  id: string;
+  kind: "input_packet" | "output_packet" | "tool_call" | "validation_failure";
+  adapter: "scene_packet" | "local_model" | "director_mode";
+  createdAt: string;
+  summary: string;
+  correlationId: string;
+  details: Record<string, unknown>;
+};
+
 type StateEventProposal = {
   id: string;
   createdAt: string;
@@ -431,6 +441,7 @@ export default function App() {
   const [localModelStatus, setLocalModelStatus] = useState("");
   const [directorDraft, setDirectorDraft] = useState<DirectorModeAdapterDraft | null>(null);
   const [directorStatus, setDirectorStatus] = useState("");
+  const [aiLogs, setAiLogs] = useState<AiLogEntry[]>([]);
 
   async function exportSessionSummary() {
     setExportStatus("exporting");
@@ -612,6 +623,21 @@ export default function App() {
     }
   }
 
+  async function loadAiLogs() {
+    try {
+      const response = await fetch("/api/ai-logs");
+
+      if (!response.ok) {
+        return;
+      }
+
+      const json = (await response.json()) as { logs: AiLogEntry[] };
+      setAiLogs(json.logs);
+    } catch {
+      // Keep this quiet in the UI for now.
+    }
+  }
+
   async function submitStateEvent(
     event: StateEventDraft,
     fingerprint: string,
@@ -697,6 +723,7 @@ export default function App() {
 
       setRuntime(runtimeJson);
       setSnapshot(snapshotJson);
+      await loadAiLogs();
     }
 
     void load();
@@ -809,10 +836,11 @@ export default function App() {
           return;
         }
 
-        if (message.type === "session_snapshot") {
-          setSnapshot(message.payload);
-        }
-      });
+      if (message.type === "session_snapshot") {
+        setSnapshot(message.payload);
+        void loadAiLogs();
+      }
+    });
     }
 
     connect();
@@ -1561,6 +1589,35 @@ export default function App() {
           ) : (
             <p>No director-mode draft run yet.</p>
           )}
+        </article>
+
+        <article className="panel panel-wide">
+          <div className="panel-header">
+            <h2>AI Activity Log</h2>
+            <span>{aiLogs.length} recent entries</span>
+          </div>
+          <div className="event-log">
+            {aiLogs.length ? (
+              aiLogs.map((entry) => (
+                <div className="event-row" key={entry.id}>
+                  <div>
+                    <strong>{entry.summary}</strong>
+                    <p>
+                      {entry.adapter} · {entry.kind} · {entry.correlationId}
+                    </p>
+                  </div>
+                  <div className="event-meta">
+                    <span className={`event-pill ${entry.kind === "validation_failure" ? "event-validation" : "event-memory"}`}>
+                      {entry.kind.replace(/_/g, " ")}
+                    </span>
+                    <small>{formatTime(entry.createdAt)}</small>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p>No AI activity logged yet.</p>
+            )}
+          </div>
         </article>
 
         <article className="panel panel-wide">

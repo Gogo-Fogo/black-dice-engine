@@ -220,6 +220,16 @@ type DirectorModeAdapterDraft = {
   };
 };
 
+type AiLogEntry = {
+  id: string;
+  kind: "input_packet" | "output_packet" | "tool_call" | "validation_failure";
+  adapter: "scene_packet" | "local_model" | "director_mode";
+  createdAt: string;
+  summary: string;
+  correlationId: string;
+  details: Record<string, unknown>;
+};
+
 type StateEventProposal = {
   id: string;
   createdAt: string;
@@ -329,6 +339,7 @@ const currentDir = dirname(fileURLToPath(import.meta.url));
 const playerCompanionDistDir = join(currentDir, "../../../apps/player-companion/dist");
 const sessionSummaryExportDir = join(currentDir, "../../../_exports/session-summaries");
 const memoryEntryExportDir = join(currentDir, "../../../_exports/memory-entries");
+const aiLogExportDir = join(currentDir, "../../../_exports/ai-logs");
 const sampleCampaignDir = join(currentDir, "../../../campaigns/sample-campaign");
 const gmSystemPromptPath = join(currentDir, "../../../prompts/gm-system-prompt.md");
 const directorPromptPath = join(currentDir, "../../../prompts/director-prompt.md");
@@ -421,6 +432,28 @@ const rollLog: RollRecord[] = [
 const eventLog: TableEventRecord[] = [];
 const approvalQueue: StateEventProposal[] = [];
 const memoryEntries: MemoryEntry[] = [];
+const aiLogs: AiLogEntry[] = [];
+
+function recordAiLog(entry: Omit<AiLogEntry, "id" | "createdAt">) {
+  const logEntry: AiLogEntry = {
+    id: randomUUID(),
+    createdAt: new Date().toISOString(),
+    ...entry
+  };
+  aiLogs.unshift(logEntry);
+  aiLogs.splice(24);
+  mkdirSync(aiLogExportDir, { recursive: true });
+  writeFileSync(
+    join(aiLogExportDir, "recent-ai-log.jsonl"),
+    aiLogs
+      .slice()
+      .reverse()
+      .map((item) => JSON.stringify(item))
+      .join("\n"),
+    "utf8"
+  );
+  return logEntry;
+}
 
 function parseQuotedValue(line: string) {
   const quotedMatch = line.match(/:\s*"([^"]*)"/);
@@ -1590,6 +1623,18 @@ app.get("/api/session-summary.md", (_request, response) => {
 
 app.get("/api/scene-packet", (_request, response) => {
   const packet = buildScenePacket();
+  recordAiLog({
+    kind: "input_packet",
+    adapter: "scene_packet",
+    correlationId: packet.id,
+    summary: `Generated scene packet input for ${packet.sceneTitle}`,
+    details: {
+      sceneTitle: packet.sceneTitle,
+      proposedStateEventCount: packet.proposedStateEvents.length,
+      mediaRequestCount: packet.mediaRequests.length,
+      audioCueCount: packet.audioCues.length
+    }
+  });
   response.json({
     packet,
     validation: validateScenePacket(packet)
@@ -1600,8 +1645,29 @@ app.post("/api/local-model/draft", (request, response) => {
   const body = request.body as { packet?: ScenePacket } | undefined;
   const packet = body?.packet ?? buildScenePacket();
   const validation = validateScenePacket(packet);
+  recordAiLog({
+    kind: "input_packet",
+    adapter: "local_model",
+    correlationId: packet.id,
+    summary: `Prepared local-model input for ${packet.sceneTitle}`,
+    details: {
+      sceneTitle: packet.sceneTitle,
+      proposedStateEventCount: packet.proposedStateEvents.length,
+      mediaRequestCount: packet.mediaRequests.length,
+      audioCueCount: packet.audioCues.length
+    }
+  });
 
   if (!validation.ok) {
+    recordAiLog({
+      kind: "validation_failure",
+      adapter: "local_model",
+      correlationId: packet.id,
+      summary: `Local-model draft blocked by scene-packet validation`,
+      details: {
+        errors: validation.errors
+      }
+    });
     response.status(400).json({
       error: "Scene packet failed validation",
       validation
@@ -1609,10 +1675,22 @@ app.post("/api/local-model/draft", (request, response) => {
     return;
   }
 
+  const draft = buildLocalModelAdapterDraft(packet);
+  recordAiLog({
+    kind: "output_packet",
+    adapter: "local_model",
+    correlationId: packet.id,
+    summary: `Created local-model placeholder output for ${packet.sceneTitle}`,
+    details: {
+      suggestedNextBeat: draft.response.suggestedNextBeat,
+      gmNotesCount: draft.response.gmNotes.length,
+      warningPresent: Boolean(draft.response.riskyStateChangeWarning)
+    }
+  });
   response.json({
     ok: true,
     validation,
-    draft: buildLocalModelAdapterDraft(packet)
+    draft
   });
 });
 
@@ -1620,8 +1698,28 @@ app.post("/api/director-mode/draft", (request, response) => {
   const body = request.body as { packet?: ScenePacket } | undefined;
   const packet = body?.packet ?? buildScenePacket();
   const validation = validateScenePacket(packet);
+  recordAiLog({
+    kind: "input_packet",
+    adapter: "director_mode",
+    correlationId: packet.id,
+    summary: `Prepared director-mode input for ${packet.sceneTitle}`,
+    details: {
+      sceneTitle: packet.sceneTitle,
+      pendingApprovalCount: approvalQueue.length,
+      memoryEntryCount: memoryEntries.length
+    }
+  });
 
   if (!validation.ok) {
+    recordAiLog({
+      kind: "validation_failure",
+      adapter: "director_mode",
+      correlationId: packet.id,
+      summary: `Director-mode draft blocked by scene-packet validation`,
+      details: {
+        errors: validation.errors
+      }
+    });
     response.status(400).json({
       error: "Scene packet failed validation",
       validation
@@ -1629,10 +1727,22 @@ app.post("/api/director-mode/draft", (request, response) => {
     return;
   }
 
+  const draft = buildDirectorModeAdapterDraft(packet);
+  recordAiLog({
+    kind: "output_packet",
+    adapter: "director_mode",
+    correlationId: packet.id,
+    summary: `Created director-mode placeholder output for ${packet.sceneTitle}`,
+    details: {
+      revealPlanCount: draft.response.revealPlan.length,
+      canonizationNoteCount: draft.response.canonizationNotes.length,
+      warningPresent: Boolean(draft.response.escalationWarning)
+    }
+  });
   response.json({
     ok: true,
     validation,
-    draft: buildDirectorModeAdapterDraft(packet)
+    draft
   });
 });
 
@@ -1679,6 +1789,15 @@ app.post("/api/scene-packet/queue-proposals", (request, response) => {
   const validation = validateScenePacket(packet);
 
   if (!validation.ok) {
+    recordAiLog({
+      kind: "validation_failure",
+      adapter: "scene_packet",
+      correlationId: packet.id || "scene-packet-queue",
+      summary: `Scene-packet proposal queue blocked by validation failure`,
+      details: {
+        errors: validation.errors
+      }
+    });
     response.status(400).json({
       error: "Scene packet failed validation",
       validation
@@ -1694,6 +1813,17 @@ app.post("/api/scene-packet/queue-proposals", (request, response) => {
     if (!stateEvent) {
       continue;
     }
+
+    recordAiLog({
+      kind: "tool_call",
+      adapter: "scene_packet",
+      correlationId: packet.id,
+      summary: `Queued scene-packet proposed state event: ${rawEvent.type}`,
+      details: {
+        proposedType: rawEvent.type,
+        actorLabel: rawEvent.actor.label
+      }
+    });
 
     const proposal: StateEventProposal = {
       id: randomUUID(),
@@ -1718,6 +1848,12 @@ app.post("/api/scene-packet/queue-proposals", (request, response) => {
     queuedCount: queued.length,
     validation,
     sessionSnapshot: publishSessionState()
+  });
+});
+
+app.get("/api/ai-logs", (_request, response) => {
+  response.json({
+    logs: aiLogs
   });
 });
 
