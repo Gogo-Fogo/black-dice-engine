@@ -1,5 +1,17 @@
 import { FormEvent, useEffect, useState } from "react";
 
+const _originalFetch = window.fetch;
+window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
+  const url = typeof input === "string" ? input : input.toString();
+  if (url.startsWith("/api/")) {
+    init = init || {};
+    const headers = new Headers(init.headers);
+    headers.set("x-bde-role", "player");
+    init.headers = headers;
+  }
+  return _originalFetch(input, init);
+};
+
 type Character = {
   id: string;
   name: string;

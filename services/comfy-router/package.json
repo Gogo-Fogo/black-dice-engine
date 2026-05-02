@@ -8,6 +8,9 @@
     "dev": "tsx watch src/index.ts",
     "lint": "tsc --noEmit"
   },
+  "dependencies": {
+    "dotenv": "^17.4.2"
+  },
   "devDependencies": {
     "@types/node": "^22.15.17",
     "tsx": "^4.19.4",
