@@ -140,12 +140,14 @@ const server = createServer(app);
 app.use(cors());
 app.use(express.json());
 
-// Serve actual audio files
-app.use("/audio", express.static(audioDir, {
-  dotfiles: "ignore",
-  index: false,
-  fallthrough: false
-}));
+// Serve actual audio files only when configured
+if (audioDir) {
+  app.use("/audio", express.static(audioDir, {
+    dotfiles: "ignore",
+    index: false,
+    fallthrough: false
+  }));
+}
 
 app.get("/health", (_request, response) => {
   response.json({
