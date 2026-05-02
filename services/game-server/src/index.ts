@@ -437,7 +437,7 @@ type StateEventRequest =
   | {
       type: "initiative_set";
       characterId: string;
-      value: number;
+      value: number | null;
       requestId?: string;
     };
 
@@ -1460,17 +1460,9 @@ function applyStateEvent(event: StateEventRequest, actorLabel = "GM Dashboard") 
   }
 
   if (event.type === "initiative_set") {
-    if (typeof event.value !== "number" || Number.isNaN(event.value)) {
-      return {
-        ok: false as const,
-        statusCode: 400,
-        body: {
-          error: "Numeric value is required for initiative"
-        }
-      };
-    }
+    const value = typeof event.value === "number" && !Number.isNaN(event.value) ? event.value : null;
 
-    character.initiative = event.value;
+    character.initiative = value;
     recordTableEvent({
       category: "state",
       type: "initiative_set",
@@ -1480,7 +1472,7 @@ function applyStateEvent(event: StateEventRequest, actorLabel = "GM Dashboard") 
         label: actorLabel
       },
       visibility: "player_visible",
-      summary: `${character.name} initiative set to ${event.value}`,
+      summary: value !== null ? `${character.name} initiative set to ${value}` : `${character.name} initiative cleared`,
       payload: {
         characterId: character.id,
         characterName: character.name,

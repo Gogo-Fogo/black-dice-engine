@@ -476,7 +476,7 @@ type StateEventRequest =
   | {
       type: "initiative_set";
       characterId: string;
-      value: number;
+      value: number | null;
       requestId: string;
     };
 
@@ -505,7 +505,7 @@ type StateEventDraft =
   | {
       type: "initiative_set";
       characterId: string;
-      value: number;
+      value: number | null;
     };
 
 const pendingRequestStorageKey = "black-dice-engine-pending-requests";
@@ -1659,6 +1659,24 @@ export default function App() {
           <div className="panel-header">
             <h2>Party State</h2>
             <span>{snapshot?.party.length ?? 0} linked</span>
+            <button
+              className="mini-button"
+              disabled={pendingActionKey !== ""}
+              onClick={() => {
+                snapshot?.party.forEach((character) => {
+                  if (character.initiative !== null) {
+                    void submitStateEvent(
+                      { type: "initiative_set", characterId: character.id, value: null },
+                      `init-clear:${character.id}`,
+                      `init-clear-${character.id}`
+                    );
+                  }
+                });
+              }}
+              type="button"
+            >
+              Clear Initiative
+            </button>
           </div>
           <label className="mode-toggle">
             <input
@@ -1701,7 +1719,7 @@ export default function App() {
                         {
                           type: "initiative_set",
                           characterId: character.id,
-                          value: value ?? 0
+                          value
                         },
                         `init:${character.id}:${value}`,
                         `init-${character.id}`
