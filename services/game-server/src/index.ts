@@ -459,6 +459,8 @@ const host = process.env.BDE_HOST ?? "0.0.0.0";
 const gameServerPort = Number(process.env.BDE_GAME_SERVER_PORT ?? 4310);
 const playerCompanionPort = Number(process.env.BDE_PLAYER_COMPANION_PORT ?? 4311);
 const comfyRouterEndpoint = process.env.BDE_COMFY_ROUTER_ENDPOINT?.trim() || "";
+const dddiceApiKey = process.env.BDE_DDDICE_API_KEY?.trim() || "";
+const dddiceRoomSlug = process.env.BDE_DDDICE_ROOM_SLUG?.trim() || "";
 const mediaOutputRoot =
   process.env.BDE_MEDIA_OUTPUT_ROOT?.trim() || "G:\\AI-DM\\04_assets\\generated";
 const localModelEndpoint = process.env.BDE_LOCAL_MODEL_ENDPOINT?.trim() || "";
@@ -3418,6 +3420,28 @@ function rollDice(parsed: { count: number; sides: number; modifier: number; adva
   return { rolls, total };
 }
 
+async function publishToDddice(actorName: string, diceLabel: string, total: number, note: string) {
+  if (!dddiceApiKey || !dddiceRoomSlug) return;
+
+  try {
+    await fetch(`https://dddice.com/api/1.0/room/${dddiceRoomSlug}/roll`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${dddiceApiKey}`,
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      body: JSON.stringify({
+        dice: [{ type: diceLabel, results: [{ value: total }] }],
+        label: `${actorName}: ${note}`
+      }),
+      signal: AbortSignal.timeout(4000)
+    });
+  } catch {
+    // dddice is optional presentation — fire-and-forget, never block local rolls
+  }
+}
+
 app.post("/api/rolls", requireRole("player", "gm", "admin"), (request, response) => {
   const actorId = typeof request.body.actorId === "string" ? request.body.actorId : "";
   const actorName = typeof request.body.actorName === "string" ? request.body.actorName : "";
@@ -3505,6 +3529,9 @@ app.post("/api/rolls", requireRole("player", "gm", "admin"), (request, response)
   }
 
   response.status(201).json(record);
+
+  // Fire-and-forget to dddice for 3D dice presentation (optional)
+  void publishToDddice(actorName, diceLabel, total, note);
 });
 
 wss.on("connection", (socket, request) => {
