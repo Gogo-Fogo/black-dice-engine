@@ -1,9 +1,14 @@
-import "dotenv/config";
+import { config } from "dotenv";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+const currentDir = dirname(fileURLToPath(import.meta.url));
+config({ path: join(currentDir, "../../../../.env") });
+
 import cors from "cors";
 import express from "express";
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -79,8 +84,21 @@ type Character = {
     detail?: string;
   }>;
   notes: string[];
+  image?: string | null;
+  stats?: {
+    str: number; dex: number; con: number;
+    int: number; wis: number; cha: number;
+    skills: string[];
+  };
   claimedByClientId: string | null;
   claimedByLabel: string | null;
+};
+
+type CurrentAction = {
+  type: string;
+  description: string;
+  ability: string;
+  dc: number | null;
 };
 
 type RollRecord = {
@@ -105,6 +123,7 @@ type TableEventRecord = {
     | "resource_changed"
     | "condition_added"
     | "condition_removed"
+    | "character_created"
     | "character_claimed"
     | "character_released"
     | "proposal_approved"
@@ -365,7 +384,7 @@ type ScenePacket = {
   visibility: "gm_only" | "player_visible" | "public_demo";
   summary: string;
   beats: Array<{
-    kind: "description" | "choice" | "threat" | "clue" | "consequence";
+    kind: "description" | "choice" | "threat" | "clue" | "consequence" | "memory";
     text: string;
   }>;
   proposedStateEvents: Array<{
@@ -406,6 +425,7 @@ type SessionSnapshot = {
   assetRecords: AssetRecord[];
   memoryEntries: MemoryEntry[];
   audioCueQueue: typeof audioCueQueue;
+  currentAction: CurrentAction | null;
 };
 
 type StateEventRequest =
@@ -458,15 +478,18 @@ type CachedMutationResponse = {
 const host = process.env.BDE_HOST ?? "0.0.0.0";
 const gameServerPort = Number(process.env.BDE_GAME_SERVER_PORT ?? 4310);
 const playerCompanionPort = Number(process.env.BDE_PLAYER_COMPANION_PORT ?? 4311);
-const comfyRouterEndpoint = process.env.BDE_COMFY_ROUTER_ENDPOINT?.trim() || "";
+const comfyRouterEndpoint = process.env.BDE_COMFY_ROUTER_ENDPOINT?.trim() || "http://127.0.0.1:4320";
 const dddiceApiKey = process.env.BDE_DDDICE_API_KEY?.trim() || "";
 const dddiceRoomSlug = process.env.BDE_DDDICE_ROOM_SLUG?.trim() || "";
+const dddiceThemeId = process.env.BDE_DDDICE_THEME_ID?.trim() || "";
 const mediaOutputRoot =
   process.env.BDE_MEDIA_OUTPUT_ROOT?.trim() || "G:\\AI-DM\\04_assets\\generated";
 const localModelEndpoint = process.env.BDE_LOCAL_MODEL_ENDPOINT?.trim() || "";
 const directorModeModel = process.env.BDE_DIRECTOR_MODE_MODEL?.trim() || "";
 const audioServiceEndpoint = process.env.BDE_AUDIO_SERVICE_ENDPOINT?.trim() || "";
-const currentDir = dirname(fileURLToPath(import.meta.url));
+const ttsServiceEndpoint = "http://127.0.0.1:4323";
+const comfyOutputRoot = process.env.BDE_COMFY_OUTPUT_ROOT?.trim() || join(currentDir, "../../../../.env"); // bogus, replaced below
+const comfyOutputBDEDir = "G:\\AI_Tools\\ComfyUI_windows_portable\\ComfyUI\\output\\bde";
 const playerCompanionDistDir = join(currentDir, "../../../apps/player-companion/dist");
 const sessionSummaryExportDir = join(currentDir, "../../../_exports/session-summaries");
 const memoryEntryExportDir = join(currentDir, "../../../_exports/memory-entries");
@@ -489,67 +512,90 @@ initDb();
 
 const defaultParty: Character[] = [
   {
-    id: "character-kael",
-    name: "Kael",
-    classLabel: "Rogue 3",
-    hp: { current: 22, max: 30 },
-    armorClass: 15,
+    id: "character-jepstein",
+    name: "J'Epstein",
+    classLabel: "Eldritch Knight 5",
+    hp: { current: 38, max: 38 },
+    armorClass: 16,
     initiative: null,
-    conditions: ["Alert", "Uninjured stride"],
+    conditions: [],
     resources: [
-      { id: "resource-hit-dice", label: "Hit Dice", current: 3, max: 3 },
-      { id: "resource-cunning-plan", label: "Trick Tokens", current: 2, max: 3 }
+      { id: "resource-spell-slots-1", label: "Spell Slots I", current: 3, max: 3 },
+      { id: "resource-hit-dice", label: "Hit Dice", current: 5, max: 5 }
     ],
     inventory: [
-      { id: "item-lockpicks", name: "Lockpick Set", quantity: 1, detail: "well-oiled" },
-      { id: "item-dagger", name: "Curved Dagger", quantity: 2 },
-      { id: "item-vial", name: "Shadow Vial", quantity: 1, detail: "single-use escape smoke" }
+      { id: "item-mace", name: "One-Handed Mace", quantity: 1 },
+      { id: "item-shield", name: "Shield", quantity: 1 },
+      { id: "item-dagger", name: "Backup Dagger", quantity: 1 },
+      { id: "item-bow", name: "Ranged Bow", quantity: 1 },
+      { id: "item-gloves", name: "Cloth Wraps (copper-proof)", quantity: 1 },
+      { id: "item-parrot", name: "Hostile Parrot on Perch-Stick", quantity: 1 }
     ],
-    notes: ["Watching every door and every lie."],
+    notes: [
+      "Tabaxi battlemage, jacked, arcane creatine enthusiast",
+      "Allergic to copper — refuses to touch it",
+      "Deeply afraid of water and drowning",
+      "Parrot is hostile, intelligent, and always screaming"
+    ],
+    image: "/images/Character_Jepstein.png",
+    stats: { str: 18, dex: 14, con: 16, int: 14, wis: 10, cha: 8, skills: ["athletics", "arcana", "intimidation", "perception"] },
     claimedByClientId: null,
     claimedByLabel: null
   },
   {
-    id: "character-sera",
-    name: "Sera",
-    classLabel: "Cleric 3",
-    hp: { current: 27, max: 27 },
+    id: "character-shlomo",
+    name: "Shlomo Ahkim",
+    classLabel: "Evasive Tank 5",
+    hp: { current: 32, max: 32 },
     armorClass: 18,
     initiative: null,
-    conditions: ["Blessed ward"],
+    conditions: [],
     resources: [
-      { id: "resource-spell-slots-1", label: "Spell Slots I", current: 4, max: 4 },
-      { id: "resource-spell-slots-2", label: "Spell Slots II", current: 2, max: 2 },
-      { id: "resource-channel-divinity", label: "Channel Divinity", current: 1, max: 1 }
+      { id: "resource-currency", label: "Currency Charges", current: 4, max: 4 },
+      { id: "resource-perfect-evasion", label: "Perfect Evasion", current: 1, max: 1 }
     ],
     inventory: [
-      { id: "item-mace", name: "Sanctified Mace", quantity: 1 },
-      { id: "item-bandages", name: "Field Bandages", quantity: 3 },
-      { id: "item-reliquary", name: "Ash Reliquary", quantity: 1, detail: "sealed" }
+      { id: "item-sword", name: "Small Greatsword", quantity: 1 },
+      { id: "item-coin", name: "Coin Pouch", quantity: 1, detail: "makes him stronger" },
+      { id: "item-hat", name: "Small Hat", quantity: 1 }
     ],
-    notes: ["Low patience for cultists and false saints."],
+    notes: [
+      "Hobgoblin, always smiling, happy-go-lucky",
+      "Uses currency to grow stronger and evade attacks",
+      "Hair is detachable — his greatest secret",
+      "Gollum-like voice, speaks of 'gentiles' with fear",
+      "Wears white robes, leather boots with steel plates"
+    ],
+    image: "/images/Character_ShlomoAhkim.png",
+    stats: { str: 14, dex: 16, con: 14, int: 10, wis: 12, cha: 18, skills: ["persuasion", "deception", "insight", "sleight_of_hand"] },
     claimedByClientId: null,
     claimedByLabel: null
   },
   {
-    id: "character-ivar",
-    name: "Ivar",
-    classLabel: "Wizard 3",
-    hp: { current: 14, max: 18 },
-    armorClass: 12,
+    id: "character-mista",
+    name: "Mista Shack",
+    classLabel: "Weapon Master 5",
+    hp: { current: 35, max: 35 },
+    armorClass: 15,
     initiative: null,
-    conditions: ["Fatigued"],
+    conditions: [],
     resources: [
-      { id: "resource-spell-slots-1", label: "Spell Slots I", current: 2, max: 4 },
-      { id: "resource-spell-slots-2", label: "Spell Slots II", current: 1, max: 2 },
-      { id: "resource-focus-charge", label: "Focus Charges", current: 1, max: 3 }
+      { id: "resource-hit-dice", label: "Hit Dice", current: 5, max: 5 },
+      { id: "resource-weapon-call", label: "Weapon Summons", current: 3, max: 3 }
     ],
     inventory: [
-      { id: "item-spellbook", name: "Spellbook", quantity: 1, detail: "salt-stained" },
-      { id: "item-lens", name: "Aether Lens", quantity: 1 },
-      { id: "item-chalk", name: "Ward Chalk", quantity: 4 }
+      { id: "item-pouch", name: "Quick Access Pouch", quantity: 1, detail: "heals and throwables" },
+      { id: "item-coat", name: "Short Sleeve Trench Coat", quantity: 1 }
     ],
-    notes: ["Tracking a pattern in the black sand pulses."],
+    notes: [
+      "Absolute unit of a human mercenary",
+      "Summons random medieval weapons at will",
+      "Eyes can see through deception — living lie detector",
+      "Works to provide for wife and dog back home",
+      "Down to business, no horsing around"
+    ],
+    image: "/images/Character_Mista.png",
+    stats: { str: 16, dex: 18, con: 14, int: 12, wis: 16, cha: 10, skills: ["perception", "investigation", "insight", "athletics"] },
     claimedByClientId: null,
     claimedByLabel: null
   }
@@ -560,8 +606,8 @@ const party: Character[] = loadedParty.length ? loadedParty : defaultParty;
 
 const defaultRoll: RollRecord = {
   id: randomUUID(),
-  actorId: "character-sera",
-  actorName: "Sera",
+  actorId: "character-jepstein",
+  actorName: "J'Epstein",
   dice: "1d20",
   modifier: 4,
   rolled: 15,
@@ -812,6 +858,9 @@ function buildActiveSceneContext(currentScene: string): ActiveSceneContext {
 app.use(cors());
 app.use(express.json());
 app.use("/player", express.static(playerCompanionDistDir));
+if (comfyOutputBDEDir) {
+  app.use("/images", express.static(comfyOutputBDEDir));
+}
 
 function extractRoleFromRequest(request: express.Request): ClientSession["role"] {
   const headerRole = request.headers["x-bde-role"];
@@ -1212,12 +1261,15 @@ function getLanJoinHost() {
   return linkLocalFallback ?? "localhost";
 }
 
+let currentSceneTitle = "Lantern Gate, just before the watchtower ascent";
+let currentAction: CurrentAction | null = null;
+let currentActionSetAt: number = 0;
+let pendingNarration: { text: string; timestamp: number } | null = null;
+
 function getSessionSnapshot(): SessionSnapshot {
   const joinHost = host === "0.0.0.0" ? getLanJoinHost() : host;
   const campaignBible = sampleCampaignContext.campaignBible;
-  const activeSceneContext = buildActiveSceneContext(
-    "Lantern Gate, just before the watchtower ascent"
-  );
+  const activeSceneContext = buildActiveSceneContext(currentSceneTitle);
 
   return {
     campaignId: campaignBible.id,
@@ -1234,7 +1286,8 @@ function getSessionSnapshot(): SessionSnapshot {
     mediaJobs,
     assetRecords,
     memoryEntries,
-    audioCueQueue
+    audioCueQueue,
+    currentAction
   };
 }
 
@@ -1726,6 +1779,10 @@ function buildScenePacket(): ScenePacket {
   const locationSummary =
     activeSceneContext.location?.summary ?? "A tense local scene remains unresolved.";
   const npcBeat = activeSceneContext.npcs[0];
+  const recentMemorySummaries = snapshot.memoryEntries
+    .filter((e) => e.visibility !== "gm_only")
+    .slice(0, 3)
+    .map((e) => e.summary);
 
   return {
     id: `scene-${Date.now().toString(36)}`,
@@ -1734,6 +1791,12 @@ function buildScenePacket(): ScenePacket {
     visibility: "gm_only",
     summary: `${locationSummary} ${activeSceneContext.facts[0]?.text ?? ""}`.trim(),
     beats: [
+      {
+        kind: "memory",
+        text: recentMemorySummaries.length
+          ? `Recent confirmed events: ${recentMemorySummaries.join(" | ")}`
+          : "No confirmed session memories yet; rely on current table state."
+      },
       {
         kind: "description",
         text: `Wind pushes black sand across ${activeSceneContext.location?.name ?? "the old gate"} while lanternlight shivers against wet stone.`
@@ -2323,7 +2386,11 @@ function broadcast(type: string, payload: unknown) {
 
   for (const client of wss.clients) {
     if (client.readyState === 1) {
-      client.send(message);
+      try {
+        client.send(message);
+      } catch {
+        // Socket closed between check and send; ignore
+      }
     }
   }
 }
@@ -2334,6 +2401,68 @@ app.get("/health", (_request, response) => {
     service: "game-server",
     port: gameServerPort
   });
+});
+
+app.get("/api/pending-narration", (_request, response) => {
+  response.json(pendingNarration);
+});
+
+app.get("/api/party", (_request, response) => {
+  response.json(party.map(c => ({
+    name: c.name,
+    classLabel: c.classLabel,
+    hp: c.hp,
+    claimedByLabel: c.claimedByLabel || "unclaimed"
+  })));
+});
+
+app.get("/api/rolls", (_request, response) => {
+  response.json(rollLog.slice(0, 20).map(r => ({
+    name: r.actorName,
+    dice: r.dice,
+    modifier: r.modifier,
+    total: r.total,
+    note: r.note,
+    time: r.timestamp
+  })));
+});
+
+app.get("/api/images", (_request, response) => {
+  if (!comfyOutputBDEDir) {
+    response.json({ images: [] });
+    return;
+  }
+  try {
+    const entries = readdirSync(comfyOutputBDEDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && /\.(png|jpg|jpeg|webp)$/i.test(entry.name))
+      .map((entry) => {
+        const fullPath = join(comfyOutputBDEDir, entry.name);
+        return { filename: entry.name, url: `/images/${entry.name}`, mtime: statSync(fullPath).mtimeMs };
+      });
+    entries.sort((a, b) => b.mtime - a.mtime);
+    response.json({ images: entries.slice(0, 20) });
+  } catch {
+    response.json({ images: [] });
+  }
+});
+
+app.post("/api/speak", async (request, response) => {
+  const text = typeof request.body.text === "string" ? request.body.text.trim() : "";
+  if (!text) { response.status(400).json({ error: "text required" }); return; }
+  try {
+    const ttsRes = await fetch(`${ttsServiceEndpoint}/speak`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, voice: "bm_george", speed: 0.85 }),
+      signal: AbortSignal.timeout(30000)
+    });
+    if (!ttsRes.ok) { response.status(502).json({ error: "TTS service error" }); return; }
+    const audioBuffer = await ttsRes.arrayBuffer();
+    response.set("Content-Type", "audio/wav");
+    response.send(Buffer.from(audioBuffer));
+  } catch {
+    response.status(502).json({ error: "TTS service unavailable" });
+  }
 });
 
 app.get("/player", (_request, response) => {
@@ -2504,7 +2633,7 @@ app.post("/api/director-mode/draft", requireRole("gm", "admin"), (request, respo
   });
 });
 
-app.post("/api/memory-entries", requireRole("gm", "admin"), (_request, response) => {
+function createMemoryEntry(trigger: string) {
   const { entry, exportPath } = buildMemoryEntry();
   memoryEntries.unshift(entry);
   memoryEntries.splice(8);
@@ -2516,15 +2645,20 @@ app.post("/api/memory-entries", requireRole("gm", "admin"), (_request, response)
       kind: "system",
       label: "Memory Service"
     },
-    visibility: "gm_only",
-    summary: `Created memory entry for ${entry.source.label}`,
+    visibility: entry.visibility,
+    summary: `${trigger}: ${entry.summary.slice(0, 120)}...`,
     payload: {
       memoryEntryId: entry.id,
       kind: entry.kind,
       exportPath
     }
   });
+  persistState();
+  return { entry, exportPath };
+}
 
+app.post("/api/memory-entries", requireRole("gm", "admin"), (_request, response) => {
+  const { entry, exportPath } = createMemoryEntry("Manual");
   response.status(201).json({
     ok: true,
     entry,
@@ -2855,6 +2989,56 @@ app.get("/api/media-cleanup-report", requireRole("gm", "admin"), (_request, resp
   });
 });
 
+app.post("/api/characters", requireRole("gm", "admin"), (request, response) => {
+  const name = typeof request.body.name === "string" ? request.body.name.trim() : "";
+  const classLabel = typeof request.body.classLabel === "string" ? request.body.classLabel.trim() : "";
+  const maxHp = typeof request.body.maxHp === "number" ? request.body.maxHp : 10;
+  const armorClass = typeof request.body.armorClass === "number" ? request.body.armorClass : 10;
+  const level = typeof request.body.level === "number" ? request.body.level : 1;
+  const clientNotes = Array.isArray(request.body.notes) ? request.body.notes.filter((n: unknown) => typeof n === "string") as string[] : [];
+  const image = typeof request.body.image === "string" && request.body.image.length > 0 ? request.body.image : null;
+
+  if (!name || !classLabel) {
+    response.status(400).json({ error: "name and classLabel are required" });
+    return;
+  }
+
+  const notes = clientNotes.length > 0 ? clientNotes : [`Created at level ${level}`];
+
+  const character: Character = {
+    id: randomUUID(),
+    name,
+    classLabel,
+    hp: { current: maxHp, max: maxHp },
+    armorClass,
+    initiative: null,
+    conditions: [],
+    resources: [],
+    inventory: [],
+    notes,
+    image,
+    claimedByClientId: null,
+    claimedByLabel: null
+  };
+
+  party.push(character);
+
+  recordTableEvent({
+    category: "state",
+    type: "character_created",
+    actor: { id: "gm", kind: "gm", label: "GM" },
+    visibility: "gm_only",
+    summary: `Character ${name} created`,
+    payload: { characterId: character.id, name, classLabel }
+  });
+
+  broadcast("session_snapshot", getSessionSnapshot());
+  broadcast("runtime_status", getRuntimeStatus());
+
+  persistState();
+  response.status(201).json(character);
+});
+
 app.post("/api/characters/:characterId/visual-canon-job", requireRole("gm", "admin"), (request, response) => {
   const character = resolveCharacter(String(request.params.characterId));
 
@@ -3164,6 +3348,8 @@ app.post("/api/state-events/:proposalId/approve", requireRole("gm", "admin"), (r
     }
   });
 
+  createMemoryEntry(`Approved: ${proposal.summary}`);
+
   response.json({
     ok: true,
     sessionSnapshot: publishSessionState()
@@ -3300,6 +3486,7 @@ app.post("/api/claim-character", requireRole("player", "gm", "admin"), (request,
   });
 
   const sessionSnapshot = publishSessionState();
+  persistState();
   const result = {
     ok: true,
     sessionSnapshot
@@ -3356,6 +3543,7 @@ app.post("/api/release-character", requireRole("player", "gm", "admin"), (reques
   }
 
   const sessionSnapshot = publishSessionState();
+  persistState();
   const result = {
     ok: true,
     sessionSnapshot
@@ -3364,6 +3552,58 @@ app.post("/api/release-character", requireRole("player", "gm", "admin"), (reques
     cacheMutationResponse("release-character", requestId, 200, result);
   }
   response.json(result);
+});
+
+app.post("/api/set-action", requireRole("gm", "admin"), (request, response) => {
+  const type = typeof request.body.type === "string" ? request.body.type.trim() : "";
+  const description = typeof request.body.description === "string" ? request.body.description.trim() : "";
+  const ability = typeof request.body.ability === "string" ? request.body.ability.trim() : "wis";
+  const dc = typeof request.body.dc === "number" ? request.body.dc : null;
+  if (!type) { response.status(400).json({ error: "type required" }); return; }
+  currentAction = { type, description: description || type, ability, dc };
+  currentActionSetAt = Date.now();
+  broadcast("session_snapshot", getSessionSnapshot());
+  response.json({ ok: true, action: currentAction });
+});
+
+app.post("/api/set-scene", requireRole("gm", "admin"), (request, response) => {
+  const title = typeof request.body.title === "string" ? request.body.title.trim() : "";
+  if (!title) {
+    response.status(400).json({ ok: false, error: "title required" });
+    return;
+  }
+  currentSceneTitle = title;
+  createMemoryEntry(`Scene change to "${title}"`);
+  const sessionSnapshot = publishSessionState();
+  persistState();
+  response.json({ ok: true, sessionSnapshot });
+
+  // Auto-trigger scene image generation directly via ComfyUI
+  if (currentSceneTitle) {
+    (async () => {
+      try {
+        const workflow = {
+          "1":{"inputs":{"ckpt_name":"sdxl_lightning_4step.safetensors"},"class_type":"CheckpointLoaderSimple"},
+          "2":{"inputs":{"text":`${currentSceneTitle}, medieval high fantasy, painterly oil painting style, dramatic lighting, epic fantasy illustration, high quality, detailed environment`,"clip":["1",1]},"class_type":"CLIPTextEncode"},
+          "3":{"inputs":{"text":"blurry low quality watermark text distorted","clip":["1",1]},"class_type":"CLIPTextEncode"},
+          "4":{"inputs":{"width":1024,"height":704,"batch_size":1},"class_type":"EmptyLatentImage"},
+          "5":{"inputs":{"seed":Math.floor(Math.random()*99999999),"steps":4,"cfg":1.0,"sampler_name":"euler","scheduler":"normal","denoise":1,"model":["1",0],"positive":["2",0],"negative":["3",0],"latent_image":["4",0]},"class_type":"KSampler"},
+          "6":{"inputs":{"samples":["5",0],"vae":["1",2]},"class_type":"VAEDecode"},
+          "7":{"inputs":{"filename_prefix":"bde/scene","images":["6",0]},"class_type":"SaveImage"}
+        };
+        await fetch("http://127.0.0.1:8188/prompt", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: workflow })
+        });
+      } catch { /* ComfyUI unavailable */ }
+    })();
+  }
+});
+
+app.post("/api/save-now", requireRole("gm", "admin"), (_request, response) => {
+  persistState();
+  response.json({ ok: true, message: "Session state saved to database", sessionSnapshot: publishSessionState() });
 });
 
 function parseDiceNotation(raw: string): { count: number; sides: number; modifier: number; advantage: boolean | null; error?: string } {
@@ -3420,8 +3660,29 @@ function rollDice(parsed: { count: number; sides: number; modifier: number; adva
   return { rolls, total };
 }
 
-async function publishToDddice(actorName: string, diceLabel: string, total: number, note: string) {
+async function publishToDddice(
+  actorName: string,
+  diceLabel: string,
+  total: number,
+  note: string,
+  parsed: { count: number; sides: number; modifier: number; advantage: boolean | null },
+  rolls: number[]
+) {
   if (!dddiceApiKey || !dddiceRoomSlug) return;
+
+  const dieType = `d${parsed.sides}`;
+  const dice: Array<Record<string, unknown>> = [];
+
+  for (let i = 0; i < rolls.length; i++) {
+    const diePayload: Record<string, unknown> = {
+      type: dieType,
+      results: [{ value: rolls[i] }]
+    };
+    if (dddiceThemeId) {
+      diePayload.theme = dddiceThemeId;
+    }
+    dice.push(diePayload);
+  }
 
   try {
     await fetch(`https://dddice.com/api/1.0/room/${dddiceRoomSlug}/roll`, {
@@ -3432,8 +3693,8 @@ async function publishToDddice(actorName: string, diceLabel: string, total: numb
         "Accept": "application/json"
       },
       body: JSON.stringify({
-        dice: [{ type: diceLabel, results: [{ value: total }] }],
-        label: `${actorName}: ${note}`
+        dice,
+        label: `${actorName}: ${note} (${diceLabel})`
       }),
       signal: AbortSignal.timeout(4000)
     });
@@ -3531,7 +3792,83 @@ app.post("/api/rolls", requireRole("player", "gm", "admin"), (request, response)
   response.status(201).json(record);
 
   // Fire-and-forget to dddice for 3D dice presentation (optional)
-  void publishToDddice(actorName, diceLabel, total, note);
+  void publishToDddice(actorName, diceLabel, total, note, effectiveParse, rolls);
+
+  // Auto-narrate when all claimed characters have rolled for the current action
+  if (currentAction) {
+    const action = currentAction;
+    const actionSetAt = currentActionSetAt;
+    const claimedCharacters = party.filter(c => c.claimedByClientId);
+    const rollsForAction = rollLog.filter(r => {
+      const rollTs = new Date(r.timestamp).getTime();
+      if (rollTs < actionSetAt) return false;
+      return r.note === "ability" || r.note === action.type;
+    });
+    const allRolled = claimedCharacters.length > 0 && claimedCharacters.every(c =>
+      rollsForAction.some(r => r.actorId === c.id)
+    );
+    if (allRolled) {
+      const abilityName: Record<string, string> = { str: "Strength", dex: "Dexterity", con: "Constitution", int: "Intelligence", wis: "Wisdom", cha: "Charisma" };
+      const dc = currentAction.dc ?? 10;
+      const abilityLabel = abilityName[currentAction.ability] || currentAction.ability;
+      const lines = claimedCharacters.map(c => {
+        const roll = rollsForAction.find(r => r.actorId === c.id);
+        if (!roll) return `${c.name} hesitates.`;
+        const pass = roll.total >= dc;
+        if (roll.rolled === 1 && typeof roll.rolled === "number") return `${c.name} stumbles critically. A disastrous failure.`;
+        if (roll.rolled === 20 && typeof roll.rolled === "number") return `${c.name} excels! A natural twenty — extraordinary success!`;
+        return pass
+          ? `${c.name} rolls ${roll.total} on ${abilityLabel} — success!`
+          : `${c.name} rolls ${roll.total} on ${abilityLabel} — not enough. DC was ${dc}.`;
+      });
+      const narration = `${currentAction.description} ${lines.join(" ")}`;
+      pendingNarration = { text: narration, timestamp: Date.now() };
+
+      // Trigger TTS narration
+      (async () => {
+        try {
+          await fetch(`http://127.0.0.1:${gameServerPort}/api/speak`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-bde-role": "gm" },
+            body: JSON.stringify({ text: narration })
+          });
+        } catch { /* TTS unavailable */ }
+      })();
+
+      // Auto-trigger scene image based on results
+      (async () => {
+        try {
+          const successes = claimedCharacters.filter(c => {
+            const roll = rollsForAction.find(r => r.actorId === c.id);
+            return roll && roll.total >= dc;
+          });
+          const mood = successes.length >= claimedCharacters.length
+            ? "triumphant, hopeful, golden light, clear skies"
+            : successes.length === 0
+              ? "ominous, dark, fog, danger, shadows"
+              : "tense, uncertain, mixed fortunes, fog parting slightly";
+          const prompt = `${currentSceneTitle}, ${mood}, medieval high fantasy, painterly oil painting style, dramatic lighting, epic fantasy illustration, high quality, detailed environment`;
+          const workflow = {
+            "1":{"inputs":{"ckpt_name":"sdxl_lightning_4step.safetensors"},"class_type":"CheckpointLoaderSimple"},
+            "2":{"inputs":{"text":prompt,"clip":["1",1]},"class_type":"CLIPTextEncode"},
+            "3":{"inputs":{"text":"blurry low quality watermark text distorted","clip":["1",1]},"class_type":"CLIPTextEncode"},
+            "4":{"inputs":{"width":1024,"height":704,"batch_size":1},"class_type":"EmptyLatentImage"},
+            "5":{"inputs":{"seed":Math.floor(Math.random()*99999999),"steps":4,"cfg":1.0,"sampler_name":"euler","scheduler":"normal","denoise":1,"model":["1",0],"positive":["2",0],"negative":["3",0],"latent_image":["4",0]},"class_type":"KSampler"},
+            "6":{"inputs":{"samples":["5",0],"vae":["1",2]},"class_type":"VAEDecode"},
+            "7":{"inputs":{"filename_prefix":"bde/scene","images":["6",0]},"class_type":"SaveImage"}
+          };
+          await fetch("http://127.0.0.1:8188/prompt", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ prompt: workflow })
+          });
+        } catch { /* ComfyUI unavailable */ }
+      })();
+
+      currentAction = null;
+      broadcast("session_snapshot", getSessionSnapshot());
+    }
+  }
 });
 
 wss.on("connection", (socket, request) => {

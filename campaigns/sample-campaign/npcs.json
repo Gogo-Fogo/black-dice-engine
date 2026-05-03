@@ -4,26 +4,34 @@
     {
       "id": "npc-mara-vell",
       "name": "Mara Vell",
-      "role": "Lantern Gate watch captain",
+      "role": "Lantern Gate watch-captain",
       "visibility": "public_demo",
-      "motive": "Keep the station calm until the signal is explained.",
-      "detail": "Carries a cracked brass signal lens as a worry stone."
+      "motive": "Find her missing salvage crew before the storm hits. She doesn't trust the party but needs muscle.",
+      "detail": "Carries a cracked brass signal lens. Notices J'Epstein's copper allergy immediately and swaps her brass lens for a steel one. 'I've seen stranger.'"
     },
     {
       "id": "npc-osric-vale",
       "name": "Osric Vale",
-      "role": "Salvage crew speaker",
+      "role": "Lantern Gate quartermaster and paymaster",
       "visibility": "public_demo",
-      "motive": "Recover a missing ledger before the Wardens find it.",
-      "detail": "Speaks softly so people lean in before he bargains."
+      "motive": "Wants to short-change the party. Deeply regrets taking Shlomo's contract terms.",
+      "detail": "Visibly nervous around Shlomo. Keeps recounting the coin pouch. Whispers 'that hobgoblin knows something.' Mista has already seen through three of his lies."
     },
     {
       "id": "npc-sella-morn",
       "name": "Sella Morn",
-      "role": "Fenbound tide-reader",
+      "role": "Fenbound tide-reader and lighthouse keeper",
       "visibility": "public_demo",
-      "motive": "Stop anyone from opening the old tide road unprepared.",
-      "detail": "Knows which foghorn patterns mean storm, ship, or warning."
+      "motive": "Warn the party about the tide patterns. 'The water is wrong. It's been wrong for four days. It's listening.'",
+      "detail": "Old woman with salt-crusted robes. Stares at J'Epstein too long. 'You already know what the water can do, don't you, cat?'"
+    },
+    {
+      "id": "npc-the-parrot",
+      "name": "Parrot (unnamed)",
+      "role": "J'Epstein's unwilling companion",
+      "visibility": "public_demo",
+      "motive": "Escape. Scream. Bite. Repeat. Secretly the smartest creature in the party.",
+      "detail": "Hostile, intelligent, perpetually furious. Screams words in languages nobody taught it. Has started screaming coordinates."
     }
   ]
 }

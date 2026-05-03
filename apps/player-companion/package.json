@@ -9,8 +9,10 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@types/three": "^0.184.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "three": "^0.184.0"
   },
   "devDependencies": {
     "@types/react": "^19.1.2",

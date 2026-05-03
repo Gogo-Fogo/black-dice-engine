@@ -108,6 +108,9 @@ temp/
 .cache/
 _exports/
 
+# 3D dice models (downloaded assets, large)
+*.glb
+
 # OS and editor noise
 .DS_Store
 Thumbs.db

@@ -119,6 +119,8 @@ Goal: route scene images through local ComfyUI without blocking gameplay.
 - [x] Add real ComfyUI workflow submission and polling via comfy-router.
 - [x] Add auto-finalization of running media jobs when ComfyUI completes.
 - [x] Wire local ComfyUI portable installation to comfy-router.
+- [x] Switch scene and portrait workflows to SDXL Lightning (4-step, ~7GB) after NetaYume 9.89GB caused system freeze.
+- [x] Download `sdxl_lightning_4step.safetensors` to ComfyUI checkpoints folder.
 
 ### Milestone 0.7: Local Audio Pipeline
 

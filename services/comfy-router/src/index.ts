@@ -1,8 +1,10 @@
-import "dotenv/config";
+import { config } from "dotenv";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+const currentDir = dirname(fileURLToPath(import.meta.url));
+config({ path: join(currentDir, "../../../../.env") });
 
 type WorkflowDefinition = {
   id: string;
@@ -36,7 +38,7 @@ type TrackedJob = {
   type: WorkflowDefinition["type"];
   status: "prepared" | "submitted" | "running" | "completed" | "failed";
   prompt: string;
-  negativePrompt?: string;
+  referenceImage?: string;
   outputRoot: string | null;
   readyForComfySubmission: boolean;
   warnings: string[];
@@ -52,7 +54,6 @@ const host = process.env.BDE_HOST ?? "0.0.0.0";
 const port = Number(process.env.BDE_COMFY_ROUTER_PORT ?? 4320);
 const comfyApiBase = process.env.BDE_COMFY_API_BASE?.trim() || "";
 const comfyOutputRoot = process.env.BDE_COMFY_OUTPUT_ROOT?.trim() || "";
-const currentDir = dirname(fileURLToPath(import.meta.url));
 const workflowRegistryPath = join(currentDir, "../../../comfy-workflows/registry.json");
 const promptTemplatePath = join(currentDir, "../../../prompts/image-prompt-templates.json");
 
@@ -120,6 +121,8 @@ function prepareJob(payload: Record<string, unknown>) {
   const prompt = typeof payload.prompt === "string" ? payload.prompt.trim() : "";
   const negativePrompt =
     typeof payload.negativePrompt === "string" ? payload.negativePrompt.trim() : undefined;
+  const referenceImage =
+    typeof payload.referenceImage === "string" && payload.referenceImage.length > 100 ? payload.referenceImage : undefined;
   const workflow = workflowRegistry.find((entry) => entry.id === workflowId);
   const promptTemplate = workflow
     ? promptTemplates.find((entry) => entry.id === workflow.promptTemplateId)
@@ -183,6 +186,7 @@ function prepareJob(payload: Record<string, unknown>) {
     status: "prepared",
     prompt,
     negativePrompt: negativePrompt || promptTemplate.negativeTemplate,
+    referenceImage,
     outputRoot: comfyOutputRoot || null,
     readyForComfySubmission: Boolean(comfyApiBase && comfyOutputRoot && workflow.workflowPath !== "PLACEHOLDER.txt"),
     warnings,
@@ -226,9 +230,24 @@ async function submitJobToComfy(job: TrackedJob): Promise<{ ok: boolean; error?:
   }
 
   // Replace prompt placeholders inside the serialized workflow JSON
+  const seed = Math.floor(Math.random() * 99999999);
+  let referenceImageName = "";
+  if (job.referenceImage) {
+    try {
+      const base64 = job.referenceImage.replace(/^data:image\/\w+;base64,/, "");
+      const buf = Buffer.from(base64, "base64");
+      const uploadName = `ref_${job.id.slice(0,8)}.png`;
+      const form = new FormData();
+      form.append("image", new Blob([buf], { type: "image/png" }), uploadName);
+      const uploadRes = await fetch(`${comfyApiBase}/upload/image`, { method: "POST", body: form as unknown as BodyInit, signal: AbortSignal.timeout(10000) });
+      if (uploadRes.ok) referenceImageName = uploadName;
+    } catch { /* reference image upload failed, continue without it */ }
+  }
   const serialized = JSON.stringify(workflowJson)
     .replaceAll("{{positivePrompt}}", job.prompt)
-    .replaceAll("{{negativePrompt}}", job.negativePrompt || "");
+    .replaceAll("{{negativePrompt}}", job.negativePrompt || "")
+    .replaceAll("{{seed}}", String(seed))
+    .replaceAll("{{referenceImageName}}", referenceImageName);
   workflowJson = JSON.parse(serialized) as Record<string, unknown>;
 
   const controller = new AbortController();

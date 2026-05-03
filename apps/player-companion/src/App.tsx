@@ -1,4 +1,9 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { DiceHandle, preloadDice, renderDiceOverlay } from "./dice3d";
+import { playDiceRollSound } from "./diceSound";
+
+// Preload dice models on startup
+preloadDice();
 
 const _originalFetch = window.fetch;
 window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
@@ -33,6 +38,8 @@ type Character = {
     detail?: string;
   }>;
   notes: string[];
+  image?: string | null;
+  stats?: { str: number; dex: number; con: number; int: number; wis: number; cha: number; skills: string[] };
   claimedByClientId: string | null;
   claimedByLabel: string | null;
 };
@@ -50,6 +57,14 @@ type RollRecord = {
   timestamp: string;
 };
 
+type MemoryEntry = {
+  id: string;
+  kind: string;
+  visibility: string;
+  summary: string;
+  createdAt: string;
+};
+
 type SessionSnapshot = {
   campaignId: string;
   campaignTitle: string;
@@ -58,6 +73,8 @@ type SessionSnapshot = {
   joinUrl: string;
   party: Character[];
   rollLog: RollRecord[];
+  memoryEntries: MemoryEntry[];
+  currentAction?: { type: string; description: string; ability: string; dc: number | null } | null;
 };
 
 type PlayerSocketEnvelope =
@@ -146,7 +163,142 @@ function formatTime(value: string) {
   });
 }
 
+function DiceOverlay({ roll, onClose }: { roll: RollRecord; onClose: () => void }) {
+  const sceneRef = useRef<HTMLDivElement | null>(null);
+  const handleRef = useRef<DiceHandle | null>(null);
+  const thrownRef = useRef(false);
+  const [showResult, setShowResult] = useState(false);
+  const [canThrow, setCanThrow] = useState(false);
+  const [thrown, setThrown] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const el = sceneRef.current;
+    if (!el) return;
+    try {
+      handleRef.current = renderDiceOverlay(el, roll.dice, () => {
+        setLoading(false);
+        setShowResult(true);
+      });
+      // Poll for when the model is loaded
+      const checkLoaded = setInterval(() => {
+        if (handleRef.current) {
+          // If we have a handle, the overlay is initialized
+          // Check if we can throw (model loaded)
+          setLoading(false);
+          clearInterval(checkLoaded);
+        }
+      }, 200);
+      const timer = setTimeout(() => {
+        setCanThrow(true);
+        clearInterval(checkLoaded);
+        setLoading(false);
+      }, 3000); // Max 3s wait before showing button
+      return () => {
+        clearTimeout(timer);
+        clearInterval(checkLoaded);
+        handleRef.current?.dispose();
+        handleRef.current = null;
+      };
+    } catch {
+      setLoading(false);
+      setShowResult(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!showResult) return;
+    const timer = setTimeout(onClose, 7000);
+    return () => clearTimeout(timer);
+  }, [showResult]);
+
+  // Shake detection
+  useEffect(() => {
+    if (!canThrow || thrown) return;
+    let lastShake = 0;
+    const onMotion = (e: DeviceMotionEvent) => {
+      if (thrownRef.current) return;
+      const acc = e.accelerationIncludingGravity;
+      if (!acc || acc.x == null || acc.y == null || acc.z == null) return;
+      const mag = Math.sqrt(acc.x ** 2 + acc.y ** 2 + acc.z ** 2);
+      if (mag > 25 && performance.now() - lastShake > 800) {
+        lastShake = performance.now();
+        if (!thrownRef.current) {
+          thrownRef.current = true;
+          setThrown(true);
+          playDiceRollSound();
+          handleRef.current?.throwDice();
+        }
+      }
+    };
+    if (typeof (DeviceMotionEvent as any).requestPermission === "function") {
+      (DeviceMotionEvent as any)
+        .requestPermission()
+        .then((s: string) => { if (s === "granted") window.addEventListener("devicemotion", onMotion); })
+        .catch(() => {});
+    } else {
+      window.addEventListener("devicemotion", onMotion);
+    }
+    return () => { window.removeEventListener("devicemotion", onMotion); };
+  }, [canThrow, thrown]);
+
+  const doThrow = useCallback(() => {
+    if (thrownRef.current) return;
+    thrownRef.current = true;
+    setThrown(true);
+    playDiceRollSound();
+    handleRef.current?.throwDice();
+  }, []);
+
+  return (
+    <div className="dice-overlay">
+      <div className="dice-overlay-bg" />
+      <div className="dice-roll-card">
+        <div className="dice-3d-container" ref={sceneRef} />
+        {loading ? (
+          <div className="dice-loading">Loading dice...</div>
+        ) : canThrow && !thrown ? (
+          <button className="dice-throw-btn" onClick={(e) => { e.stopPropagation(); doThrow(); }}>
+            TAP TO THROW
+          </button>
+        ) : null}
+        {showResult ? (
+          <div className="dice-result-wrap" onClick={onClose}>
+            <div className="dice-result-number">{roll.total}</div>
+            <p className="dice-roll-who">{roll.actorName}</p>
+            <p className="dice-roll-what">{roll.dice} — {roll.note}</p>
+            <p className="dice-roll-tap">tap to close</p>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function useAdvancedMode() {
+  const [advancedMode, setAdvancedMode] = useState(() => {
+    try {
+      return window.localStorage.getItem("bde-player-advanced") === "true";
+    } catch {
+      return false;
+    }
+  });
+  const toggle = useCallback(() => {
+    setAdvancedMode((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem("bde-player-advanced", String(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+  return { advancedMode, toggle };
+}
+
 export default function App() {
+  const { advancedMode, toggle: toggleAdvancedMode } = useAdvancedMode();
   const [snapshot, setSnapshot] = useState<SessionSnapshot | null>(null);
   const [selectedCharacterId, setSelectedCharacterId] = useState("");
   const [note, setNote] = useState("Perception");
@@ -155,9 +307,13 @@ export default function App() {
   const [advantage, setAdvantage] = useState<boolean | null>(null);
   const [connectionLabel, setConnectionLabel] = useState("connecting");
   const [submitting, setSubmitting] = useState(false);
-  const [playerLabel, setPlayerLabel] = useState("Player");
+  const [playerLabel, setPlayerLabel] = useState(() => {
+    try { return localStorage.getItem("bde-player-label") || "Player"; } catch { return "Player"; }
+  });
   const [clientId, setClientId] = useState("");
   const [claimBusy, setClaimBusy] = useState(false);
+  const [diceAnimation, setDiceAnimation] = useState<RollRecord | null>(null);
+  const [preset, setPreset] = useState<string>("custom");
 
   useEffect(() => {
     let mounted = true;
@@ -176,7 +332,12 @@ export default function App() {
       const alreadyClaimed = sessionSnapshot.party.find(
         (character) => character.claimedByClientId === localClientId
       );
-      setSelectedCharacterId(alreadyClaimed?.id ?? sessionSnapshot.party[0]?.id ?? "");
+      if (alreadyClaimed) {
+        setSelectedCharacterId(alreadyClaimed.id);
+      } else {
+        // NEVER auto-claim. Player must claim manually.
+        setSelectedCharacterId("");
+      }
     }
 
     void load();
@@ -259,6 +420,11 @@ export default function App() {
                 }
               : current
           );
+          // Only show dice animation for this player's claimed character
+          const char = snapshot?.party.find(c => c.claimedByClientId === clientId);
+          if (char && message.payload.actorId === char.id) {
+            setDiceAnimation(message.payload as RollRecord);
+          }
         }
       });
     }
@@ -277,43 +443,24 @@ export default function App() {
   const claimedCharacter =
     snapshot?.party.find((character) => character.claimedByClientId === clientId) ?? null;
 
-  async function submitRoll(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!claimedCharacter) {
-      return;
-    }
-
-    const diceFinal = advantage !== null ? `${dice} ${advantage ? "adv" : "dis"}` : dice;
-    const payload: RollRequest = {
-      actorId: claimedCharacter.id,
-      actorName: claimedCharacter.name,
-      modifier,
-      dice: diceFinal,
-      note,
-      requestId: getOrCreatePendingRequestId(
-        `roll:${claimedCharacter.id}:${note.trim() || "Check"}:${diceFinal}:${modifier}`
-      )
-    };
-    const fingerprint = `roll:${claimedCharacter.id}:${note.trim() || "Check"}:${diceFinal}:${modifier}`;
-
+  async function submitRollWith(diceStr: string, noteText: string, mod: number) {
+    if (!claimedCharacter) return;
     setSubmitting(true);
-
     try {
-      const response = await fetch("/api/rolls", {
+      const fingerprint = `roll:${claimedCharacter.id}:${noteText}:${diceStr}:${mod}`;
+      await fetch("/api/rolls", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(payload)
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          actorId: claimedCharacter.id,
+          actorName: claimedCharacter.name,
+          modifier: mod,
+          dice: diceStr,
+          note: noteText,
+          requestId: getOrCreatePendingRequestId(fingerprint)
+        })
       });
-
-      if (response.ok) {
-        clearPendingRequestId(fingerprint);
-      }
-    } finally {
-      setSubmitting(false);
-    }
+    } finally { setSubmitting(false); }
   }
 
   async function claimCharacter() {
@@ -390,7 +537,24 @@ export default function App() {
             Phone-first state, quick rolls, and reconnect-safe table access.
           </p>
         </div>
-        <div className="status-chip">{connectionLabel}</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: "8px", alignItems: "flex-end" }}>
+          <div className="status-chip">{connectionLabel}</div>
+          <button
+            onClick={toggleAdvancedMode}
+            type="button"
+            style={{
+              fontSize: "0.7rem",
+              padding: "4px 10px",
+              borderRadius: "4px",
+              border: "1px solid #5a4a2a",
+              background: "linear-gradient(135deg, #3a2a1a 0%, #1a1209 100%)",
+              color: "#bca06d",
+              cursor: "pointer"
+            }}
+          >
+            {advancedMode ? "🔽 Simple" : "🔧 Advanced"}
+          </button>
+        </div>
       </section>
 
       <section className="companion-stack">
@@ -402,152 +566,85 @@ export default function App() {
         </article>
 
         <article className="panel">
-          <label className="label" htmlFor="player-label">
-            Player label
-          </label>
-          <input
-            id="player-label"
-            value={playerLabel}
-            onChange={(event) => setPlayerLabel(event.target.value)}
-          />
+          <label className="label">Your name</label>
+          <input value={playerLabel} onChange={(e) => { setPlayerLabel(e.target.value); try { localStorage.setItem("bde-player-label", e.target.value); } catch {} }} style={{ fontSize: "1rem", padding: "8px" }} />
 
-          <label className="label" htmlFor="character-select">
-            Character selection
-          </label>
-          <select
-            id="character-select"
-            value={selectedCharacterId}
-            onChange={(event) => setSelectedCharacterId(event.target.value)}
-          >
-            {snapshot?.party.map((character) => (
-              <option key={character.id} value={character.id}>
-                {character.name}
-                {character.claimedByLabel ? ` - claimed by ${character.claimedByLabel}` : ""}
-              </option>
-            ))}
-          </select>
-
-          <div className="claim-actions">
-            <button
-              disabled={!selectedCharacterId || claimBusy}
-              onClick={() => void claimCharacter()}
-              type="button"
-            >
-              {claimBusy ? "Saving..." : "Claim character"}
-            </button>
-            <button
-              className="secondary-button"
-              disabled={!claimedCharacter || claimBusy}
-              onClick={() => void releaseCharacter()}
-              type="button"
-            >
-              Release
-            </button>
-          </div>
-
-          {selectedCharacter ? (
-            <div className="character-card">
-              <h3>{selectedCharacter.name}</h3>
-              <p>{selectedCharacter.classLabel}</p>
-              <div className="stats-row">
-                <span>
-                  HP {selectedCharacter.hp.current}/{selectedCharacter.hp.max}
-                </span>
-                <span>AC {selectedCharacter.armorClass}</span>
-              </div>
-              <div className="tag-row">
-                {selectedCharacter.conditions.length > 0 ? (
-                  selectedCharacter.conditions.map((condition) => (
-                    <span key={condition} className="tag-chip">
-                      {condition}
-                    </span>
-                  ))
-                ) : (
-                  <span className="tag-chip muted-chip">No conditions</span>
-                )}
-              </div>
-              <div className="detail-block">
-                <p className="detail-label">Resources</p>
-                <div className="resource-list">
-                  {selectedCharacter.resources.map((resource) => (
-                    <div className="resource-row" key={resource.id}>
-                      <span>{resource.label}</span>
-                      <strong>
-                        {resource.current}/{resource.max}
-                      </strong>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="detail-block">
-                <p className="detail-label">Inventory</p>
-                <div className="inventory-list">
-                  {selectedCharacter.inventory.map((item) => (
-                    <div className="inventory-row" key={item.id}>
-                      <span>
-                        {item.name}
-                        {item.detail ? ` - ${item.detail}` : ""}
-                      </span>
-                      <strong>x{item.quantity}</strong>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <p className="note">{selectedCharacter.notes[0]}</p>
-              <p className="claim-status">
-                {selectedCharacter.claimedByClientId === clientId
-                  ? "Claimed by this device"
-                  : selectedCharacter.claimedByLabel
-                    ? `Claimed by ${selectedCharacter.claimedByLabel}`
-                    : "Not claimed yet"}
-              </p>
+          {!claimedCharacter ? (
+            <div style={{ marginTop: 10 }}>
+              <p className="eyebrow" style={{ marginBottom: 8 }}>Tap your character:</p>
+              {snapshot?.party.map((c) => (
+                <button
+                  key={c.id}
+                  onClick={() => { setSelectedCharacterId(c.id); void (async () => { setClaimBusy(true); try { const r = await fetch("/api/claim-character", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId, characterId: c.id, playerLabel, requestId: `claim-${Date.now()}` }) }); if (r.ok) { const j = await r.json(); setSnapshot(j.sessionSnapshot); } } finally { setClaimBusy(false); } })(); }}
+                  disabled={!!(c.claimedByClientId && c.claimedByClientId !== clientId) || claimBusy}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 10, width: "100%", padding: 10, marginBottom: 8,
+                    border: "1px solid #4a3a2a", borderRadius: 8, background: c.claimedByClientId === clientId ? "rgba(60,120,60,0.3)" : "rgba(30,20,10,0.6)",
+                    color: c.claimedByClientId && c.claimedByClientId !== clientId ? "#666" : "#f0dcaf",
+                    cursor: c.claimedByClientId && c.claimedByClientId !== clientId ? "default" : "pointer",
+                    fontSize: "0.95rem"
+                  }}
+                  type="button"
+                >
+                  {c.image ? <img src={c.image} alt="" style={{ width: 48, height: 48, borderRadius: 6, objectFit: "cover" }} /> : null}
+                  <div style={{ flex: 1, textAlign: "left" }}>
+                    <strong>{c.name}</strong>
+                    <div style={{ fontSize: "0.75rem", color: "#8a7a4a" }}>{c.classLabel} · HP {c.hp.current}/{c.hp.max} · AC {c.armorClass}</div>
+                  </div>
+                  {c.claimedByClientId && c.claimedByClientId !== clientId ? <span style={{ fontSize: "0.7rem", color: "#e44" }}>{c.claimedByLabel || "taken"}</span> : c.claimedByClientId === clientId ? <span style={{ color: "#7bc47f" }}>✓</span> : <span style={{ color: "#c9a45f", fontSize: "0.8rem" }}>CLAIM</span>}
+                </button>
+              ))}
             </div>
-          ) : null}
+          ) : (
+            <div>
+              <div style={{ background: "rgba(60,120,60,0.2)", border: "1px solid #3a6b3a", borderRadius: 8, padding: 12, marginTop: 10, marginBottom: 10, textAlign: "center" }}>
+                <strong style={{ color: "#7bc47f", fontSize: "1.1rem" }}>{claimedCharacter.name}</strong>
+                <div style={{ fontSize: "0.8rem", color: "#8a8a6a" }}>{claimedCharacter.classLabel} · HP {claimedCharacter.hp.current}/{claimedCharacter.hp.max} · AC {claimedCharacter.armorClass}</div>
+              </div>
+              {claimedCharacter.image ? <img src={claimedCharacter.image} alt="" style={{ width: "100%", maxHeight: 200, objectFit: "cover", borderRadius: 8, marginBottom: 10 }} /> : null}
+            </div>
+          )}
         </article>
 
+        {diceAnimation ? (
+          <DiceOverlay roll={diceAnimation} onClose={() => setDiceAnimation(null)} />
+        ) : null}
+
         <article className="panel">
-          <form className="roll-form" onSubmit={submitRoll}>
-            <label className="label" htmlFor="roll-note">
-              Roll
-            </label>
-            <input
-              id="roll-note"
-              value={note}
-              onChange={(event) => setNote(event.target.value)}
-            />
-            <label className="label" htmlFor="roll-dice">
-              Dice
-            </label>
-            <input
-              id="roll-dice"
-              value={dice}
-              onChange={(event) => setDice(event.target.value)}
-              placeholder="d20"
-            />
-            <label className="label" htmlFor="roll-modifier">
-              Modifier
-            </label>
-            <input
-              id="roll-modifier"
-              type="number"
-              value={modifier}
-              onChange={(event) => setModifier(Number(event.target.value))}
-            />
-            <div className="roll-toggle-row">
-              <button type="button" className={advantage === true ? "active" : ""} onClick={() => setAdvantage(advantage === true ? null : true)}>
-                ADV
-              </button>
-              <button type="button" className={advantage === null ? "active" : ""} onClick={() => setAdvantage(null)}>
-                NORM
-              </button>
-              <button type="button" className={advantage === false ? "active" : ""} onClick={() => setAdvantage(advantage === false ? null : false)}>
-                DIS
-              </button>
+          {snapshot?.currentAction ? (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ background: "rgba(40,30,10,0.8)", border: "1px solid #5a4a2a", borderRadius: 8, padding: "10px 12px" }}>
+                <strong style={{ color: "#c9a45f" }}>{snapshot.currentAction.type.toUpperCase()}</strong>
+                <p style={{ fontSize: "0.85rem", color: "#f0dcaf", margin: "4px 0 0" }}>{snapshot.currentAction.description}</p>
+                {snapshot.currentAction.dc !== null ? <p style={{ fontSize: "0.75rem", color: "#8a7a4a" }}>DC {snapshot.currentAction.dc}</p> : null}
+              </div>
             </div>
-            <button disabled={!claimedCharacter || submitting} type="submit">
-              {submitting ? "Rolling..." : `Roll ${dice}${advantage !== null ? (advantage ? " (adv)" : " (dis)") : ""}`}
-            </button>
-          </form>
+          ) : (
+            <p style={{ color: "#8a7a4a", fontSize: "0.85rem", fontStyle: "italic", marginBottom: 8 }}>Waiting for the GM to set an action...</p>
+          )}
+
+          <button
+            className="big-roll-btn"
+            disabled={!claimedCharacter || submitting}
+            onClick={(e) => { e.preventDefault(); if (snapshot?.currentAction && claimedCharacter) {
+              const ability = snapshot.currentAction.ability;
+              const abiModMap: Record<string, string> = { str: "str", dex: "dex", con: "con", int: "int", wis: "wis", cha: "cha" };
+              const abiKey = abiModMap[ability] || "wis";
+              const statVal = claimedCharacter.stats?.[abiKey as keyof typeof claimedCharacter.stats] ?? 10;
+              const mod = Math.floor(((statVal as number) - 10) / 2);
+              void submitRollWith(dice, snapshot.currentAction.type, mod);
+            }}}
+            type="button"
+            style={{ width: "100%", padding: "18px", fontSize: "1.4rem", fontWeight: "bold" }}
+          >
+            {submitting ? "Rolling..." : snapshot?.currentAction ? `ROLL d20 + ${((): number => {
+              if (!claimedCharacter?.stats || !snapshot?.currentAction) return 0;
+              const ability = snapshot.currentAction.ability;
+              const map: Record<string, keyof typeof claimedCharacter.stats> = { str: "str", dex: "dex", con: "con", int: "int", wis: "wis", cha: "cha" };
+              const key = map[ability] || "wis";
+              return Math.floor((Number(claimedCharacter.stats![key]) - 10) / 2);
+            })()}` : "WAITING..."}
+          </button>
         </article>
 
         <article className="panel">
@@ -569,6 +666,28 @@ export default function App() {
             )) ?? <p>Waiting for live rolls.</p>}
           </div>
         </article>
+
+        {snapshot?.memoryEntries?.filter((e) => e.visibility === "player_visible").length ? (
+          <article className="panel">
+            <div className="panel-header">
+              <h2>Session memory</h2>
+            </div>
+            <div className="roll-log">
+              {snapshot.memoryEntries
+                .filter((e) => e.visibility === "player_visible")
+                .map((entry) => (
+                  <div className="roll-row" key={entry.id}>
+                    <div>
+                      <span style={{ color: "#c9a45f", fontSize: "0.7rem", textTransform: "uppercase" }}>
+                        {entry.kind}
+                      </span>
+                      <p>{entry.summary}</p>
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </article>
+        ) : null}
       </section>
     </main>
   );

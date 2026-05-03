@@ -1,4 +1,9 @@
-import "dotenv/config";
+import { config } from "dotenv";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+const currentDir = dirname(fileURLToPath(import.meta.url));
+config({ path: join(currentDir, "../../../../.env") });
+
 import cors from "cors";
 import express from "express";
 import { createServer } from "node:http";
@@ -9,7 +14,6 @@ import { fileURLToPath } from "node:url";
 const host = process.env.BDE_HOST ?? "0.0.0.0";
 const port = Number(process.env.BDE_AUDIO_SERVICE_PORT ?? 4321);
 const audioDir = process.env.BDE_AUDIO_DIR?.trim() || "";
-const currentDir = dirname(fileURLToPath(import.meta.url));
 
 const audioExtensions = new Set([".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac", ".webm", ".opus"]);
 
