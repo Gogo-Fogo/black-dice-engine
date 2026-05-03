@@ -30,6 +30,14 @@ import {
   loadAudioCues,
   saveAudioCues
 } from "./db.js";
+import {
+  generateNarration,
+  proposeSceneAction,
+  generateDirectorGuidance,
+  getAiAdapterStatus,
+  type SceneContext,
+  type RollResultContext
+} from "./ai-adapter.js";
 
 type ServiceState = {
   name: string;
@@ -224,8 +232,8 @@ type ActiveSceneContext = {
 
 type LocalModelAdapterDraft = {
   adapter: {
-    mode: "placeholder";
-    provider: "local_llm";
+    mode: "placeholder" | "live";
+    provider: "local_llm" | "ollama" | "openai";
     endpointConfigured: boolean;
     endpoint: string | null;
   };
@@ -248,8 +256,8 @@ type LocalModelAdapterDraft = {
 
 type DirectorModeAdapterDraft = {
   adapter: {
-    mode: "placeholder";
-    provider: "chatgpt_director";
+    mode: "placeholder" | "live";
+    provider: "chatgpt_director" | "ollama" | "openai";
     enabled: boolean;
     model: string | null;
   };
@@ -479,9 +487,6 @@ const host = process.env.BDE_HOST ?? "0.0.0.0";
 const gameServerPort = Number(process.env.BDE_GAME_SERVER_PORT ?? 4310);
 const playerCompanionPort = Number(process.env.BDE_PLAYER_COMPANION_PORT ?? 4311);
 const comfyRouterEndpoint = process.env.BDE_COMFY_ROUTER_ENDPOINT?.trim() || "http://127.0.0.1:4320";
-const dddiceApiKey = process.env.BDE_DDDICE_API_KEY?.trim() || "";
-const dddiceRoomSlug = process.env.BDE_DDDICE_ROOM_SLUG?.trim() || "";
-const dddiceThemeId = process.env.BDE_DDDICE_THEME_ID?.trim() || "";
 const mediaOutputRoot =
   process.env.BDE_MEDIA_OUTPUT_ROOT?.trim() || "G:\\AI-DM\\04_assets\\generated";
 const localModelEndpoint = process.env.BDE_LOCAL_MODEL_ENDPOINT?.trim() || "";
@@ -1208,20 +1213,16 @@ function getRuntimeStatus(): RuntimeStatus {
           ? `Router configured at ${comfyRouterEndpoint}; submits to ComfyUI when workflow files are present`
           : "No comfy-router endpoint configured yet; media queue remains internal only"
       },
-      {
-        name: "local-model-adapter",
-        status: localModelEndpoint ? "degraded" : "unknown",
-        message: localModelEndpoint
-          ? `Placeholder adapter ready for ${localModelEndpoint}`
-          : "No local model endpoint configured yet; placeholder mode only"
-      },
-      {
-        name: "director-mode-adapter",
-        status: directorModeModel ? "degraded" : "unknown",
-        message: directorModeModel
-          ? `Placeholder director ready for ${directorModeModel}`
-          : "No director model configured yet; placeholder mode only"
-      },
+      (() => {
+        const aiStatus = getAiAdapterStatus();
+        return {
+          name: "ai-adapter",
+          status: aiStatus.endpointConfigured ? "ok" : "unknown",
+          message: aiStatus.endpointConfigured
+            ? `AI adapter ready (${aiStatus.provider} / ${aiStatus.model})`
+            : `AI adapter not configured (provider: ${aiStatus.provider}, model: ${aiStatus.model})`
+        };
+      })(),
       {
         name: "audio-service",
         status: audioServiceEndpoint ? "ok" : "unknown",
@@ -2528,7 +2529,7 @@ app.get("/api/scene-packet", requireRole("gm", "admin"), (_request, response) =>
   });
 });
 
-app.post("/api/local-model/draft", requireRole("gm", "admin"), (request, response) => {
+app.post("/api/local-model/draft", requireRole("gm", "admin"), async (request, response) => {
   const body = request.body as { packet?: ScenePacket } | undefined;
   const packet = body?.packet ?? buildScenePacket();
   const validation = validateScenePacket(packet);
@@ -2563,17 +2564,71 @@ app.post("/api/local-model/draft", requireRole("gm", "admin"), (request, respons
   }
 
   const draft = buildLocalModelAdapterDraft(packet);
-  recordAiLog({
-    kind: "output_packet",
-    adapter: "local_model",
-    correlationId: packet.id,
-    summary: `Created local-model placeholder output for ${packet.sceneTitle}`,
-    details: {
-      suggestedNextBeat: draft.response.suggestedNextBeat,
-      gmNotesCount: draft.response.gmNotes.length,
-      warningPresent: Boolean(draft.response.riskyStateChangeWarning)
+
+  // Attempt real AI narration
+  try {
+    const snapshot = getSessionSnapshot();
+    const sceneContext: SceneContext = {
+      campaignTitle: snapshot.campaignTitle,
+      currentScene: snapshot.currentScene,
+      sceneDescription: snapshot.activeSceneContext.location?.summary,
+      location: snapshot.activeSceneContext.location
+        ? { name: snapshot.activeSceneContext.location.name, summary: snapshot.activeSceneContext.location.summary }
+        : undefined,
+      tone: snapshot.activeSceneContext.tone,
+      facts: snapshot.activeSceneContext.facts.map((f: { text: string }) => f.text),
+      activeCharacters: party.map((c) => ({
+        name: c.name,
+        raceClass: c.classLabel,
+        hp: c.hp.current,
+        maxHp: c.hp.max
+      })),
+      recentEvents: eventLog.slice(0, 5).map((e) => e.summary)
+    };
+
+    const rollContext: RollResultContext = {
+      actorName: party[0]?.name || "The party",
+      actionDescription: packet.sceneTitle,
+      diceLabel: "d20",
+      total: 10,
+      modifier: 0,
+      rawRoll: 10,
+      success: true,
+      critical: null
+    };
+
+    const aiResult = await generateNarration(sceneContext, rollContext, { temperature: 0.85, maxTokens: 350 });
+
+    if (aiResult.text && !aiResult.error) {
+      draft.response.narration = aiResult.text;
+      draft.adapter.mode = "live";
     }
-  });
+
+    recordAiLog({
+      kind: "output_packet",
+      adapter: "local_model",
+      correlationId: packet.id,
+      summary: `Local-model draft created${aiResult.error ? " (placeholder fallback)" : ""} for ${packet.sceneTitle}`,
+      details: {
+        suggestedNextBeat: draft.response.suggestedNextBeat,
+        gmNotesCount: draft.response.gmNotes.length,
+        warningPresent: Boolean(draft.response.riskyStateChangeWarning),
+        provider: aiResult.provider,
+        model: aiResult.model,
+        error: aiResult.error
+      }
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    recordAiLog({
+      kind: "output_packet",
+      adapter: "local_model",
+      correlationId: packet.id,
+      summary: `Local-model draft failed, using placeholder for ${packet.sceneTitle}`,
+      details: { error: message }
+    });
+  }
+
   response.json({
     ok: true,
     validation,
@@ -2581,7 +2636,7 @@ app.post("/api/local-model/draft", requireRole("gm", "admin"), (request, respons
   });
 });
 
-app.post("/api/director-mode/draft", requireRole("gm", "admin"), (request, response) => {
+app.post("/api/director-mode/draft", requireRole("gm", "admin"), async (request, response) => {
   const body = request.body as { packet?: ScenePacket } | undefined;
   const packet = body?.packet ?? buildScenePacket();
   const validation = validateScenePacket(packet);
@@ -2615,22 +2670,145 @@ app.post("/api/director-mode/draft", requireRole("gm", "admin"), (request, respo
   }
 
   const draft = buildDirectorModeAdapterDraft(packet);
-  recordAiLog({
-    kind: "output_packet",
-    adapter: "director_mode",
-    correlationId: packet.id,
-    summary: `Created director-mode placeholder output for ${packet.sceneTitle}`,
-    details: {
-      revealPlanCount: draft.response.revealPlan.length,
-      canonizationNoteCount: draft.response.canonizationNotes.length,
-      warningPresent: Boolean(draft.response.escalationWarning)
+
+  // Attempt real AI director guidance
+  try {
+    const snapshot = getSessionSnapshot();
+    const sceneContext: SceneContext = {
+      campaignTitle: snapshot.campaignTitle,
+      currentScene: snapshot.currentScene,
+      sceneDescription: snapshot.activeSceneContext.location?.summary,
+      location: snapshot.activeSceneContext.location
+        ? { name: snapshot.activeSceneContext.location.name, summary: snapshot.activeSceneContext.location.summary }
+        : undefined,
+      tone: snapshot.activeSceneContext.tone,
+      facts: snapshot.activeSceneContext.facts.map((f: { text: string }) => f.text),
+      activeCharacters: party.map((c) => ({
+        name: c.name,
+        raceClass: c.classLabel,
+        hp: c.hp.current,
+        maxHp: c.hp.max
+      })),
+      recentEvents: eventLog.slice(0, 5).map((e) => e.summary)
+    };
+
+    const aiResult = await generateDirectorGuidance(sceneContext, approvalQueue.length, memoryEntries.length, {
+      temperature: 0.7,
+      maxTokens: 450
+    });
+
+    if (aiResult.text && !aiResult.error) {
+      draft.response.directorGuidance = aiResult.text;
+      draft.adapter.mode = "live";
     }
-  });
+
+    recordAiLog({
+      kind: "output_packet",
+      adapter: "director_mode",
+      correlationId: packet.id,
+      summary: `Director-mode draft created${aiResult.error ? " (placeholder fallback)" : ""} for ${packet.sceneTitle}`,
+      details: {
+        revealPlanCount: draft.response.revealPlan.length,
+        canonizationNoteCount: draft.response.canonizationNotes.length,
+        warningPresent: Boolean(draft.response.escalationWarning),
+        provider: aiResult.provider,
+        model: aiResult.model,
+        error: aiResult.error
+      }
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    recordAiLog({
+      kind: "output_packet",
+      adapter: "director_mode",
+      correlationId: packet.id,
+      summary: `Director-mode draft failed, using placeholder for ${packet.sceneTitle}`,
+      details: { error: message }
+    });
+  }
+
   response.json({
     ok: true,
     validation,
     draft
   });
+});
+
+app.post("/api/ai/propose-action", requireRole("gm", "admin"), async (request, response) => {
+  const body = request.body as { previousAction?: string } | undefined;
+  const snapshot = getSessionSnapshot();
+
+  const sceneContext: SceneContext = {
+    campaignTitle: snapshot.campaignTitle,
+    currentScene: snapshot.currentScene,
+    sceneDescription: snapshot.activeSceneContext.location?.summary,
+    location: snapshot.activeSceneContext.location
+      ? { name: snapshot.activeSceneContext.location.name, summary: snapshot.activeSceneContext.location.summary }
+      : undefined,
+    tone: snapshot.activeSceneContext.tone,
+    facts: snapshot.activeSceneContext.facts.map((f: { text: string }) => f.text),
+    activeCharacters: party.map((c) => ({
+      name: c.name,
+      raceClass: c.classLabel,
+      hp: c.hp.current,
+      maxHp: c.hp.max
+    })),
+    recentEvents: eventLog.slice(0, 5).map((e) => e.summary)
+  };
+
+  const recentRolls: RollResultContext[] = rollLog.slice(0, 3).map((r) => ({
+    actorName: r.actorName,
+    actionDescription: r.note,
+    diceLabel: r.dice,
+    total: r.total,
+    modifier: r.modifier,
+    rawRoll: typeof r.rolled === "number" ? r.rolled : Array.isArray(r.rolled) ? r.rolled[0] : 0,
+    success: r.total >= 10,
+    critical: (typeof r.rolled === "number" && r.rolled === 20)
+      ? "success"
+      : (typeof r.rolled === "number" && r.rolled === 1)
+        ? "failure"
+        : null
+  }));
+
+  try {
+    const aiResult = await proposeSceneAction(sceneContext, body?.previousAction, recentRolls, {
+      temperature: 0.8,
+      maxTokens: 400
+    });
+
+    recordAiLog({
+      kind: "output_packet",
+      adapter: "local_model",
+      correlationId: randomUUID(),
+      summary: `AI proposed action${aiResult.error ? " (failed)" : ""}`,
+      details: { provider: aiResult.provider, model: aiResult.model, error: aiResult.error }
+    });
+
+    if (aiResult.error || !aiResult.text) {
+      response.status(503).json({ error: aiResult.error || "AI did not return a proposal" });
+      return;
+    }
+
+    let parsed: Record<string, unknown> = {};
+    try {
+      const jsonMatch = aiResult.text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+      }
+    } catch {
+      // Non-JSON response — return raw text
+    }
+
+    response.json({
+      ok: true,
+      raw: aiResult.text,
+      proposal: parsed
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    response.status(500).json({ error: message });
+  }
 });
 
 function createMemoryEntry(trigger: string) {
@@ -3660,49 +3838,6 @@ function rollDice(parsed: { count: number; sides: number; modifier: number; adva
   return { rolls, total };
 }
 
-async function publishToDddice(
-  actorName: string,
-  diceLabel: string,
-  total: number,
-  note: string,
-  parsed: { count: number; sides: number; modifier: number; advantage: boolean | null },
-  rolls: number[]
-) {
-  if (!dddiceApiKey || !dddiceRoomSlug) return;
-
-  const dieType = `d${parsed.sides}`;
-  const dice: Array<Record<string, unknown>> = [];
-
-  for (let i = 0; i < rolls.length; i++) {
-    const diePayload: Record<string, unknown> = {
-      type: dieType,
-      results: [{ value: rolls[i] }]
-    };
-    if (dddiceThemeId) {
-      diePayload.theme = dddiceThemeId;
-    }
-    dice.push(diePayload);
-  }
-
-  try {
-    await fetch(`https://dddice.com/api/1.0/room/${dddiceRoomSlug}/roll`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${dddiceApiKey}`,
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-      },
-      body: JSON.stringify({
-        dice,
-        label: `${actorName}: ${note} (${diceLabel})`
-      }),
-      signal: AbortSignal.timeout(4000)
-    });
-  } catch {
-    // dddice is optional presentation — fire-and-forget, never block local rolls
-  }
-}
-
 app.post("/api/rolls", requireRole("player", "gm", "admin"), (request, response) => {
   const actorId = typeof request.body.actorId === "string" ? request.body.actorId : "";
   const actorName = typeof request.body.actorName === "string" ? request.body.actorName : "";
@@ -3791,9 +3926,6 @@ app.post("/api/rolls", requireRole("player", "gm", "admin"), (request, response)
 
   response.status(201).json(record);
 
-  // Fire-and-forget to dddice for 3D dice presentation (optional)
-  void publishToDddice(actorName, diceLabel, total, note, effectiveParse, rolls);
-
   // Auto-narrate when all claimed characters have rolled for the current action
   if (currentAction) {
     const action = currentAction;
@@ -3811,7 +3943,9 @@ app.post("/api/rolls", requireRole("player", "gm", "admin"), (request, response)
       const abilityName: Record<string, string> = { str: "Strength", dex: "Dexterity", con: "Constitution", int: "Intelligence", wis: "Wisdom", cha: "Charisma" };
       const dc = currentAction.dc ?? 10;
       const abilityLabel = abilityName[currentAction.ability] || currentAction.ability;
-      const lines = claimedCharacters.map(c => {
+
+      // Build fallback template narration
+      const templateLines = claimedCharacters.map(c => {
         const roll = rollsForAction.find(r => r.actorId === c.id);
         if (!roll) return `${c.name} hesitates.`;
         const pass = roll.total >= dc;
@@ -3821,18 +3955,89 @@ app.post("/api/rolls", requireRole("player", "gm", "admin"), (request, response)
           ? `${c.name} rolls ${roll.total} on ${abilityLabel} — success!`
           : `${c.name} rolls ${roll.total} on ${abilityLabel} — not enough. DC was ${dc}.`;
       });
-      const narration = `${currentAction.description} ${lines.join(" ")}`;
-      pendingNarration = { text: narration, timestamp: Date.now() };
+      const fallbackNarration = `${currentAction.description} ${templateLines.join(" ")}`;
+      pendingNarration = { text: fallbackNarration, timestamp: Date.now() };
 
-      // Trigger TTS narration
+      // Trigger fallback TTS immediately
       (async () => {
         try {
           await fetch(`http://127.0.0.1:${gameServerPort}/api/speak`, {
             method: "POST",
             headers: { "Content-Type": "application/json", "x-bde-role": "gm" },
-            body: JSON.stringify({ text: narration })
+            body: JSON.stringify({ text: fallbackNarration })
           });
         } catch { /* TTS unavailable */ }
+      })();
+
+      // Try AI-generated narration (may replace fallback)
+      (async () => {
+        try {
+          const snapshot = getSessionSnapshot();
+          const sceneContext: SceneContext = {
+            campaignTitle: snapshot.campaignTitle,
+            currentScene: snapshot.currentScene,
+            sceneDescription: snapshot.activeSceneContext.location?.summary,
+            location: snapshot.activeSceneContext.location
+              ? { name: snapshot.activeSceneContext.location.name, summary: snapshot.activeSceneContext.location.summary }
+              : undefined,
+            tone: snapshot.activeSceneContext.tone,
+            facts: snapshot.activeSceneContext.facts.map((f: { text: string }) => f.text),
+            activeCharacters: party.map((c) => ({
+              name: c.name,
+              raceClass: c.classLabel,
+              hp: c.hp.current,
+              maxHp: c.hp.max
+            })),
+            recentEvents: eventLog.slice(0, 5).map((e) => e.summary)
+          };
+
+          const firstRoll = rollsForAction[0];
+          const firstChar = party.find((c) => c.id === firstRoll?.actorId);
+          const rollContext: RollResultContext = {
+            actorName: firstChar?.name || firstRoll?.actorName || "Someone",
+            actionDescription: currentAction.description,
+            diceLabel: firstRoll?.dice || "d20",
+            total: firstRoll?.total || 0,
+            modifier: firstRoll?.modifier || 0,
+            rawRoll: typeof firstRoll?.rolled === "number" ? firstRoll.rolled : Array.isArray(firstRoll?.rolled) ? firstRoll.rolled[0] : 0,
+            success: (firstRoll?.total || 0) >= dc,
+            critical: (typeof firstRoll?.rolled === "number" && firstRoll.rolled === 20)
+              ? "success"
+              : (typeof firstRoll?.rolled === "number" && firstRoll.rolled === 1)
+                ? "failure"
+                : null
+          };
+
+          const aiResult = await generateNarration(sceneContext, rollContext, { temperature: 0.85, maxTokens: 350 });
+          const narration = aiResult.text && !aiResult.error ? aiResult.text : fallbackNarration;
+          pendingNarration = { text: narration, timestamp: Date.now() };
+
+          // Trigger TTS narration
+          try {
+            await fetch(`http://127.0.0.1:${gameServerPort}/api/speak`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "x-bde-role": "gm" },
+              body: JSON.stringify({ text: narration })
+            });
+          } catch { /* TTS unavailable */ }
+
+          recordAiLog({
+            kind: "output_packet",
+            adapter: "local_model",
+            correlationId: randomUUID(),
+            summary: `AI narration generated${aiResult.error ? " (fallback used)" : ""}`,
+            details: { narration: narration.slice(0, 200), provider: aiResult.provider, model: aiResult.model, error: aiResult.error }
+          });
+        } catch {
+          pendingNarration = { text: fallbackNarration, timestamp: Date.now() };
+          try {
+            await fetch(`http://127.0.0.1:${gameServerPort}/api/speak`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "x-bde-role": "gm" },
+              body: JSON.stringify({ text: fallbackNarration })
+            });
+          } catch { /* TTS unavailable */ }
+        }
       })();
 
       // Auto-trigger scene image based on results

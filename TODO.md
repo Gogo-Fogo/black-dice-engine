@@ -61,7 +61,11 @@ Goal: prove that a local game server can coordinate state and live updates.
 - [x] Add WebSocket broadcast prototype.
 - [x] Add WebSocket heartbeat and reconnect status prototype.
 - [x] Add dice roller endpoint/service.
-- [ ] Add dddice presentation adapter placeholder using free/default dice.
+- [x] Add AI adapter with Ollama and OpenAI support.
+- [x] Wire AI narration generation into auto-narrate flow.
+- [x] Add /api/ai/propose-action endpoint for AI scene proposals.
+- [x] Add /api/director-mode/draft with real AI director guidance.
+- [x] Add /api/local-model/draft with real AI narration.
 - [x] Add state-event validation prototype.
 - [x] Add runtime status prototype.
 - [ ] Add player-safe error event prototype.
