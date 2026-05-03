@@ -749,6 +749,11 @@ export default function App() {
   const [newCharacterAc, setNewCharacterAc] = useState(10);
   const [newCharacterImage, setNewCharacterImage] = useState<string | null>(null);
   const [creatingCharacter, setCreatingCharacter] = useState(false);
+  const [aiNarrationEnabled, setAiNarrationEnabled] = useState(true);
+  const [aiProposedAction, setAiProposedAction] = useState<Record<string, unknown> | null>(null);
+  const [aiProposeStatus, setAiProposeStatus] = useState("");
+  const [aiDirectorGuidance, setAiDirectorGuidance] = useState("");
+  const [aiDirectorStatus, setAiDirectorStatus] = useState("");
 
   function handleImagePick(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -1227,6 +1232,53 @@ export default function App() {
     }
   }
 
+  async function runAiProposeAction() {
+    setPendingActionKey("ai-propose-action");
+    setAiProposeStatus("running");
+    try {
+      const response = await fetch("/api/ai/propose-action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({})
+      });
+      if (!response.ok) {
+        setAiProposeStatus("failed");
+        return;
+      }
+      const json = (await response.json()) as { ok: boolean; raw: string; proposal: Record<string, unknown> };
+      setAiProposedAction(json.proposal || {});
+      setAiProposeStatus("ready");
+    } catch {
+      setAiProposeStatus("failed");
+    } finally {
+      setPendingActionKey("");
+    }
+  }
+
+  async function runAiDirectorGuidance() {
+    setPendingActionKey("ai-director-guidance");
+    setAiDirectorStatus("running");
+    try {
+      const response = await fetch("/api/director-mode/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(scenePacket ? { packet: scenePacket } : {})
+      });
+      if (!response.ok) {
+        setAiDirectorStatus("failed");
+        return;
+      }
+      const json = (await response.json()) as { ok: boolean; draft: DirectorModeAdapterDraft };
+      setAiDirectorGuidance(json.draft?.response?.directorGuidance || "");
+      setDirectorDraft(json.draft);
+      setAiDirectorStatus("ready");
+    } catch {
+      setAiDirectorStatus("failed");
+    } finally {
+      setPendingActionKey("");
+    }
+  }
+
   async function loadAiLogs() {
     try {
       const response = await fetch("/api/ai-logs");
@@ -1502,6 +1554,21 @@ export default function App() {
     }, 3000);
     return () => window.clearInterval(interval);
   }, [audioServiceUrl]);
+
+  useEffect(() => {
+    async function loadAiNarrationToggle() {
+      try {
+        const res = await fetch("/api/ai/narration-toggle");
+        if (res.ok) {
+          const json = (await res.json()) as { enabled: boolean };
+          setAiNarrationEnabled(json.enabled);
+        }
+      } catch {
+        // ignore
+      }
+    }
+    void loadAiNarrationToggle();
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -1822,6 +1889,136 @@ export default function App() {
           </ul>
         </article>
         ) : null}
+
+        <article className="panel">
+          <div className="panel-header">
+            <h2>AI Director</h2>
+            <span className="pill pill-ok">{aiNarrationEnabled ? "ON" : "OFF"}</span>
+          </div>
+          <p className="muted-line">
+            Use the AI to propose actions, get director guidance, and enable richer auto-narration.
+          </p>
+
+          <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "12px" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "0.8rem", color: "#bca06d", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={aiNarrationEnabled}
+                onChange={async (e) => {
+                  const enabled = e.target.checked;
+                  setAiNarrationEnabled(enabled);
+                  try {
+                    await fetch("/api/ai/narration-toggle", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ enabled })
+                    });
+                  } catch {
+                    // ignore
+                  }
+                }}
+              />
+              AI Narration on rolls
+            </label>
+            <span style={{ fontSize: "0.7rem", color: "#8a7a5a" }}>
+              {aiNarrationEnabled ? "Auto-narrate will call Ollama" : "Auto-narrate uses templates only"}
+            </span>
+          </div>
+
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginBottom: "12px" }}>
+            <button
+              className="export-button"
+              style={{ background: "linear-gradient(135deg, #5a4a8a 0%, #3a2a6a 100%)" }}
+              disabled={pendingActionKey !== ""}
+              onClick={() => void runAiProposeAction()}
+              type="button"
+            >
+              {pendingActionKey === "ai-propose-action" ? "⏳ Thinking..." : "🎲 AI Propose Action"}
+            </button>
+            <button
+              className="export-button"
+              style={{ background: "linear-gradient(135deg, #4a6a8a 0%, #2a4a6a 100%)" }}
+              disabled={pendingActionKey !== ""}
+              onClick={() => void runAiDirectorGuidance()}
+              type="button"
+            >
+              {pendingActionKey === "ai-director-guidance" ? "⏳ Thinking..." : "🎬 AI Director Guidance"}
+            </button>
+          </div>
+
+          {aiProposeStatus === "running" ? (
+            <p className="export-note">Asking the AI what the party should do next...</p>
+          ) : aiProposeStatus === "failed" ? (
+            <p className="export-note" style={{ color: "#c66" }}>AI proposal failed. Is Ollama running?</p>
+          ) : null}
+
+          {aiProposedAction && aiProposeStatus === "ready" ? (
+            <div className="context-block" style={{ borderLeft: "3px solid #7a5aaa", paddingLeft: "12px" }}>
+              <div className="packet-meta-grid">
+                <div>
+                  <span>Action</span>
+                  <strong>{String(aiProposedAction.action ?? "—")}</strong>
+                </div>
+                <div>
+                  <span>Skill</span>
+                  <strong>{String(aiProposedAction.skill ?? "—")}</strong>
+                </div>
+                <div>
+                  <span>Difficulty</span>
+                  <strong>{String(aiProposedAction.difficulty ?? "—")}</strong>
+                </div>
+              </div>
+              <div className="context-row">
+                <strong>Description</strong>
+                <p>{String(aiProposedAction.description ?? "")}</p>
+              </div>
+              <div className="context-row">
+                <strong>Consequences</strong>
+                <p>{String(aiProposedAction.consequences ?? "")}</p>
+              </div>
+              <button
+                className="mini-button"
+                style={{ marginTop: "8px" }}
+                onClick={() => {
+                  const action = String(aiProposedAction.action ?? "");
+                  const skill = String(aiProposedAction.skill ?? "");
+                  const difficulty = String(aiProposedAction.difficulty ?? "medium");
+                  const dc = difficulty === "easy" ? 10 : difficulty === "medium" ? 15 : difficulty === "hard" ? 20 : 25;
+                  const abilityMap: Record<string, string> = {
+                    athletics: "str", acrobatics: "dex", sleightofhand: "dex", stealth: "dex",
+                    arcana: "int", history: "int", investigation: "int", nature: "int", religion: "int",
+                    animalhandling: "wis", insight: "wis", medicine: "wis", perception: "wis", survival: "wis",
+                    deception: "cha", intimidation: "cha", performance: "cha", persuasion: "cha"
+                  };
+                  const ability = abilityMap[skill.toLowerCase().replace(/\s/g, "")] || "str";
+                  fetch("/api/set-action", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ action: skill.toLowerCase(), description: action, ability, dc })
+                  });
+                }}
+                type="button"
+              >
+                Use This Action
+              </button>
+            </div>
+          ) : null}
+
+          {aiDirectorStatus === "running" ? (
+            <p className="export-note">Consulting the AI director for scene guidance...</p>
+          ) : aiDirectorStatus === "failed" ? (
+            <p className="export-note" style={{ color: "#c66" }}>Director guidance failed. Is Ollama running?</p>
+          ) : null}
+
+          {aiDirectorGuidance && aiDirectorStatus === "ready" ? (
+            <div className="context-block" style={{ borderLeft: "3px solid #4a7aaa", paddingLeft: "12px" }}>
+              <div className="context-row">
+                <strong>Director Guidance</strong>
+                <p style={{ whiteSpace: "pre-wrap" }}>{aiDirectorGuidance}</p>
+              </div>
+            </div>
+          ) : null}
+        </article>
 
         {advancedMode ? (
 

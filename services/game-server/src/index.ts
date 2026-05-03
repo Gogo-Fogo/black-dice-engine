@@ -1266,6 +1266,7 @@ let currentSceneTitle = "Lantern Gate, just before the watchtower ascent";
 let currentAction: CurrentAction | null = null;
 let currentActionSetAt: number = 0;
 let pendingNarration: { text: string; timestamp: number } | null = null;
+let aiNarrationEnabled = true;
 
 function getSessionSnapshot(): SessionSnapshot {
   const joinHost = host === "0.0.0.0" ? getLanJoinHost() : host;
@@ -3744,6 +3745,16 @@ app.post("/api/set-action", requireRole("gm", "admin"), (request, response) => {
   response.json({ ok: true, action: currentAction });
 });
 
+app.get("/api/ai/narration-toggle", requireRole("gm", "admin"), (_request, response) => {
+  response.json({ enabled: aiNarrationEnabled });
+});
+
+app.post("/api/ai/narration-toggle", requireRole("gm", "admin"), (request, response) => {
+  const enabled = typeof request.body.enabled === "boolean" ? request.body.enabled : true;
+  aiNarrationEnabled = enabled;
+  response.json({ ok: true, enabled: aiNarrationEnabled });
+});
+
 app.post("/api/set-scene", requireRole("gm", "admin"), (request, response) => {
   const title = typeof request.body.title === "string" ? request.body.title.trim() : "";
   if (!title) {
@@ -3970,6 +3981,7 @@ app.post("/api/rolls", requireRole("player", "gm", "admin"), (request, response)
       })();
 
       // Try AI-generated narration (may replace fallback)
+      if (aiNarrationEnabled) {
       (async () => {
         try {
           const snapshot = getSessionSnapshot();
@@ -4039,6 +4051,7 @@ app.post("/api/rolls", requireRole("player", "gm", "admin"), (request, response)
           } catch { /* TTS unavailable */ }
         }
       })();
+      }
 
       // Auto-trigger scene image based on results
       (async () => {
