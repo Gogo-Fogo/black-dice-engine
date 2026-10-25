@@ -3,6 +3,7 @@ import QRCode from "qrcode";
 import { startAmbient, stopAmbient, setAmbientVolume } from "./ambient";
 import { DiceHandle, preloadDice, renderDiceOverlay } from "./dice3d";
 import { playDiceRollSound } from "./diceSound";
+import { Stage, openStageWindow, useNarration, useSceneArt, useStageWindowOpen } from "./stage";
 
 preloadDice();
 
@@ -416,6 +417,7 @@ type SessionSnapshot = {
   mediaJobs: MediaJob[];
   assetRecords: AssetRecord[];
   memoryEntries: MemoryEntry[];
+  currentAction?: { type: string; description: string; ability: string; dc: number | null } | null;
   audioCueQueue: Array<{
     id: string;
     kind: string;
@@ -677,6 +679,36 @@ function DiceOverlay({ roll, onClose }: { roll: RollRecord; onClose: () => void 
   );
 }
 
+type GmTab = "stage" | "run" | "media" | "audio" | "system";
+
+const gmTabs: Array<{ id: GmTab; label: string; hint: string }> = [
+  { id: "stage", label: "Stage", hint: "What the table sees on the TV: scene art and narration" },
+  { id: "run", label: "Run", hint: "Scene, roll calls, party HP and conditions, AI director" },
+  { id: "media", label: "Media", hint: "Scene art gallery, scene packets and generation jobs" },
+  { id: "audio", label: "Audio", hint: "Ambience, music library and YouTube" },
+  { id: "system", label: "System", hint: "Runtime health, logs, adapters and session export" }
+];
+
+function useGmTab() {
+  const [tab, setTabState] = useState<GmTab>(() => {
+    try {
+      const saved = window.localStorage.getItem("bde-gm-tab");
+      return gmTabs.some((t) => t.id === saved) ? (saved as GmTab) : "stage";
+    } catch {
+      return "stage";
+    }
+  });
+  const setTab = useCallback((next: GmTab) => {
+    setTabState(next);
+    try {
+      window.localStorage.setItem("bde-gm-tab", next);
+    } catch {
+      // ignore
+    }
+  }, []);
+  return [tab, setTab] as const;
+}
+
 function useAdvancedMode() {
   const [advancedMode, setAdvancedMode] = useState(() => {
     try {
@@ -714,7 +746,6 @@ export default function App() {
   const [scenePacketStatus, setScenePacketStatus] = useState("");
   const [scenePacketValidation, setScenePacketValidation] = useState<ScenePacketValidation | null>(null);
   const [mediaQueueStatus, setMediaQueueStatus] = useState("");
-  const [galleryImages, setGalleryImages] = useState<Array<{filename:string;url:string}>>([]);
   const [galleryFull, setGalleryFull] = useState<string | null>(null);
   const [cleanupReport, setCleanupReport] = useState<CleanupReport | null>(null);
   const [cleanupReportStatus, setCleanupReportStatus] = useState("");
@@ -799,77 +830,86 @@ export default function App() {
   // stub handlers (restored from earlier edits)
   const loadCleanupReport = async (_opts?: {silent?:boolean}) => {};
   const loadErrorEvents = async () => {};
-  const exportSessionSummary = async () => {};
-  
-  const [speaking, setSpeaking] = useState(false);
-  const [narrationText, setNarrationText] = useState("");
-  const [audioUnlocked, setAudioUnlocked] = useState(false);
-  const lastSceneImageRef = useRef("");
-  const audioCtxRef = useRef<AudioContext | null>(null);
+  const [tab, setTab] = useGmTab();
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+  const stageWindowOpen = useStageWindowOpen();
+  const narration = useNarration({ autoSpeak: !stageWindowOpen });
+  const art = useSceneArt(snapshot?.currentScene);
+  const galleryImages = art.images;
+  const [stageRoll, setStageRoll] = useState<RollRecord | null>(null);
+  const [sceneDraft, setSceneDraft] = useState("");
+  const [autoYtSearch, setAutoYtSearch] = useState(false);
+  const [ambientVolume, setAmbientVolumeState] = useState(30);
+  const [rollCall, setRollCall] = useState({ type: "Perception", description: "", ability: "wis", dc: "12" });
+  const [rollCallStatus, setRollCallStatus] = useState("");
 
-  function unlockAudio() {
-    if (audioUnlocked) return;
-    try {
-      if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
-      audioCtxRef.current.resume().then(() => setAudioUnlocked(true));
-    } catch { setAudioUnlocked(true); }
+  async function changeScene(title: string) {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    const res = await fetch("/api/set-scene", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: trimmed })
+    });
+    if (!res.ok) return;
+    setSceneDraft("");
+    startAmbient(trimmed);
+    if (autoYtSearch) {
+      const query = encodeURIComponent(`DnD ambience ${trimmed} 1 hour`);
+      window.open(`https://www.youtube.com/results?search_query=${query}`, "_blank");
+    }
   }
 
-  async function speakSceneText(textOverride?: string) {
-    let text = textOverride;
-    if (!text) {
-      try { const r = await fetch("/api/pending-narration"); if (r.ok) { const d = await r.json(); if (d?.text) text = d.text; } } catch {}
-    }
-    if (!text) text = snapshot?.memoryEntries?.[0]?.summary;
-    if (!text || speaking) return;
-    const shortText = text.length > 500 ? text.slice(0, 500) + "..." : text;
-    setNarrationText(text);
-    setSpeaking(true);
+  async function callForRoll() {
+    const type = rollCall.type.trim();
+    if (!type) return;
+    setRollCallStatus("sending");
     try {
-      const res = await fetch("/api/speak", {
+      const res = await fetch("/api/set-action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: shortText })
+        body: JSON.stringify({
+          type,
+          description: rollCall.description.trim() || type,
+          ability: rollCall.ability,
+          dc: rollCall.dc.trim() ? Number(rollCall.dc) : null
+        })
       });
-      if (!res.ok) { setSpeaking(false); setNarrationText(""); return; }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      if (audioCtxRef.current) {
-        const audioBuffer = await audioCtxRef.current.decodeAudioData(await blob.arrayBuffer());
-        const source = audioCtxRef.current.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(audioCtxRef.current.destination);
-        source.onended = () => { setSpeaking(false); setNarrationText(""); URL.revokeObjectURL(url); };
-        source.start();
-      } else {
-        const audio = new Audio(url);
-        audio.onended = () => { setSpeaking(false); setNarrationText(""); URL.revokeObjectURL(url); };
-        audio.onerror = () => { setSpeaking(false); setNarrationText(""); URL.revokeObjectURL(url); };
-        await audio.play();
-      }
-    } catch { setSpeaking(false); setNarrationText(""); }
+      setRollCallStatus(res.ok ? "sent" : "failed");
+    } catch {
+      setRollCallStatus("failed");
+    }
   }
 
-  const lastNarrationTextRef = useRef("");
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (speaking) return;
-      fetch("/api/pending-narration")
-        .then(r => r.ok ? r.json() : null)
-        .then(d => {
-          if (d?.text && d.text !== lastNarrationTextRef.current) {
-            lastNarrationTextRef.current = d.text;
-            void speakSceneText(d.text);
-          }
-        })
-        .catch(() => {});
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [speaking]);
+  async function saveNow() {
+    setExportStatus("saving");
+    try {
+      const res = await fetch("/api/save-now", { method: "POST" });
+      setExportStatus(res.ok ? "saved" : "failed");
+    } catch {
+      setExportStatus("failed");
+    }
+    window.setTimeout(() => setExportStatus(""), 2000);
+  }
 
-  useEffect(() => {
-    setTimeout(() => void speakSceneText(), 2000);
-  }, []);
+  async function exportSessionSummary() {
+    setExportStatus("exporting");
+    try {
+      const res = await fetch("/api/session-summary.md");
+      if (!res.ok) throw new Error();
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `session-summary-${new Date().toISOString().slice(0, 10)}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setExportPath("");
+      setExportStatus("ready");
+    } catch {
+      setExportStatus("failed");
+    }
+  }
 
   async function loadScenePacket() {
     setScenePacketStatus("loading");
@@ -1600,20 +1640,6 @@ export default function App() {
     };
   }, [snapshot?.joinUrl]);
 
-  useEffect(() => {
-    let mounted = true;
-    async function poll() {
-      try {
-        const res = await fetch("/api/images");
-        if (!res.ok) return;
-        const data = await res.json();
-        if (mounted) setGalleryImages(data.images ?? []);
-      } catch { /* ignore */ }
-    }
-    poll();
-    const interval = setInterval(poll, 5000);
-    return () => { mounted = false; clearInterval(interval); };
-  }, []);
 
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -1685,7 +1711,8 @@ export default function App() {
                 }
               : current
           );
-          setDiceAnimation(message.payload as RollRecord);
+          setStageRoll(message.payload as RollRecord);
+          if (tabRef.current !== "stage") setDiceAnimation(message.payload as RollRecord);
           return;
         }
 
@@ -1705,531 +1732,1959 @@ export default function App() {
     };
   }, []);
 
+  const runningMediaJobs = snapshot?.mediaJobs.filter((job) => job.status === "running").length ?? 0;
+  const approvalCount = snapshot?.approvalQueue.length ?? 0;
+  const tabBadges: Partial<Record<GmTab, number>> = { run: approvalCount, media: runningMediaJobs };
+
   return (
-    <main className="dashboard-shell" onClick={unlockAudio}>
-      <section className="hero-panel">
-        <div className="hero-copy">
-          <p className="eyebrow">Black Dice Engine</p>
-          <h1>GM Dashboard</h1>
-          <p className="hero-summary">
-            The first slice proves the loop: local server up, player clients connected,
-            runtime visible, and every roll preserved in an auditable table log.
-          </p>
-          <div className="hero-metrics">
-            <div>
-              <span>Campaign</span>
-              <strong>{snapshot?.campaignTitle ?? "Loading..."}</strong>
-            </div>
-            <div>
-              <span>Scene</span>
-              <strong>{snapshot?.currentScene ?? "Loading..."}
-                <span style={{ marginLeft: 8, fontSize: "0.7rem", color: audioUnlocked ? "#6a6" : "#a66" }}>{audioUnlocked ? "🔊 ready" : "🔇 click to enable"}</span>
-                <button onClick={(e) => { e.stopPropagation(); unlockAudio(); void speakSceneText(); }} disabled={speaking} type="button" title="Read narration aloud" style={{ marginLeft: 8, background: "none", border: "1px solid #5a4a2a", borderRadius: 4, cursor: "pointer", fontSize: "1rem", padding: "2px 6px" }}>{speaking ? "⏳" : "🔊"}</button>
-              </strong>
-            </div>
-            <div>
-              <span>Socket</span>
-              <strong>{connectionLabel}</strong>
-            </div>
-            <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
-              <input
-                type="text"
-                placeholder="New scene title..."
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    const title = (e.target as HTMLInputElement).value.trim();
-                    if (!title) return;
-                    fetch("/api/set-scene", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ title }),
-                    }).then(() => {
-                      (e.target as HTMLInputElement).value = "";
-                      startAmbient(title);
-                      const autoSearch = document.getElementById("auto-yt-search") as HTMLInputElement | null;
-                      if (autoSearch?.checked) {
-                        const query = encodeURIComponent(`DnD ambience ${title} 1 hour`);
-                        window.open(`https://www.youtube.com/results?search_query=${query}`, "_blank");
-                      }
-                    });
-                  }
-                }}
-                style={{ flex: 1, fontSize: "0.85rem", padding: "6px 10px" }}
-              />
-              <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "0.7rem", color: "#bca06d", whiteSpace: "nowrap" }}>
-                <input id="auto-yt-search" type="checkbox" defaultChecked />
-                🎵
-              </label>
-              <button
-                className="mini-button"
-                onClick={() => stopAmbient()}
-                type="button"
-                title="Stop ambient"
-              >
-                ⏹
-              </button>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" }}>
-              <span style={{ fontSize: "0.7rem", color: "#bca06d" }}>Ambient Vol</span>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                defaultValue="30"
-                style={{ flex: 1, accentColor: "#d4af37" }}
-                onChange={(e) => setAmbientVolume(Number(e.target.value) / 100)}
-              />
-            </div>
+    <main className={`dashboard-shell tab-${tab}`} onClick={narration.unlockAudio}>
+      <header className="gm-header">
+        <div className="gm-brand">
+          <span className="gm-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M12 2.5 20.5 7.4v9.2L12 21.5 3.5 16.6V7.4Z" />
+              <path d="M12 2.5v6.3m0 0L3.5 16.6M12 8.8l8.5 7.8M3.5 16.6h17" />
+            </svg>
+          </span>
+          <div className="gm-brand-text">
+            <span>{snapshot?.campaignTitle ?? "Black Dice Engine"}</span>
+            <strong>{snapshot?.currentScene ?? "Connecting…"}</strong>
           </div>
         </div>
-        <div className="hero-note">
-          <span>Join path</span>
-          <strong>{snapshot?.joinUrl ?? "Waiting for server..."}</strong>
-          <p>Table PIN: {snapshot?.tablePin ?? "----"}</p>
-          <div style={{ display: "flex", gap: "10px", marginTop: "10px", flexWrap: "wrap" }}>
-            <button className="export-button" onClick={() => void exportSessionSummary()} type="button">
-              Export Session Markdown
-            </button>
+        <nav className="gm-tabs" role="tablist" aria-label="Dashboard sections">
+          {gmTabs.map((t) => (
             <button
-              className="export-button"
-              style={{ background: "linear-gradient(135deg, #3a6b3a 0%, #2a4a2a 100%)" }}
-              onClick={async () => {
-                try {
-                  const res = await fetch("/api/save-now", { method: "POST" });
-                  if (res.ok) {
-                    setExportStatus("saved");
-                    setTimeout(() => setExportStatus(""), 2000);
-                  }
-                } catch {
-                  setExportStatus("failed");
-                }
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === t.id}
+              className={tab === t.id ? "active" : ""}
+              onClick={() => setTab(t.id)}
+              title={t.hint}
+            >
+              {t.label}
+              {tabBadges[t.id] ? <span className="gm-tab-badge">{tabBadges[t.id]}</span> : null}
+            </button>
+          ))}
+        </nav>
+        <div className="gm-header-actions">
+          <span className={`conn-pill conn-${connectionLabel}`}>
+            <i aria-hidden="true" />
+            {connectionLabel === "connected" ? "Live" : connectionLabel}
+          </span>
+          <button className="gm-btn" type="button" onClick={() => void saveNow()} disabled={exportStatus === "saving"}>
+            {exportStatus === "saving" ? "Saving…" : exportStatus === "saved" ? "Saved ✓" : "Save"}
+          </button>
+        </div>
+      </header>
+
+      {tab === "stage" ? (
+        <section className="stage-pane">
+          <div className="stage-toolbar">
+            <button className="gm-btn primary" type="button" onClick={openStageWindow}>
+              {stageWindowOpen ? "TV window open" : "Open on TV"}
+            </button>
+            <form
+              className="stage-scene-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void changeScene(sceneDraft);
               }}
-              type="button"
             >
-              💾 Save Now
-            </button>
-            <button
-              className="export-button"
-              style={{ background: "linear-gradient(135deg, #5a4a2a 0%, #3a2a1a 100%)" }}
-              onClick={toggleAdvancedMode}
-              type="button"
-            >
-              {advancedMode ? "🔽 Simple Mode" : "🔧 Advanced Mode"}
-            </button>
-          </div>
-          {exportStatus ? (
-            <p className="export-note">
-              {exportStatus === "exporting"
-                ? "Preparing Markdown export..."
-                : exportStatus === "ready"
-                  ? exportPath
-                    ? `Session summary saved to ${exportPath}`
-                    : "Session summary downloaded."
-                  : "Export failed."}
-            </p>
-          ) : null}
-          {qrCodeUrl ? <img className="qr-preview" src={qrCodeUrl} alt="Player join QR code" /> : null}
-        </div>
-      </section>
-
-      <section className="dashboard-grid">
-        {advancedMode ? (
-        <article className="panel">
-          <div className="panel-header">
-            <h2>Runtime Status</h2>
-            <span className={`pill pill-${runtime?.status ?? "offline"}`}>
-              {runtime?.status ?? "offline"}
-            </span>
-          </div>
-          <p className="muted-line">Mode: {runtime?.mode ?? "offline"}</p>
-          {runtime?.mediaPressure ? (
-            <div className="scene-packet-block">
-              <div className="panel-header">
-                <h3>Media Pressure</h3>
-                <span className={`pill pill-${runtime.mediaPressure.level === "low" ? "ok" : "degraded"}`}>
-                  {runtime.mediaPressure.level}
-                </span>
-              </div>
-              <p className="helper-note">{runtime.mediaPressure.summary}</p>
-              {runtime.mediaPressure.blockedJobTypes.length ? (
-                <div className="tag-row">
-                  {runtime.mediaPressure.blockedJobTypes.map((type) => (
-                    <span className="tag-chip" key={type}>
-                      blocked: {formatMediaJobType(type)}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-              {runtime.mediaPressure.reasons.length ? (
-                <div className="validation-list">
-                  {runtime.mediaPressure.reasons.map((reason) => (
-                    <p key={reason}>{reason}</p>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-          {runtime?.warnings?.length ? (
-            <div className="validation-list">
-              {runtime.warnings.map((warning) => (
-                <p key={warning}>{warning}</p>
-              ))}
-            </div>
-          ) : null}
-          <ul className="service-list">
-            {runtime?.services.map((service) => (
-              <li key={service.name}>
-                <div>
-                  <strong>{service.name}</strong>
-                  <span>{service.message ?? "Ready"}</span>
-                </div>
-                <span>{service.status}</span>
-              </li>
-            )) ?? <li>Waiting for runtime service data.</li>}
-          </ul>
-        </article>
-        ) : null}
-
-        <article className="panel">
-          <div className="panel-header">
-            <h2>AI Director</h2>
-            <span className="pill pill-ok">{aiNarrationEnabled ? "ON" : "OFF"}</span>
-          </div>
-          <p className="muted-line">
-            Use the AI to propose actions, get director guidance, and enable richer auto-narration.
-          </p>
-
-          <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "12px" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "0.8rem", color: "#bca06d", cursor: "pointer" }}>
               <input
-                type="checkbox"
-                checked={aiNarrationEnabled}
-                onChange={async (e) => {
-                  const enabled = e.target.checked;
-                  setAiNarrationEnabled(enabled);
-                  try {
-                    await fetch("/api/ai/narration-toggle", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ enabled })
-                    });
-                  } catch {
-                    // ignore
-                  }
-                }}
+                value={sceneDraft}
+                onChange={(event) => setSceneDraft(event.target.value)}
+                placeholder="Move the party to… (paints new scene art)"
+                aria-label="New scene title"
               />
-              AI Narration on rolls
-            </label>
-            <span style={{ fontSize: "0.7rem", color: "#8a7a5a" }}>
-              {aiNarrationEnabled ? "Auto-narrate will call Ollama" : "Auto-narrate uses templates only"}
-            </span>
-          </div>
-
-          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginBottom: "12px" }}>
+              <button className="gm-btn" type="submit" disabled={!sceneDraft.trim()}>
+                Set scene
+              </button>
+            </form>
             <button
-              className="export-button"
-              style={{ background: "linear-gradient(135deg, #5a4a8a 0%, #3a2a6a 100%)" }}
-              disabled={pendingActionKey !== ""}
-              onClick={() => void runAiProposeAction()}
+              className="gm-btn"
               type="button"
+              disabled={narration.speaking || !narration.text}
+              onClick={() => {
+                narration.unlockAudio();
+                void narration.speak(narration.text);
+              }}
             >
-              {pendingActionKey === "ai-propose-action" ? "⏳ Thinking..." : "🎲 AI Propose Action"}
-            </button>
-            <button
-              className="export-button"
-              style={{ background: "linear-gradient(135deg, #4a6a8a 0%, #2a4a6a 100%)" }}
-              disabled={pendingActionKey !== ""}
-              onClick={() => void runAiDirectorGuidance()}
-              type="button"
-            >
-              {pendingActionKey === "ai-director-guidance" ? "⏳ Thinking..." : "🎬 AI Director Guidance"}
+              {narration.speaking ? "Reading…" : "Read aloud"}
             </button>
           </div>
+          <p className={`stage-hint ${narration.ttsUnavailable ? "warn" : ""}`}>
+            {narration.ttsUnavailable
+              ? "Narrator voice is unavailable. Is the TTS service running? Text still shows on screen."
+              : stageWindowOpen
+                ? "The TV window is showing this view and reading narration aloud."
+                : narration.audioReady
+                  ? "Preview of the TV view. Open it on the TV, drag the window there, then press Start."
+                  : "Click anywhere to let this screen read narration aloud, or open the TV window."}
+          </p>
+          <div className="stage-frame">
+            <Stage
+              snapshot={snapshot}
+              art={art}
+              narration={narration}
+              latestRoll={stageRoll}
+              onRollShown={() => setStageRoll(null)}
+            />
+          </div>
+        </section>
+      ) : null}
 
-          {aiProposeStatus === "running" ? (
-            <p className="export-note">Asking the AI what the party should do next...</p>
-          ) : aiProposeStatus === "failed" ? (
-            <p className="export-note" style={{ color: "#c66" }}>AI proposal failed. Is Ollama running?</p>
-          ) : null}
+      <section className="dashboard-grid" hidden={tab !== "run"}>
+  <article className="panel">
+    <div className="panel-header">
+      <h2>Scene</h2>
+      <span>{art.generating ? "Painting art…" : "Changing it paints new art"}</span>
+    </div>
+    <form
+      className="stack-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void changeScene(sceneDraft);
+      }}
+    >
+      <label className="label" htmlFor="scene-title">Where is the party now?</label>
+      <div className="inline-form">
+        <input
+          id="scene-title"
+          value={sceneDraft}
+          onChange={(event) => setSceneDraft(event.target.value)}
+          placeholder={snapshot?.currentScene ?? "Scene title"}
+        />
+        <button className="primary-button" type="submit" disabled={!sceneDraft.trim()}>
+          Set scene
+        </button>
+      </div>
+      <label className="mode-toggle">
+        <input type="checkbox" checked={autoYtSearch} onChange={(event) => setAutoYtSearch(event.target.checked)} />
+        <span>Also search YouTube for matching ambience</span>
+      </label>
+    </form>
+  </article>
 
-          {aiProposedAction && aiProposeStatus === "ready" ? (
-            <div className="context-block" style={{ borderLeft: "3px solid #7a5aaa", paddingLeft: "12px" }}>
-              <div className="packet-meta-grid">
-                <div>
-                  <span>Action</span>
-                  <strong>{String(aiProposedAction.action ?? "—")}</strong>
-                </div>
-                <div>
-                  <span>Skill</span>
-                  <strong>{String(aiProposedAction.skill ?? "—")}</strong>
-                </div>
-                <div>
-                  <span>Difficulty</span>
-                  <strong>{String(aiProposedAction.difficulty ?? "—")}</strong>
-                </div>
-              </div>
-              <div className="context-row">
-                <strong>Description</strong>
-                <p>{String(aiProposedAction.description ?? "")}</p>
-              </div>
-              <div className="context-row">
-                <strong>Consequences</strong>
-                <p>{String(aiProposedAction.consequences ?? "")}</p>
-              </div>
+  <article className="panel">
+    <div className="panel-header">
+      <h2>Call for a roll</h2>
+      <span>{snapshot?.currentAction ? `Live: ${snapshot.currentAction.type}` : "Shows on phones and the TV"}</span>
+    </div>
+    <form
+      className="stack-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void callForRoll();
+      }}
+    >
+      <div className="rollcall-grid">
+        <div>
+          <label className="label" htmlFor="rc-type">Check</label>
+          <input
+            id="rc-type"
+            list="rc-skills"
+            value={rollCall.type}
+            onChange={(event) => setRollCall({ ...rollCall, type: event.target.value })}
+          />
+          <datalist id="rc-skills">
+            {["Perception", "Stealth", "Athletics", "Insight", "Persuasion", "Investigation", "Arcana", "Dexterity save", "Wisdom save", "Constitution save"].map((skill) => (
+              <option key={skill} value={skill} />
+            ))}
+          </datalist>
+        </div>
+        <div>
+          <label className="label" htmlFor="rc-ability">Ability</label>
+          <select id="rc-ability" value={rollCall.ability} onChange={(event) => setRollCall({ ...rollCall, ability: event.target.value })}>
+            <option value="str">Strength</option>
+            <option value="dex">Dexterity</option>
+            <option value="con">Constitution</option>
+            <option value="int">Intelligence</option>
+            <option value="wis">Wisdom</option>
+            <option value="cha">Charisma</option>
+          </select>
+        </div>
+        <div>
+          <label className="label" htmlFor="rc-dc">DC</label>
+          <input
+            id="rc-dc"
+            type="number"
+            min={1}
+            max={40}
+            value={rollCall.dc}
+            onChange={(event) => setRollCall({ ...rollCall, dc: event.target.value })}
+          />
+        </div>
+      </div>
+      <label className="label" htmlFor="rc-desc">What's happening (optional)</label>
+      <input
+        id="rc-desc"
+        value={rollCall.description}
+        onChange={(event) => setRollCall({ ...rollCall, description: event.target.value })}
+        placeholder="Something moves on the stairs…"
+      />
+      <button className="primary-button" type="submit" disabled={!rollCall.type.trim() || rollCallStatus === "sending"}>
+        {rollCallStatus === "sending" ? "Sending…" : "Call for the roll"}
+      </button>
+      {rollCallStatus === "failed" ? <p className="export-note">Couldn't reach the server.</p> : null}
+    </form>
+  </article>
+
+  <article className="panel">
+    <div className="panel-header">
+      <h2>Players join</h2>
+      <span>PIN {snapshot?.tablePin ?? "----"}</span>
+    </div>
+    <div className="join-block">
+      {qrCodeUrl ? <img className="qr-preview" src={qrCodeUrl} alt="Player join QR code" /> : null}
+      <div>
+        <p className="muted-line">Scan with a phone on the same Wi-Fi, or open:</p>
+        <p className="join-url">{snapshot?.joinUrl ?? "Waiting for server…"}</p>
+      </div>
+    </div>
+  </article>
+
+          <article className="panel">
+            <div className="panel-header">
+              <h2>AI Director</h2>
+              <span className="pill pill-ok">{aiNarrationEnabled ? "ON" : "OFF"}</span>
+            </div>
+            <p className="muted-line">
+              Use the AI to propose actions, get director guidance, and enable richer auto-narration.
+            </p>
+
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "12px" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "0.8rem", color: "#bca06d", cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={aiNarrationEnabled}
+                  onChange={async (e) => {
+                    const enabled = e.target.checked;
+                    setAiNarrationEnabled(enabled);
+                    try {
+                      await fetch("/api/ai/narration-toggle", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ enabled })
+                      });
+                    } catch {
+                      // ignore
+                    }
+                  }}
+                />
+                AI Narration on rolls
+              </label>
+              <span style={{ fontSize: "0.7rem", color: "#8a7a5a" }}>
+                {aiNarrationEnabled ? "Auto-narrate will call Ollama" : "Auto-narrate uses templates only"}
+              </span>
+            </div>
+
+            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginBottom: "12px" }}>
               <button
-                className="mini-button"
-                style={{ marginTop: "8px" }}
-                onClick={() => {
-                  const action = String(aiProposedAction.action ?? "");
-                  const skill = String(aiProposedAction.skill ?? "");
-                  const difficulty = String(aiProposedAction.difficulty ?? "medium");
-                  const dc = difficulty === "easy" ? 10 : difficulty === "medium" ? 15 : difficulty === "hard" ? 20 : 25;
-                  const abilityMap: Record<string, string> = {
-                    athletics: "str", acrobatics: "dex", sleightofhand: "dex", stealth: "dex",
-                    arcana: "int", history: "int", investigation: "int", nature: "int", religion: "int",
-                    animalhandling: "wis", insight: "wis", medicine: "wis", perception: "wis", survival: "wis",
-                    deception: "cha", intimidation: "cha", performance: "cha", persuasion: "cha"
-                  };
-                  const ability = abilityMap[skill.toLowerCase().replace(/\s/g, "")] || "str";
-                  fetch("/api/set-action", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ action: skill.toLowerCase(), description: action, ability, dc })
-                  });
-                }}
+                className="export-button"
+                style={{ background: "linear-gradient(135deg, #5a4a8a 0%, #3a2a6a 100%)" }}
+                disabled={pendingActionKey !== ""}
+                onClick={() => void runAiProposeAction()}
                 type="button"
               >
-                Use This Action
+                {pendingActionKey === "ai-propose-action" ? "⏳ Thinking..." : "🎲 AI Propose Action"}
+              </button>
+              <button
+                className="export-button"
+                style={{ background: "linear-gradient(135deg, #4a6a8a 0%, #2a4a6a 100%)" }}
+                disabled={pendingActionKey !== ""}
+                onClick={() => void runAiDirectorGuidance()}
+                type="button"
+              >
+                {pendingActionKey === "ai-director-guidance" ? "⏳ Thinking..." : "🎬 AI Director Guidance"}
               </button>
             </div>
-          ) : null}
 
-          {aiDirectorStatus === "running" ? (
-            <p className="export-note">Consulting the AI director for scene guidance...</p>
-          ) : aiDirectorStatus === "failed" ? (
-            <p className="export-note" style={{ color: "#c66" }}>Director guidance failed. Is Ollama running?</p>
-          ) : null}
+            {aiProposeStatus === "running" ? (
+              <p className="export-note">Asking the AI what the party should do next...</p>
+            ) : aiProposeStatus === "failed" ? (
+              <p className="export-note" style={{ color: "#c66" }}>AI proposal failed. Is Ollama running?</p>
+            ) : null}
 
-          {aiDirectorGuidance && aiDirectorStatus === "ready" ? (
-            <div className="context-block" style={{ borderLeft: "3px solid #4a7aaa", paddingLeft: "12px" }}>
-              <div className="context-row">
-                <strong>Director Guidance</strong>
-                <p style={{ whiteSpace: "pre-wrap" }}>{aiDirectorGuidance}</p>
-              </div>
-            </div>
-          ) : null}
-        </article>
-
-        {advancedMode ? (
-
-        <article className="panel">
-          <div className="panel-header">
-            <h2>Presence</h2>
-            <span>{runtime?.clients.length ?? 0} clients</span>
-          </div>
-          <div className="presence-list">
-            {runtime?.clients.map((client) => (
-              <div className="presence-row" key={client.id}>
-                <div>
-                  <strong>
-                    {client.playerLabel ?? client.role}
-                    {client.claimedCharacterName ? ` - ${client.claimedCharacterName}` : ""}
-                  </strong>
-                  <p>
-                    {client.role} · last seen {formatRelativeTime(client.lastSeenAt)}
-                  </p>
-                </div>
-                <span className={`presence-pill presence-${client.status}`}>{client.status}</span>
-              </div>
-            )) ?? <p>Waiting for connected clients.</p>}
-          </div>
-        </article>
-
-        ) : null}
-
-        {advancedMode ? (
-
-        <article className="panel">
-          <div className="panel-header">
-            <h2>Campaign Context</h2>
-            <span>{snapshot?.campaignBible.visibility ?? "loading"}</span>
-          </div>
-          {snapshot ? (
-            <div className="context-block">
-              <strong>{snapshot.campaignBible.subtitle}</strong>
-              <p>{snapshot.activeSceneContext.location?.summary ?? "No scene location summary resolved yet."}</p>
-              <div className="packet-meta-grid">
-                <div>
-                  <span>Scene Location</span>
-                  <strong>{snapshot.activeSceneContext.location?.name ?? "Unresolved"}</strong>
-                </div>
-                <div>
-                  <span>Safety Rating</span>
-                  <strong>{snapshot.activeSceneContext.safety.rating}</strong>
-                </div>
-              </div>
-              <div className="tag-row">
-                {snapshot.activeSceneContext.tone.map((tone) => (
-                  <span className="tag-chip" key={tone}>
-                    {tone}
-                  </span>
-                ))}
-              </div>
-              {snapshot.activeSceneContext.location?.features.length ? (
-                <div>
-                  <p className="detail-label">Location Features</p>
-                  <div className="tag-row">
-                    {snapshot.activeSceneContext.location.features.map((feature) => (
-                      <span className="tag-chip" key={feature}>
-                        {feature}
-                      </span>
-                    ))}
+            {aiProposedAction && aiProposeStatus === "ready" ? (
+              <div className="context-block" style={{ borderLeft: "3px solid #7a5aaa", paddingLeft: "12px" }}>
+                <div className="packet-meta-grid">
+                  <div>
+                    <span>Action</span>
+                    <strong>{String(aiProposedAction.action ?? "—")}</strong>
+                  </div>
+                  <div>
+                    <span>Skill</span>
+                    <strong>{String(aiProposedAction.skill ?? "—")}</strong>
+                  </div>
+                  <div>
+                    <span>Difficulty</span>
+                    <strong>{String(aiProposedAction.difficulty ?? "—")}</strong>
                   </div>
                 </div>
+                <div className="context-row">
+                  <strong>Description</strong>
+                  <p>{String(aiProposedAction.description ?? "")}</p>
+                </div>
+                <div className="context-row">
+                  <strong>Consequences</strong>
+                  <p>{String(aiProposedAction.consequences ?? "")}</p>
+                </div>
+                <button
+                  className="mini-button"
+                  style={{ marginTop: "8px" }}
+                  onClick={() => {
+                    const action = String(aiProposedAction.action ?? "");
+                    const skill = String(aiProposedAction.skill ?? "");
+                    const difficulty = String(aiProposedAction.difficulty ?? "medium");
+                    const dc = difficulty === "easy" ? 10 : difficulty === "medium" ? 15 : difficulty === "hard" ? 20 : 25;
+                    const abilityMap: Record<string, string> = {
+                      athletics: "str", acrobatics: "dex", sleightofhand: "dex", stealth: "dex",
+                      arcana: "int", history: "int", investigation: "int", nature: "int", religion: "int",
+                      animalhandling: "wis", insight: "wis", medicine: "wis", perception: "wis", survival: "wis",
+                      deception: "cha", intimidation: "cha", performance: "cha", persuasion: "cha"
+                    };
+                    const ability = abilityMap[skill.toLowerCase().replace(/\s/g, "")] || "str";
+                    fetch("/api/set-action", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ type: skill || action, description: action, ability, dc })
+                    });
+                  }}
+                  type="button"
+                >
+                  Use This Action
+                </button>
+              </div>
+            ) : null}
+
+            {aiDirectorStatus === "running" ? (
+              <p className="export-note">Consulting the AI director for scene guidance...</p>
+            ) : aiDirectorStatus === "failed" ? (
+              <p className="export-note" style={{ color: "#c66" }}>Director guidance failed. Is Ollama running?</p>
+            ) : null}
+
+            {aiDirectorGuidance && aiDirectorStatus === "ready" ? (
+              <div className="context-block" style={{ borderLeft: "3px solid #4a7aaa", paddingLeft: "12px" }}>
+                <div className="context-row">
+                  <strong>Director Guidance</strong>
+                  <p style={{ whiteSpace: "pre-wrap" }}>{aiDirectorGuidance}</p>
+                </div>
+              </div>
+            ) : null}
+          </article>
+
+          <article className="panel">
+            <div className="panel-header">
+              <h2>Party State</h2>
+              <span>{snapshot?.party.length ?? 0} linked</span>
+              <button className="mini-button" onClick={toggleAdvancedMode} type="button">
+                {advancedMode ? "Compact cards" : "Full controls"}
+              </button>
+              {advancedMode ? (
+                <button
+                  className="mini-button"
+                  disabled={pendingActionKey !== ""}
+                  onClick={() => {
+                    snapshot?.party.forEach((character) => {
+                      if (character.initiative !== null) {
+                        void submitStateEvent(
+                          { type: "initiative_set", characterId: character.id, value: null },
+                          `init-clear:${character.id}`,
+                          `init-clear-${character.id}`
+                        );
+                      }
+                    });
+                  }}
+                  type="button"
+                >
+                  Clear Initiative
+                </button>
               ) : null}
-              {snapshot.activeSceneContext.npcs.length ? (
+            </div>
+            {advancedMode ? (
+              <label className="mode-toggle">
+                <input
+                  checked={queueApprovalMode}
+                  onChange={(event) => setQueueApprovalMode(event.target.checked)}
+                  type="checkbox"
+                />
+                <span>Queue risky state changes for approval</span>
+              </label>
+            ) : null}
+
+            {snapshot?.party.some((c) => c.initiative !== null) ? (
+              <div style={{ display: "flex", gap: "8px", marginBottom: "10px" }}>
+                <button
+                  className="mini-button"
+                  onClick={() => {
+                    setCombatMode(!combatMode);
+                    if (!combatMode) {
+                      setCombatRound(1);
+                      setCombatTurnIndex(0);
+                    }
+                  }}
+                  type="button"
+                >
+                  {combatMode ? "End Combat" : "Start Combat"}
+                </button>
+              </div>
+            ) : null}
+
+            {combatMode && snapshot?.party.some((c) => c.initiative !== null) ? (
+              <div className="combat-tracker" style={{ marginBottom: "14px" }}>
+                <div className="combat-header">
+                  <span className="combat-round">Round {combatRound}</span>
+                  <button
+                    className="combat-next-btn"
+                    onClick={() => {
+                      const combatants = snapshot.party
+                        .filter((c) => c.initiative !== null)
+                        .sort((a, b) => (b.initiative ?? 0) - (a.initiative ?? 0));
+                      if (combatTurnIndex + 1 >= combatants.length) {
+                        setCombatTurnIndex(0);
+                        setCombatRound((r) => r + 1);
+                      } else {
+                        setCombatTurnIndex((i) => i + 1);
+                      }
+                    }}
+                    type="button"
+                  >
+                    Next Turn →
+                  </button>
+                </div>
+                <div className="combat-order">
+                  {snapshot.party
+                    .filter((c) => c.initiative !== null)
+                    .sort((a, b) => (b.initiative ?? 0) - (a.initiative ?? 0))
+                    .map((character, idx) => (
+                      <div
+                        key={character.id}
+                        className={`combat-turn ${idx === combatTurnIndex ? "combat-active" : ""}`}
+                      >
+                        <span className="combat-init">{character.initiative}</span>
+                        <div>
+                          <strong>{character.name}</strong>
+                          <span className="combat-hp">HP {character.hp.current}/{character.hp.max}</span>
+                          {character.conditions.length > 0 ? (
+                            <span className="combat-conditions">{character.conditions.join(", ")}</span>
+                          ) : null}
+                        </div>
+                        {idx === combatTurnIndex ? <span className="combat-badge">ACTIVE</span> : null}
+                      </div>
+                    ))}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="party-list">
+              {snapshot?.party
+                .slice()
+                .sort((a, b) => {
+                  const ai = a.initiative ?? -1;
+                  const bi = b.initiative ?? -1;
+                  if (ai !== bi) return bi - ai;
+                  return a.name.localeCompare(b.name);
+                })
+                .map((character) => {
+                  const hpPct = Math.max(0, Math.min(100, Math.round((character.hp.current / character.hp.max) * 100)));
+                  const hpClass = character.hp.current <= character.hp.max * 0.25 ? "hp-critical" : character.hp.current <= character.hp.max * 0.5 ? "hp-wounded" : "";
+                  return advancedMode ? (
+                    <div key={character.id} className="party-card">
+                      <div>
+                        <h3>{character.name}</h3>
+                        <p>{character.classLabel}</p>
+                      </div>
+                      <div className="party-stats">
+                        <span>HP {character.hp.current}/{character.hp.max}</span>
+                        <span>AC {character.armorClass}</span>
+                        <span>{formatInitiative(character.initiative)}</span>
+                      </div>
+                      <div className="initiative-row">
+                        <input
+                          className="initiative-input"
+                          type="number"
+                          value={character.initiative ?? ""}
+                          onChange={(event) => {
+                            const value = event.target.value ? Number(event.target.value) : null;
+                            void submitStateEvent(
+                              { type: "initiative_set", characterId: character.id, value },
+                              `init:${character.id}:${value}`,
+                              `init-${character.id}`
+                            );
+                          }}
+                          placeholder="Init"
+                        />
+                      </div>
+                      <div className="tag-row">
+                        {character.conditions.length > 0 ? (
+                          character.conditions.map((condition) => (
+                            <span key={condition} className="tag-chip">{condition}</span>
+                          ))
+                        ) : (
+                          <span className="tag-chip muted-chip">No conditions</span>
+                        )}
+                      </div>
+                      <div className="party-detail-grid">
+                        <div>
+                          <p className="detail-label">Resources</p>
+                          <ul className="detail-list">
+                            {character.resources.map((resource) => (
+                              <li key={resource.id}>
+                                <span>{resource.label}</span>
+                                <div className="detail-actions">
+                                  <strong>{resource.current}/{resource.max}</strong>
+                                  <div className="stepper-row">
+                                    <button className="mini-button" disabled={pendingActionKey !== ""} onClick={() => void submitStateEvent({ type: "resource_set", characterId: character.id, resourceId: resource.id, value: resource.current - 1 }, `resource:${character.id}:${resource.id}:${resource.current - 1}`, `resource-dec-${character.id}-${resource.id}`)} type="button">-</button>
+                                    <button className="mini-button" disabled={pendingActionKey !== ""} onClick={() => void submitStateEvent({ type: "resource_set", characterId: character.id, resourceId: resource.id, value: resource.current + 1 }, `resource:${character.id}:${resource.id}:${resource.current + 1}`, `resource-inc-${character.id}-${resource.id}`)} type="button">+</button>
+                                  </div>
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                        <div>
+                          <p className="detail-label">Inventory</p>
+                          <ul className="detail-list">
+                            {character.inventory.map((item) => (
+                              <li key={item.id}><span>{item.name}</span><strong>x{item.quantity}</strong></li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+                      <div className="gm-action-grid">
+                        <div className="action-panel">
+                          <p className="detail-label">Quick HP</p>
+                          <div className="hp-quick-row">
+                            <input
+                              type="number"
+                              className="hp-quick-input"
+                              placeholder="DMG"
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  const val = Number((e.target as HTMLInputElement).value);
+                                  if (!isNaN(val) && val !== 0) {
+                                    void submitStateEvent(
+                                      { type: "hp_delta", characterId: character.id, amount: -Math.abs(val) },
+                                      `hp:${character.id}:-${Math.abs(val)}`,
+                                      `hp-dmg-${character.id}`
+                                    );
+                                    (e.target as HTMLInputElement).value = "";
+                                  }
+                                }
+                              }}
+                            />
+                            <input
+                              type="number"
+                              className="hp-quick-input heal"
+                              placeholder="HEAL"
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  const val = Number((e.target as HTMLInputElement).value);
+                                  if (!isNaN(val) && val !== 0) {
+                                    void submitStateEvent(
+                                      { type: "hp_delta", characterId: character.id, amount: Math.abs(val) },
+                                      `hp:${character.id}:+${Math.abs(val)}`,
+                                      `hp-heal-${character.id}`
+                                    );
+                                    (e.target as HTMLInputElement).value = "";
+                                  }
+                                }
+                              }}
+                            />
+                          </div>
+                          <div className="quick-action-row">
+                            <button className="mini-button" disabled={pendingActionKey !== ""} onClick={() => void submitStateEvent({ type: "hp_delta", characterId: character.id, amount: -1 }, `hp:${character.id}:-1`, `hp-1-${character.id}`)} type="button">-1</button>
+                            <button className="mini-button" disabled={pendingActionKey !== ""} onClick={() => void submitStateEvent({ type: "hp_delta", characterId: character.id, amount: -5 }, `hp:${character.id}:-5`, `hp-5-${character.id}`)} type="button">-5</button>
+                            <button className="mini-button" disabled={pendingActionKey !== ""} onClick={() => void submitStateEvent({ type: "hp_delta", characterId: character.id, amount: 1 }, `hp:${character.id}:1`, `hp+1-${character.id}`)} type="button">+1</button>
+                            <button className="mini-button" disabled={pendingActionKey !== ""} onClick={() => void submitStateEvent({ type: "hp_delta", characterId: character.id, amount: 5 }, `hp:${character.id}:5`, `hp+5-${character.id}`)} type="button">+5</button>
+                          </div>
+                        </div>
+                        <div className="action-panel">
+                          <p className="detail-label">Condition Controls</p>
+                          <div className="condition-entry-row">
+                            <input className="inline-input" onChange={(event) => setConditionDrafts((current) => ({ ...current, [character.id]: event.target.value }))} placeholder="Add condition" value={conditionDrafts[character.id] ?? ""} />
+                            <button className="mini-button" disabled={pendingActionKey !== "" || !(conditionDrafts[character.id] ?? "").trim()} onClick={() => void submitStateEvent({ type: "condition_add", characterId: character.id, condition: (conditionDrafts[character.id] ?? "").trim() }, `condition-add:${character.id}:${(conditionDrafts[character.id] ?? "").trim()}`, `condition-add-${character.id}`, { clearConditionDraftFor: character.id })} type="button">Add</button>
+                          </div>
+                          {character.conditions.length > 0 ? (
+                            <div className="removal-chip-row">
+                              {character.conditions.map((condition) => (
+                                <button className="tag-chip removable-chip" disabled={pendingActionKey !== ""} key={`${character.id}-${condition}`} onClick={() => void submitStateEvent({ type: "condition_remove", characterId: character.id, condition }, `condition-remove:${character.id}:${condition}`, `condition-remove-${character.id}-${condition}`)} type="button">{condition} x</button>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                      <p className="party-note">{character.notes[0]}</p>
+                      <p className="claim-note">{character.claimedByLabel ? `Claimed by ${character.claimedByLabel}` : "Unclaimed"}</p>
+                      <button className="mini-button secondary-button" disabled={pendingActionKey !== ""} onClick={() => void queueCharacterVisualCanonJob(character.id)} type="button">Queue Visual Canon Job</button>
+                    </div>
+                  ) : (
+                    <div key={character.id} className="simple-party-card">
+                      <div className="simple-party-header">
+                        <h3>{character.name}</h3>
+                        <span>{character.classLabel}</span>
+                      </div>
+                      <div className="hp-bar">
+                        <div className={`hp-bar-fill ${hpClass}`} style={{ width: `${hpPct}%` }} />
+                      </div>
+                      <div className="simple-party-stats">
+                        <span>HP<strong>{character.hp.current}/{character.hp.max}</strong></span>
+                        <span>AC<strong>{character.armorClass}</strong></span>
+                        {character.initiative !== null ? <span>INIT<strong>{character.initiative}</strong></span> : null}
+                      </div>
+                      <div className="tag-row">
+                        {character.conditions.length > 0 ? (
+                          character.conditions.map((condition) => (
+                            <span key={condition} className="tag-chip">{condition}</span>
+                          ))
+                        ) : (
+                          <span className="tag-chip muted-chip">No conditions</span>
+                        )}
+                      </div>
+                      <div className="hp-simple-row">
+                        <button className="hp-big-btn dmg" disabled={pendingActionKey !== ""} onClick={() => void submitStateEvent({ type: "hp_delta", characterId: character.id, amount: -5 }, `hp:${character.id}:-5`, `hp-5-${character.id}`)} type="button">-5</button>
+                        <button className="hp-big-btn dmg" disabled={pendingActionKey !== ""} onClick={() => void submitStateEvent({ type: "hp_delta", characterId: character.id, amount: -1 }, `hp:${character.id}:-1`, `hp-1-${character.id}`)} type="button">-1</button>
+                        <button className="hp-big-btn heal" disabled={pendingActionKey !== ""} onClick={() => void submitStateEvent({ type: "hp_delta", characterId: character.id, amount: 1 }, `hp:${character.id}:1`, `hp+1-${character.id}`)} type="button">+1</button>
+                        <button className="hp-big-btn heal" disabled={pendingActionKey !== ""} onClick={() => void submitStateEvent({ type: "hp_delta", characterId: character.id, amount: 5 }, `hp:${character.id}:5`, `hp+5-${character.id}`)} type="button">+5</button>
+                      </div>
+                    </div>
+                  );
+                }) ?? <p>No party state yet.</p>}
+            </div>
+          </article>
+
+          <article className="panel">
+            <div className="panel-header">
+              <h2>Approval Queue</h2>
+              <span>{snapshot?.approvalQueue.length ?? 0} waiting</span>
+            </div>
+            <p className="muted-line">
+              Risky state changes land here before they become canon. Approve to apply them to the table, or reject
+              to discard them.
+            </p>
+            <div className="approval-list">
+              {snapshot?.approvalQueue.length ? (
+                snapshot.approvalQueue.map((proposal) => (
+                  <div className="approval-row" key={proposal.id}>
+                    <div>
+                      <strong>{proposal.summary}</strong>
+                      <p>
+                        queued by {proposal.submittedBy.label} · {formatTime(proposal.createdAt)}
+                      </p>
+                    </div>
+                    <div className="approval-actions">
+                      <button
+                        className="mini-button"
+                        disabled={pendingActionKey !== ""}
+                        onClick={() => void resolveProposal(proposal.id, "approve")}
+                        type="button"
+                      >
+                        Approve
+                      </button>
+                      <button
+                        className="mini-button secondary-button"
+                        disabled={pendingActionKey !== ""}
+                        onClick={() => void resolveProposal(proposal.id, "reject")}
+                        type="button"
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p>No queued state changes.</p>
+              )}
+            </div>
+          </article>
+
+          <article className="panel panel-wide">
+            <div className="panel-header">
+              <h2>Live Roll Log</h2>
+              <span>In-memory truth</span>
+            </div>
+            <div className="roll-log">
+              {snapshot?.rollLog.map((roll) => (
+                <div key={roll.id} className="roll-row">
+                  <div>
+                    <strong>{roll.actorName}</strong>
+                    <p>{roll.note}</p>
+                  </div>
+                  <div className="roll-values">
+                    <span>{roll.dice}</span>
+                    <strong>{roll.total}</strong>
+                    <small>{formatTime(roll.timestamp)}</small>
+                  </div>
+                </div>
+              )) ?? <p>Waiting for the first roll.</p>}
+            </div>
+          </article>
+
+          <article className="panel panel-wide">
+            <div className="panel-header">
+              <h2>Quick Add Character</h2>
+              <span>Name + Class + Stats</span>
+            </div>
+            <div className="character-form">
+              <div className="character-form-row">
+                <div style={{ flex: 2 }}>
+                  <label className="label">Name *</label>
+                  <input value={newCharacterName} onChange={(e) => setNewCharacterName(e.target.value)} placeholder="Character name" />
+                </div>
                 <div>
-                  <p className="detail-label">Relevant NPCs</p>
-                  <div className="context-list">
-                    {snapshot.activeSceneContext.npcs.map((npc) => (
-                      <div className="context-row" key={npc.id}>
-                        <strong>{npc.name}</strong>
+                  <label className="label">Class *</label>
+                  <input value={newCharacterClass} onChange={(e) => setNewCharacterClass(e.target.value)} placeholder="Fighter, Wizard..." />
+                </div>
+                <div>
+                  <label className="label">Level</label>
+                  <input type="number" value={newCharacterLevel} onChange={(e) => setNewCharacterLevel(Number(e.target.value))} min={1} max={20} />
+                </div>
+              </div>
+              <div className="character-form-row">
+                <div>
+                  <label className="label">Max HP</label>
+                  <input type="number" value={newCharacterMaxHp} onChange={(e) => setNewCharacterMaxHp(Number(e.target.value))} min={1} />
+                </div>
+                <div>
+                  <label className="label">AC</label>
+                  <input type="number" value={newCharacterAc} onChange={(e) => setNewCharacterAc(Number(e.target.value))} min={1} />
+                </div>
+              </div>
+              <div className="character-form-row" style={{ alignItems: "center" }}>
+                <div>
+                  <label className="label">Portrait Image</label>
+                  <input type="file" accept="image/*" onChange={handleImagePick} style={{ maxWidth: 220 }} />
+                </div>
+                {newCharacterImage ? (
+                  <img src={newCharacterImage} alt="Preview" style={{ width: 60, height: 60, objectFit: "cover", borderRadius: 6, border: "2px solid #555" }} />
+                ) : null}
+              </div>
+              <button
+                className="primary-button"
+                disabled={!newCharacterName.trim() || !newCharacterClass.trim() || creatingCharacter}
+                onClick={() => void createCharacter()}
+                type="button"
+              >
+                {creatingCharacter ? "Creating..." : "Create Character"}
+              </button>
+            </div>
+          </article>
+      </section>
+
+      <section className="dashboard-grid" hidden={tab !== "media"}>
+          {galleryImages.length > 0 ? (
+            <article className="panel">
+              <div className="panel-header">
+                <h2>🖼 All Images</h2>
+                <span>{galleryImages.length}</span>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {galleryImages.map((img) => (
+                  <img
+                    key={img.filename}
+                    src={img.url}
+                    alt={img.filename}
+                    loading="lazy"
+                    style={{
+                      width: 160, height: 110, objectFit: "cover",
+                      cursor: "pointer", borderRadius: 6,
+                      border: "2px solid #333"
+                    }}
+                    onClick={() => setGalleryFull(img.url)}
+                  />
+                ))}
+            </div>
+          </article>
+          ) : null}
+
+          <article className="panel">
+            <div className="panel-header">
+              <h2>Scene Packet Draft</h2>
+              <span>{scenePacket ? scenePacket.visibility : "not generated"}</span>
+            </div>
+            <p className="muted-line">
+              This is the working scene bundle for AI and media tools. Start here, then branch into approval,
+              narration, director planning, or queued media.
+            </p>
+            <button className="export-button" onClick={() => void loadScenePacket()} type="button">
+              Generate Scene Packet
+            </button>
+            {scenePacketStatus ? (
+              <p className="export-note">
+                {scenePacketStatus === "loading"
+                  ? "Building scene packet..."
+                  : scenePacketStatus === "ready"
+                    ? "Scene packet refreshed."
+                    : scenePacketStatus.startsWith("queued:")
+                      ? `${scenePacketStatus.split(":")[1]} proposal(s) added to the approval queue.`
+                    : "Scene packet failed to load."}
+              </p>
+            ) : null}
+            {scenePacket ? (
+              <div className="scene-packet-block">
+                <strong>{scenePacket.sceneTitle}</strong>
+                <p>{scenePacket.summary}</p>
+                <p className="helper-note">
+                  Suggested order: 1) Generate the packet. 2) Queue risky state or media work you want to keep. 3)
+                  Run Local Model Draft for moment-to-moment narration. 4) Run Director Mode Draft for pacing,
+                  reveals, and canon notes. 5) Create a memory entry when the scene settles.
+                </p>
+                <div className="packet-meta-grid">
+                  <div>
+                    <span>Beats</span>
+                    <strong>{scenePacket.beats.length}</strong>
+                  </div>
+                  <div>
+                    <span>Proposed State</span>
+                    <strong>{scenePacket.proposedStateEvents.length}</strong>
+                  </div>
+                  <div>
+                    <span>Media</span>
+                    <strong>{scenePacket.mediaRequests.length}</strong>
+                  </div>
+                  <div>
+                    <span>Audio</span>
+                    <strong>{scenePacket.audioCues.length}</strong>
+                  </div>
+                  <div>
+                    <span>Validation</span>
+                    <strong>{scenePacketValidation?.ok ? "Valid" : "Needs fixes"}</strong>
+                  </div>
+                </div>
+                {scenePacketValidation && !scenePacketValidation.ok ? (
+                  <div className="validation-list">
+                    {scenePacketValidation.errors.map((error) => (
+                      <p key={error}>{error}</p>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="packet-beat-list">
+                  {scenePacket.beats.map((beat, index) => (
+                    <div className="packet-beat" key={`${scenePacket.id}-${index}`}>
+                      <span className="event-pill event-state">{beat.kind}</span>
+                      <p>{beat.text}</p>
+                    </div>
+                  ))}
+                </div>
+                {scenePacket.proposedStateEvents.length ? (
+                  <div className="packet-beat-list">
+                    {scenePacket.proposedStateEvents.map((event) => (
+                      <div className="packet-beat" key={event.id}>
+                        <span className="event-pill event-claim">{event.type}</span>
+                        <p>{event.actor.label} proposed a GM-reviewed state change.</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                <button
+                  className="export-button"
+                  disabled={
+                    pendingActionKey !== "" ||
+                    !scenePacket.proposedStateEvents.length ||
+                    scenePacketValidation?.ok === false
+                  }
+                  onClick={() => void queueScenePacketProposals()}
+                  type="button"
+                >
+                  Queue Proposed State Events
+                </button>
+                <button
+                  className="export-button secondary-action"
+                  disabled={
+                    pendingActionKey !== "" ||
+                    !scenePacket.mediaRequests.length ||
+                    scenePacketValidation?.ok === false
+                  }
+                  onClick={() => void queueScenePacketMediaJobs()}
+                  type="button"
+                >
+                  Queue Media Jobs
+                </button>
+                <button
+                  className="export-button secondary-action"
+                  disabled={
+                    pendingActionKey !== "" ||
+                    !scenePacket.audioCues.length ||
+                    scenePacketValidation?.ok === false
+                  }
+                  onClick={() => void queueScenePacketAudioCues()}
+                  type="button"
+                >
+                  Queue Audio Cues
+                </button>
+                {scenePacket.audioCues.length ? (
+                  <div className="packet-beat-list">
+                    {scenePacket.audioCues.map((cue, index) => (
+                      <div className="packet-beat" key={`${scenePacket.id}-audio-${index}`}>
+                        <span className="event-pill event-memory">{String(cue.kind ?? "audio")}</span>
                         <p>
-                          {npc.role} · {npc.motive}
+                          {String(cue.notes ?? "Suggested audio cue")}
+                          {Array.isArray(cue.tags) && cue.tags.length ? (
+                            <span className="tag-row" style={{ marginLeft: 8 }}>
+                              {cue.tags.map((tag: string) => (
+                                <span className="tag-chip" key={tag}>{tag}</span>
+                              ))}
+                            </span>
+                          ) : null}
                         </p>
                       </div>
                     ))}
                   </div>
-                </div>
-              ) : null}
-              {snapshot.activeSceneContext.facts.length ? (
-                <div>
-                  <p className="detail-label">Matched Facts</p>
-                  <div className="context-list">
-                    {snapshot.activeSceneContext.facts.map((fact) => (
-                      <div className="context-row" key={fact.id}>
-                        <strong>{formatSimpleLabel(fact.id)}</strong>
-                        <p>{fact.text}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <p>No campaign facts matched this scene yet.</p>
-              )}
-            </div>
-          ) : (
-            <p>Waiting for campaign context.</p>
-          )}
-        </article>
-
-        ) : null}
-
-        {advancedMode ? (
-        <article className="panel panel-wide">
-          <div className="panel-header">
-            <h2>Quick Add Character</h2>
-            <span>Name + Class + Stats</span>
-          </div>
-          <div className="character-form">
-            <div className="character-form-row">
-              <div style={{ flex: 2 }}>
-                <label className="label">Name *</label>
-                <input value={newCharacterName} onChange={(e) => setNewCharacterName(e.target.value)} placeholder="Character name" />
+                ) : null}
+                {mediaQueueStatus === "queueing" ||
+                mediaQueueStatus.startsWith("queued:") ||
+                mediaQueueStatus === "queueing-visual-canon" ||
+                mediaQueueStatus.startsWith("visual-canon:") ||
+                mediaQueueStatus === "queueing-audio" ||
+                mediaQueueStatus.startsWith("queued-audio:") ||
+                mediaQueueStatus === "failed" ? (
+                  <p className="export-note">
+                    {mediaQueueStatus === "queueing"
+                      ? "Queueing media jobs..."
+                      : mediaQueueStatus.startsWith("queued:")
+                        ? `${mediaQueueStatus.split(":")[1]} media job(s) added to the queue.`
+                        : mediaQueueStatus === "queueing-visual-canon"
+                          ? "Queueing character visual-canon job..."
+                          : mediaQueueStatus.startsWith("visual-canon:")
+                            ? `Character visual-canon job ${mediaQueueStatus.split(":")[1]} added to the queue.`
+                            : mediaQueueStatus === "queueing-audio"
+                              ? "Queueing audio cues..."
+                              : mediaQueueStatus.startsWith("queued-audio:")
+                                ? `${mediaQueueStatus.split(":")[1]} audio cue(s) added to the queue.`
+                        : "Media jobs failed to queue."}
+                  </p>
+                ) : null}
               </div>
-              <div>
-                <label className="label">Class *</label>
-                <input value={newCharacterClass} onChange={(e) => setNewCharacterClass(e.target.value)} placeholder="Fighter, Wizard..." />
-              </div>
-              <div>
-                <label className="label">Level</label>
-                <input type="number" value={newCharacterLevel} onChange={(e) => setNewCharacterLevel(Number(e.target.value))} min={1} max={20} />
-              </div>
-            </div>
-            <div className="character-form-row">
-              <div>
-                <label className="label">Max HP</label>
-                <input type="number" value={newCharacterMaxHp} onChange={(e) => setNewCharacterMaxHp(Number(e.target.value))} min={1} />
-              </div>
-              <div>
-                <label className="label">AC</label>
-                <input type="number" value={newCharacterAc} onChange={(e) => setNewCharacterAc(Number(e.target.value))} min={1} />
-              </div>
-            </div>
-            <div className="character-form-row" style={{ alignItems: "center" }}>
-              <div>
-                <label className="label">Portrait Image</label>
-                <input type="file" accept="image/*" onChange={handleImagePick} style={{ maxWidth: 220 }} />
-              </div>
-              {newCharacterImage ? (
-                <img src={newCharacterImage} alt="Preview" style={{ width: 60, height: 60, objectFit: "cover", borderRadius: 6, border: "2px solid #555" }} />
-              ) : null}
-            </div>
-            <button
-              className="primary-button"
-              disabled={!newCharacterName.trim() || !newCharacterClass.trim() || creatingCharacter}
-              onClick={() => void createCharacter()}
-              type="button"
-            >
-              {creatingCharacter ? "Creating..." : "Create Character"}
-            </button>
-          </div>
-        </article>
-        ) : null}
-
-        {galleryImages.length > 0 ? (
-          <article className="panel" id="scene-image-hero">
-            <div className="panel-header">
-              <h2>🏞 Latest Scene</h2>
-              <span>{snapshot?.currentScene ?? ""}</span>
-            </div>
-            <img
-              src={galleryImages[0].url}
-              alt="Current scene"
-              style={{ width: "100%", maxHeight: 420, objectFit: "cover", borderRadius: 8, cursor: "pointer" }}
-              onClick={() => setGalleryFull(galleryImages[0].url)}
-            />
+            ) : (
+              <p>No scene packet generated yet.</p>
+            )}
           </article>
-        ) : null}
 
-        {narrationText ? (
-          <div style={{
-            background: "linear-gradient(135deg, #1a1209 0%, #2a1a0a 100%)",
-            border: "1px solid #5a4a2a", borderRadius: 8, padding: "20px 24px",
-            marginBottom: 12, fontSize: "1.35rem", lineHeight: 1.7,
-            color: "#f0dcaf", fontStyle: "italic", position: "relative"
-          }}>
-            <div style={{ position: "absolute", top: 6, right: 10, fontSize: "0.7rem", color: "#8a7a4a" }}>
-              {speaking ? "🔊 speaking..." : ""}
-            </div>
-            {narrationText}
-          </div>
-        ) : null}
-
-        {advancedMode && galleryImages.length > 0 ? (
           <article className="panel">
             <div className="panel-header">
-              <h2>🖼 All Images</h2>
-              <span>{galleryImages.length}</span>
+              <h2>Media Job Queue</h2>
+              <span>{snapshot?.mediaJobs.length ?? 0} tracked</span>
             </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {galleryImages.map((img) => (
-                <img
-                  key={img.filename}
-                  src={img.url}
-                  alt={img.filename}
-                  loading="lazy"
-                  style={{
-                    width: 160, height: 110, objectFit: "cover",
-                    cursor: "pointer", borderRadius: 6,
-                    border: "2px solid #333"
-                  }}
-                  onClick={() => setGalleryFull(img.url)}
-                />
-              ))}
-          </div>
-        </article>
-        ) : null}
+            <p className="muted-line">
+              Jobs auto-submit to ComfyUI when the router is configured. If ComfyUI is offline or the router is
+              unconfigured, Start/Fail/Record remain manual overrides.
+            </p>
+            <div className="memory-entry-list">
+              {snapshot?.mediaJobs.length ? (
+                snapshot.mediaJobs.map((job) => (
+                  <div className="memory-entry-card" key={job.id}>
+                    <div className="memory-entry-header">
+                      <strong>{formatMediaJobType(job.type)}</strong>
+                      <span className="event-pill event-memory">{formatMediaJobStatus(job.status)}</span>
+                    </div>
+                    <p>{job.prompt ?? "No prompt attached."}</p>
+                    <div className="memory-entry-meta">
+                      <span>{formatVisibilityLabel(job.visibility)}</span>
+                      <span>{job.priority}</span>
+                      <span>{job.runWhen}</span>
+                      <span>{formatTime(job.createdAt)}</span>
+                    </div>
+                    <div className="memory-entry-meta">
+                      <span>{job.startedAt ? `started ${formatTime(job.startedAt)}` : "not started"}</span>
+                      <span>{job.completedAt ? `completed ${formatTime(job.completedAt)}` : "not completed"}</span>
+                    </div>
+                    <div className="tag-row">
+                      {job.workflowId ? <span className="tag-chip">workflow: {job.workflowId}</span> : null}
+                      {job.sceneId ? <span className="tag-chip">scene: {job.sceneId}</span> : null}
+                      {job.comfyPromptId ? (
+                        <span className="tag-chip">comfy: {job.comfyPromptId.slice(0, 8)}…</span>
+                      ) : null}
+                      {job.settings?.subjectName ? (
+                        <span className="tag-chip">subject: {String(job.settings.subjectName)}</span>
+                      ) : null}
+                      {Array.isArray(job.settings?.variantSet)
+                        ? job.settings.variantSet.map((variant) => (
+                            <span className="tag-chip" key={`${job.id}-${String(variant)}`}>
+                              view: {String(variant).replace(/_/g, " ")}
+                            </span>
+                          ))
+                        : null}
+                    </div>
+                    {job.error ? <p className="export-note">Last error: {job.error}</p> : null}
+                    <div className="approval-actions">
+                      <button
+                        className="mini-button"
+                        disabled={
+                          pendingActionKey !== "" ||
+                          job.status === "running" ||
+                          job.status === "generated" ||
+                          job.status === "archived" ||
+                          job.status === "rejected"
+                        }
+                        onClick={() => void startMediaJob(job.id)}
+                        type="button"
+                      >
+                        {job.status === "failed" ? "Retry Job" : "Start Job"}
+                      </button>
+                      <button
+                        className="mini-button"
+                        disabled={
+                          pendingActionKey !== "" ||
+                          job.status === "failed" ||
+                          job.status === "generated" ||
+                          job.status === "archived" ||
+                          job.status === "rejected"
+                        }
+                        onClick={() => void failMediaJob(job.id)}
+                        type="button"
+                      >
+                        Mark Failed
+                      </button>
+                      <button
+                        className="mini-button"
+                        disabled={
+                          pendingActionKey !== "" ||
+                          job.status === "generated" ||
+                          job.status === "failed" ||
+                          job.status === "archived" ||
+                          job.status === "rejected"
+                        }
+                        onClick={() => void markMediaJobGenerated(job.id)}
+                        type="button"
+                      >
+                        {job.status === "generated" ? "Metadata Recorded" : "Record Generated Metadata"}
+                      </button>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p>No queued media jobs yet.</p>
+              )}
+            </div>
+            {mediaQueueStatus ? (
+              <p className="export-note">
+                {mediaQueueStatus === "starting"
+                  ? "Starting media job..."
+                  : mediaQueueStatus === "failing"
+                    ? "Marking media job as failed..."
+                    : mediaQueueStatus === "recording"
+                      ? "Recording generated media metadata..."
+                      : mediaQueueStatus.startsWith("blocked:")
+                        ? mediaQueueStatus.slice("blocked:".length)
+                      : mediaQueueStatus.startsWith("started:")
+                        ? `Media job ${mediaQueueStatus.split(":")[1]} is now running.`
+                        : mediaQueueStatus.startsWith("failed-job:")
+                          ? `Media job ${mediaQueueStatus.split(":")[1]} was marked failed.`
+                          : mediaQueueStatus.startsWith("generated:")
+                            ? `Stored asset metadata as ${mediaQueueStatus.split(":")[1]}.`
+                            : mediaQueueStatus.startsWith("queued:")
+                              ? `${mediaQueueStatus.split(":")[1]} media job(s) added to the queue.`
+                              : mediaQueueStatus === "queueing"
+                                ? "Queueing media jobs..."
+                                : "Media metadata update failed."}
+              </p>
+            ) : null}
+          </article>
+
+          <article className="panel">
+            <div className="panel-header">
+              <h2>Generated Media Metadata</h2>
+              <span>{snapshot?.assetRecords.length ?? 0} tracked</span>
+            </div>
+            <p className="muted-line">
+              These records keep prompts, workflows, and intended local output paths in runtime state while the
+              actual files stay outside Git. Think of this as the campaign's memory of what art exists, not the art
+              files themselves.
+            </p>
+            <div className="memory-entry-list">
+              {snapshot?.assetRecords.length ? (
+                snapshot.assetRecords.map((asset) => (
+                  <div className="memory-entry-card" key={asset.id}>
+                    <div className="memory-entry-header">
+                      <strong>{formatAssetKind(asset.kind)}</strong>
+                      <span className="event-pill event-memory">{asset.status}</span>
+                    </div>
+                    <p>{asset.prompt ?? "No prompt attached."}</p>
+                    <div className="memory-entry-meta">
+                      <span>{formatVisibilityLabel(asset.visibility)}</span>
+                      <span>{asset.workflowId ?? "no workflow"}</span>
+                      <span>{asset.localPath ?? "no local path"}</span>
+                    </div>
+                    <div className="tag-row">
+                      {asset.sceneId ? <span className="tag-chip">scene: {asset.sceneId}</span> : null}
+                      <span className="tag-chip">asset: {asset.id}</span>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p>No generated media metadata recorded yet.</p>
+              )}
+            </div>
+          </article>
+
+          <article className="panel">
+            <div className="panel-header">
+              <h2>Cleanup Policy</h2>
+              <span>{cleanupReport ? formatTime(cleanupReport.generatedAt) : "not loaded"}</span>
+            </div>
+            <p className="muted-line">
+              This is a report-only cleanup pass. It shows what should be archived or reviewed later while keeping
+              final files outside Git and untouched for now.
+            </p>
+            <button className="export-button" onClick={() => void loadCleanupReport()} type="button">
+              Refresh Cleanup Report
+            </button>
+            {cleanupReportStatus ? (
+              <p className="export-note">
+                {cleanupReportStatus === "loading"
+                  ? "Refreshing cleanup report..."
+                  : cleanupReportStatus === "ready"
+                    ? "Cleanup report refreshed."
+                    : "Cleanup report failed to load."}
+              </p>
+            ) : null}
+            {cleanupReport ? (
+              <div className="context-block">
+                <div className="packet-meta-grid">
+                  <div>
+                    <span>Tracked Jobs</span>
+                    <strong>{cleanupReport.summary.trackedMediaJobs}</strong>
+                  </div>
+                  <div>
+                    <span>Tracked Assets</span>
+                    <strong>{cleanupReport.summary.trackedAssets}</strong>
+                  </div>
+                  <div>
+                    <span>Archive Candidates</span>
+                    <strong>{cleanupReport.summary.archiveCandidateCount}</strong>
+                  </div>
+                  <div>
+                    <span>Review Candidates</span>
+                    <strong>{cleanupReport.summary.reviewCandidateCount}</strong>
+                  </div>
+                  <div>
+                    <span>Protected Finals</span>
+                    <strong>{cleanupReport.summary.protectedFinalAssetCount}</strong>
+                  </div>
+                </div>
+                <div className="tag-row">
+                  <span className="tag-chip">media root: {cleanupReport.outputRoots.mediaOutputRoot}</span>
+                  <span className="tag-chip">repo exports: {cleanupReport.outputRoots.repoExportsRoot}</span>
+                </div>
+                <div className="validation-list">
+                  {cleanupReport.policy.notes.map((note) => (
+                    <p key={note}>{note}</p>
+                  ))}
+                </div>
+                <div>
+                  <p className="detail-label">Archive Candidates</p>
+                  <div className="memory-entry-list">
+                    {cleanupReport.archiveCandidates.length ? (
+                      cleanupReport.archiveCandidates.map((candidate) => (
+                        <div className="memory-entry-card" key={`archive-${candidate.kind}-${candidate.id}`}>
+                          <div className="memory-entry-header">
+                            <strong>{candidate.kind.replace("_", " ")}</strong>
+                            <span className="event-pill event-memory">{candidate.status}</span>
+                          </div>
+                          <p>{candidate.reason}</p>
+                          <div className="memory-entry-meta">
+                            <span>{candidate.recommendedAction.replace("_", " ")}</span>
+                            <span>{candidate.workflowId ?? "no workflow"}</span>
+                            <span>{candidate.timestamp ? formatTime(candidate.timestamp) : "no timestamp"}</span>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p>No archive candidates yet.</p>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <p className="detail-label">Review / Protected Items</p>
+                  <div className="memory-entry-list">
+                    {cleanupReport.reviewCandidates.length ? (
+                      cleanupReport.reviewCandidates.map((candidate) => (
+                        <div className="memory-entry-card" key={`review-${candidate.kind}-${candidate.id}`}>
+                          <div className="memory-entry-header">
+                            <strong>{candidate.kind.replace("_", " ")}</strong>
+                            <span className="event-pill event-state">{candidate.recommendedAction.replace("_", " ")}</span>
+                          </div>
+                          <p>{candidate.reason}</p>
+                          <div className="memory-entry-meta">
+                            <span>{candidate.status}</span>
+                            <span>{candidate.workflowId ?? "no workflow"}</span>
+                            <span>{candidate.localPath ?? "no local path"}</span>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p>No review candidates yet.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p>No cleanup report loaded yet.</p>
+            )}
+          </article>
+      </section>
+
+      <section className="dashboard-grid" hidden={tab !== "audio"}>
+  <article className="panel">
+    <div className="panel-header">
+      <h2>Ambience</h2>
+      <span>Starts with each scene</span>
+    </div>
+    <label className="label" htmlFor="ambient-volume">Volume · {ambientVolume}%</label>
+    <input
+      id="ambient-volume"
+      type="range"
+      min="0"
+      max="100"
+      value={ambientVolume}
+      className="range"
+      onChange={(event) => {
+        const value = Number(event.target.value);
+        setAmbientVolumeState(value);
+        setAmbientVolume(value / 100);
+      }}
+    />
+    <div className="button-row">
+      <button className="mini-button" type="button" onClick={() => snapshot && startAmbient(snapshot.currentScene)}>
+        Play for current scene
+      </button>
+      <button className="mini-button" type="button" onClick={() => stopAmbient()}>
+        Stop
+      </button>
+    </div>
+  </article>
+
+          <article className="panel">
+            <div className="panel-header">
+              <h2>Audio Library</h2>
+              <span>{audioTracks.length} tracks</span>
+            </div>
+            <p className="muted-line">
+              Browse the local audio library by kind. Playback controls the host audio service state; the GM
+              dashboard is the default playback source.
+            </p>
+            {audioServiceUrl ? (
+              <div>
+                <div className="panel-header">
+                  <h3>Now Playing</h3>
+                  <span className={`pill pill-${audioPlayback?.status === "playing" ? "ok" : "degraded"}`}>
+                    {audioPlayback?.status ?? "idle"}
+                  </span>
+                </div>
+                {audioPlayback?.currentTrackId ? (
+                  <div className="context-row">
+                    <strong>
+                      {audioTracks.find((t) => t.id === audioPlayback.currentTrackId)?.filename ?? "Unknown track"}
+                    </strong>
+                    <p>
+                      Volume: {Math.round((audioPlayback?.volume ?? 0) * 100)}%
+                      {audioPlayback?.muted ? " · muted" : ""}
+                      {audioPlayback?.loop ? " · looping" : ""}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="muted-line">No track selected.</p>
+                )}
+                <div className="quick-action-row">
+                  <button
+                    className="mini-button"
+                    disabled={!audioPlayback?.currentTrackId}
+                    onClick={() => void pauseAudio()}
+                    type="button"
+                  >
+                    Pause
+                  </button>
+                  <button
+                    className="mini-button"
+                    disabled={audioPlayback?.status === "idle"}
+                    onClick={() => void stopAudio()}
+                    type="button"
+                  >
+                    Stop
+                  </button>
+                  <button
+                    className="mini-button"
+                    disabled={audioPlayback?.status === "idle"}
+                    onClick={() => void toggleAudioMute()}
+                    type="button"
+                  >
+                    {audioPlayback?.muted ? "Unmute" : "Mute"}
+                  </button>
+                </div>
+                <div className="quick-action-row">
+                  <button className="mini-button" onClick={() => void setAudioVolume(0.2)} type="button">
+                    Vol 20%
+                  </button>
+                  <button className="mini-button" onClick={() => void setAudioVolume(0.5)} type="button">
+                    Vol 50%
+                  </button>
+                  <button className="mini-button" onClick={() => void setAudioVolume(0.8)} type="button">
+                    Vol 80%
+                  </button>
+                  <button className="mini-button" onClick={() => void setAudioVolume(1.0)} type="button">
+                    Vol 100%
+                  </button>
+                </div>
+                <div>
+                  <p className="detail-label">Tracks</p>
+                  <div className="memory-entry-list">
+                    {audioTracks.length ? (
+                      audioTracks.map((track) => (
+                        <div className="memory-entry-card" key={track.id}>
+                          <div className="memory-entry-header">
+                            <strong>{track.filename}</strong>
+                            <span className="event-pill event-memory">{track.kind}</span>
+                          </div>
+                          <div className="tag-row">
+                            {track.tags.map((tag) => (
+                              <span className="tag-chip" key={`${track.id}-${tag}`}>
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                          <div className="approval-actions">
+                            <button
+                              className="mini-button"
+                              onClick={() => void playAudioTrack(track.id, false)}
+                              type="button"
+                            >
+                              Play
+                            </button>
+                            <button
+                              className="mini-button"
+                              onClick={() => void playAudioTrack(track.id, true)}
+                              type="button"
+                            >
+                              Loop
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p>No audio tracks found in library.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p>Audio service not configured in runtime status.</p>
+            )}
+          </article>
+
+          <article className="panel">
+            <div className="panel-header">
+              <h2>Audio Cue Queue</h2>
+              <span>{snapshot?.audioCueQueue.length ?? 0} queued</span>
+            </div>
+            <p className="muted-line">
+              Scene-packet audio cues land here. The GM can trigger playback manually; auto-play on scene
+              change is not wired yet.
+            </p>
+            <div className="memory-entry-list">
+              {snapshot?.audioCueQueue.length ? (
+                snapshot.audioCueQueue.map((cue) => (
+                  <div className="memory-entry-card" key={cue.id}>
+                    <div className="memory-entry-header">
+                      <strong>{cue.kind}</strong>
+                      <span className="event-pill event-memory">{cue.status}</span>
+                    </div>
+                    <p>{cue.notes ?? "No notes attached."}</p>
+                    <div className="tag-row">
+                      {cue.tags.map((tag) => (
+                        <span className="tag-chip" key={`${cue.id}-${tag}`}>
+                          {tag}
+                        </span>
+                      ))}
+                      {cue.loop ? <span className="tag-chip">loop</span> : null}
+                      <span className="tag-chip">vol: {Math.round(cue.volume * 100)}%</span>
+                    </div>
+                    <div className="approval-actions">
+                      <button
+                        className="mini-button"
+                        disabled={pendingActionKey !== "" || cue.status === "playing"}
+                        onClick={() => void playAudioCue(cue.id)}
+                        type="button"
+                      >
+                        {cue.status === "playing" ? "Playing" : "Play Cue"}
+                      </button>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p>No audio cues queued yet.</p>
+              )}
+            </div>
+            {audioCuePlayStatus ? (
+              <p className="export-note">
+                {audioCuePlayStatus === "playing"
+                  ? "Starting audio cue..."
+                  : audioCuePlayStatus.startsWith("playing:")
+                    ? `Playing track: ${audioCuePlayStatus.split(":")[1]}`
+                    : audioCuePlayStatus.startsWith("failed:")
+                      ? `Failed: ${audioCuePlayStatus.slice("failed:".length)}`
+                      : "Audio cue playback updated."}
+              </p>
+            ) : null}
+          </article>
+
+          <article className="panel">
+            <div className="panel-header">
+              <h2>🎵 YouTube Music</h2>
+              <span>{ytTracks.length} tracks</span>
+            </div>
+            <p className="muted-line">
+              Paste any YouTube URL below. Works with full-length ambience videos, music compilations, or short loops.
+              Premium account = no ads.
+            </p>
+            <div style={{ display: "flex", gap: "8px", marginBottom: "12px" }}>
+              <input
+                type="text"
+                value={ytUrl}
+                onChange={(e) => setYtUrl(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    const url = ytUrl.trim();
+                    const id = extractYtId(url);
+                    if (id) {
+                      setYtTracks((prev) => [...prev, { url, id, label: url }]);
+                      setYtUrl("");
+                    }
+                  }
+                }}
+                placeholder="Paste YouTube URL and press Enter..."
+                style={{ flex: 1, fontSize: "0.85rem", padding: "8px 12px" }}
+              />
+            </div>
+            {ytTracks.length > 0 ? (
+              <div className="yt-controls">
+                <div className={`yt-player-wrap ${ytFading ? "yt-fading" : ""}`}>
+                  {ytVideoId ? (
+                    <iframe
+                      key={ytVideoId}
+                      src={`https://www.youtube.com/embed/${ytVideoId}?autoplay=1&loop=${ytLoop ? "1" : "0"}${ytLoop ? `&playlist=${ytVideoId}` : ""}&controls=0&enablejsapi=1`}
+                      allow="autoplay"
+                      style={{ width: "100%", height: "120px", border: "none", borderRadius: "4px", opacity: ytFading ? 0 : 1, transition: "opacity 0.5s" }}
+                    />
+                  ) : (
+                    <div className="yt-placeholder">Select a track below to play</div>
+                  )}
+                </div>
+                <div className="quick-action-row" style={{ marginTop: "8px" }}>
+                  <button className="mini-button" disabled={!ytVideoId} onClick={() => { setYtPlaying(!ytPlaying); setYtVideoId(ytPlaying ? "" : ytVideoId); }} type="button">
+                    {ytPlaying ? "⏹ Stop" : "▶ Play"}
+                  </button>
+                  <button className="mini-button" disabled={!ytVideoId} onClick={() => setYtLoop(!ytLoop)} type="button">
+                    {ytLoop ? "🔁 Looping" : "🔂 Once"}
+                  </button>
+                  <span style={{ fontSize: "0.78rem", color: "#bca06d", padding: "4px 8px" }}>Vol {ytVolume}%</span>
+                  <button className="mini-button" onClick={() => setYtVolume(Math.max(0, ytVolume - 10))} type="button">−</button>
+                  <button className="mini-button" onClick={() => setYtVolume(Math.min(100, ytVolume + 10))} type="button">+</button>
+                </div>
+                <div className="tag-row" style={{ marginTop: "8px" }}>
+                  {ytTracks.map((track) => (
+                    <span
+                      key={track.id}
+                      className={`tag-chip ${track.id === ytVideoId ? "condition-chip" : ""}`}
+                      style={{ cursor: "pointer" }}
+                      onClick={() => {
+                        if (track.id !== ytVideoId) {
+                          setYtFading(true);
+                          setTimeout(() => {
+                            setYtVideoId(track.id);
+                            setYtPlaying(true);
+                            setYtFading(false);
+                          }, 300);
+                        }
+                      }}
+                    >
+                      {track.id === ytVideoId && ytPlaying ? "▶ " : ""}{formatYtLabel(track.url)}
+                    </span>
+                  ))}
+                  <span className="tag-chip muted-chip" style={{ cursor: "pointer" }} onClick={() => setYtTracks([])}>Clear all</span>
+                </div>
+              </div>
+            ) : null}
+          </article>
+      </section>
+
+      <section className="dashboard-grid" hidden={tab !== "system"}>
+  <article className="panel">
+    <div className="panel-header">
+      <h2>Session</h2>
+      <span>{exportStatus === "saved" ? "Saved" : "Local database"}</span>
+    </div>
+    <div className="button-row">
+      <button className="primary-button" type="button" onClick={() => void saveNow()}>
+        Save now
+      </button>
+      <button className="mini-button" type="button" onClick={() => void exportSessionSummary()}>
+        Export session summary (.md)
+      </button>
+    </div>
+    {exportStatus === "exporting" ? <p className="export-note">Preparing Markdown export…</p> : null}
+    {exportStatus === "ready" ? <p className="export-note">Session summary downloaded{exportPath ? ` to ${exportPath}` : ""}.</p> : null}
+    {exportStatus === "failed" ? <p className="export-note">That didn't work. Is the game server running?</p> : null}
+  </article>
+
+          <article className="panel">
+            <div className="panel-header">
+              <h2>Runtime Status</h2>
+              <span className={`pill pill-${runtime?.status ?? "offline"}`}>
+                {runtime?.status ?? "offline"}
+              </span>
+            </div>
+            <p className="muted-line">Mode: {runtime?.mode ?? "offline"}</p>
+            {runtime?.mediaPressure ? (
+              <div className="scene-packet-block">
+                <div className="panel-header">
+                  <h3>Media Pressure</h3>
+                  <span className={`pill pill-${runtime.mediaPressure.level === "low" ? "ok" : "degraded"}`}>
+                    {runtime.mediaPressure.level}
+                  </span>
+                </div>
+                <p className="helper-note">{runtime.mediaPressure.summary}</p>
+                {runtime.mediaPressure.blockedJobTypes.length ? (
+                  <div className="tag-row">
+                    {runtime.mediaPressure.blockedJobTypes.map((type) => (
+                      <span className="tag-chip" key={type}>
+                        blocked: {formatMediaJobType(type)}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                {runtime.mediaPressure.reasons.length ? (
+                  <div className="validation-list">
+                    {runtime.mediaPressure.reasons.map((reason) => (
+                      <p key={reason}>{reason}</p>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+            {runtime?.warnings?.length ? (
+              <div className="validation-list">
+                {runtime.warnings.map((warning) => (
+                  <p key={warning}>{warning}</p>
+                ))}
+              </div>
+            ) : null}
+            <ul className="service-list">
+              {runtime?.services.map((service) => (
+                <li key={service.name}>
+                  <div>
+                    <strong>{service.name}</strong>
+                    <span>{service.message ?? "Ready"}</span>
+                  </div>
+                  <span>{service.status}</span>
+                </li>
+              )) ?? <li>Waiting for runtime service data.</li>}
+            </ul>
+          </article>
+
+          <article className="panel">
+            <div className="panel-header">
+              <h2>Presence</h2>
+              <span>{runtime?.clients.length ?? 0} clients</span>
+            </div>
+            <div className="presence-list">
+              {runtime?.clients.map((client) => (
+                <div className="presence-row" key={client.id}>
+                  <div>
+                    <strong>
+                      {client.playerLabel ?? client.role}
+                      {client.claimedCharacterName ? ` - ${client.claimedCharacterName}` : ""}
+                    </strong>
+                    <p>
+                      {client.role} · last seen {formatRelativeTime(client.lastSeenAt)}
+                    </p>
+                  </div>
+                  <span className={`presence-pill presence-${client.status}`}>{client.status}</span>
+                </div>
+              )) ?? <p>Waiting for connected clients.</p>}
+            </div>
+          </article>
+
+          <article className="panel">
+            <div className="panel-header">
+              <h2>Campaign Context</h2>
+              <span>{snapshot?.campaignBible.visibility ?? "loading"}</span>
+            </div>
+            {snapshot ? (
+              <div className="context-block">
+                <strong>{snapshot.campaignBible.subtitle}</strong>
+                <p>{snapshot.activeSceneContext.location?.summary ?? "No scene location summary resolved yet."}</p>
+                <div className="packet-meta-grid">
+                  <div>
+                    <span>Scene Location</span>
+                    <strong>{snapshot.activeSceneContext.location?.name ?? "Unresolved"}</strong>
+                  </div>
+                  <div>
+                    <span>Safety Rating</span>
+                    <strong>{snapshot.activeSceneContext.safety.rating}</strong>
+                  </div>
+                </div>
+                <div className="tag-row">
+                  {snapshot.activeSceneContext.tone.map((tone) => (
+                    <span className="tag-chip" key={tone}>
+                      {tone}
+                    </span>
+                  ))}
+                </div>
+                {snapshot.activeSceneContext.location?.features.length ? (
+                  <div>
+                    <p className="detail-label">Location Features</p>
+                    <div className="tag-row">
+                      {snapshot.activeSceneContext.location.features.map((feature) => (
+                        <span className="tag-chip" key={feature}>
+                          {feature}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {snapshot.activeSceneContext.npcs.length ? (
+                  <div>
+                    <p className="detail-label">Relevant NPCs</p>
+                    <div className="context-list">
+                      {snapshot.activeSceneContext.npcs.map((npc) => (
+                        <div className="context-row" key={npc.id}>
+                          <strong>{npc.name}</strong>
+                          <p>
+                            {npc.role} · {npc.motive}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {snapshot.activeSceneContext.facts.length ? (
+                  <div>
+                    <p className="detail-label">Matched Facts</p>
+                    <div className="context-list">
+                      {snapshot.activeSceneContext.facts.map((fact) => (
+                        <div className="context-row" key={fact.id}>
+                          <strong>{formatSimpleLabel(fact.id)}</strong>
+                          <p>{fact.text}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <p>No campaign facts matched this scene yet.</p>
+                )}
+              </div>
+            ) : (
+              <p>Waiting for campaign context.</p>
+            )}
+          </article>
+
+          <article className="panel">
+            <div className="panel-header">
+              <h2>Memory Entry Drafts</h2>
+              <span>{snapshot?.memoryEntries.length ?? 0} saved</span>
+            </div>
+            <p className="muted-line">
+              Use this after a scene settles. It turns the current table state and recent events into a reusable
+              campaign-memory artifact.
+            </p>
+            <button
+              className="export-button"
+              disabled={pendingActionKey !== ""}
+              onClick={() => void createMemoryEntry()}
+              type="button"
+            >
+              Create Memory Entry
+            </button>
+            {memoryEntryStatus ? (
+              <p className="export-note">
+                {memoryEntryStatus === "creating"
+                  ? "Building memory entry..."
+                  : memoryEntryStatus.startsWith("ready:")
+                    ? memoryEntryExportPath
+                      ? `Memory entry saved to ${memoryEntryExportPath}`
+                      : "Memory entry created."
+                    : "Memory entry generation failed."}
+              </p>
+            ) : null}
+            <div className="memory-entry-list">
+              {snapshot?.memoryEntries.length ? (
+                snapshot.memoryEntries.map((entry) => (
+                  <div className="memory-entry-card" key={entry.id}>
+                    <div className="memory-entry-header">
+                      <strong>{entry.source.label}</strong>
+                      <span className="event-pill event-memory">{formatMemoryKind(entry.kind)}</span>
+                    </div>
+                    <p>{entry.summary}</p>
+                    <div className="memory-entry-meta">
+                      <span>{formatVisibilityLabel(entry.visibility)}</span>
+                      <span>{entry.status}</span>
+                      <span>{formatTime(entry.createdAt)}</span>
+                    </div>
+                    {entry.entities.length ? (
+                      <div className="tag-row">
+                        {entry.entities.slice(0, 6).map((entity) => (
+                          <span className="tag-chip" key={`${entry.id}-${entity}`}>
+                            {entity}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ))
+              ) : (
+                <p>No memory entries generated yet.</p>
+              )}
+            </div>
+          </article>
+
+          <article className="panel">
+            <div className="panel-header">
+              <h2>Local Model Adapter</h2>
+              <span>{localModelDraft?.adapter.mode ?? "placeholder"}</span>
+            </div>
+            <p className="muted-line">
+              This is the fast narrator lane. Use it to preview moment-to-moment scene narration built from the
+              current packet.
+            </p>
+            <button
+              className="export-button"
+              disabled={pendingActionKey !== ""}
+              onClick={() => void runLocalModelDraft()}
+              type="button"
+            >
+              Run Local Model Draft
+            </button>
+            {localModelStatus ? (
+              <p className="export-note">
+                {localModelStatus === "running"
+                  ? "Preparing local-model draft..."
+                  : localModelStatus === "ready"
+                    ? localModelDraft?.adapter.endpointConfigured
+                      ? `Placeholder contract built for ${localModelDraft.adapter.endpoint}`
+                      : "Placeholder contract built with no local endpoint configured yet."
+                    : "Local-model draft failed."}
+              </p>
+            ) : null}
+            {localModelDraft ? (
+              <div className="context-block">
+                <div className="packet-meta-grid">
+                  <div>
+                    <span>Scene Packet</span>
+                    <strong>{localModelDraft.request.sceneTitle}</strong>
+                  </div>
+                  <div>
+                    <span>State / Media / Audio</span>
+                    <strong>
+                      {localModelDraft.request.proposedStateEventCount} / {localModelDraft.request.mediaRequestCount} /{" "}
+                      {localModelDraft.request.audioCueCount}
+                    </strong>
+                  </div>
+                </div>
+                <div className="context-row">
+                  <strong>Prompt Preview</strong>
+                  <p>{localModelDraft.request.promptPreview}</p>
+                </div>
+                <div className="context-row">
+                  <strong>Context Summary</strong>
+                  <p>{localModelDraft.request.contextSummary}</p>
+                </div>
+                <div className="context-row">
+                  <strong>Draft Narration</strong>
+                  <p>{localModelDraft.response.narration}</p>
+                </div>
+                <div className="context-row">
+                  <strong>Suggested Next Beat</strong>
+                  <p>{localModelDraft.response.suggestedNextBeat}</p>
+                </div>
+                <div className="context-list">
+                  {localModelDraft.response.gmNotes.map((note) => (
+                    <div className="context-row" key={note}>
+                      <strong>GM Note</strong>
+                      <p>{note}</p>
+                    </div>
+                  ))}
+                </div>
+                {localModelDraft.response.riskyStateChangeWarning ? (
+                  <div className="validation-list">
+                    <p>{localModelDraft.response.riskyStateChangeWarning}</p>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <p>No local-model draft run yet.</p>
+            )}
+          </article>
+
+          <article className="panel">
+            <div className="panel-header">
+              <h2>Director Mode Adapter</h2>
+              <span>{directorDraft?.adapter.mode ?? "placeholder"}</span>
+            </div>
+            <p className="muted-line">
+              This is the higher-level planning lane. Use it for pacing, reveal order, canon notes, and scene
+              escalation rather than line-by-line narration.
+            </p>
+            <button
+              className="export-button"
+              disabled={pendingActionKey !== ""}
+              onClick={() => void runDirectorModeDraft()}
+              type="button"
+            >
+              Run Director Mode Draft
+            </button>
+            {directorStatus ? (
+              <p className="export-note">
+                {directorStatus === "running"
+                  ? "Preparing director-mode draft..."
+                  : directorStatus === "ready"
+                    ? directorDraft?.adapter.enabled
+                      ? `Placeholder director contract built for ${directorDraft.adapter.model}`
+                      : "Placeholder director contract built with no director model configured yet."
+                    : "Director-mode draft failed."}
+              </p>
+            ) : null}
+            {directorDraft ? (
+              <div className="context-block">
+                <div className="packet-meta-grid">
+                  <div>
+                    <span>Scene Packet</span>
+                    <strong>{directorDraft.request.sceneTitle}</strong>
+                  </div>
+                  <div>
+                    <span>Memory / Approvals</span>
+                    <strong>
+                      {directorDraft.request.memoryEntryCount} / {directorDraft.request.pendingApprovalCount}
+                    </strong>
+                  </div>
+                </div>
+                <div className="context-row">
+                  <strong>Prompt Preview</strong>
+                  <p>{directorDraft.request.promptPreview}</p>
+                </div>
+                <div className="context-row">
+                  <strong>Context Summary</strong>
+                  <p>{directorDraft.request.contextSummary}</p>
+                </div>
+                <div className="context-row">
+                  <strong>Director Guidance</strong>
+                  <p>{directorDraft.response.directorGuidance}</p>
+                </div>
+                <div className="context-list">
+                  {directorDraft.response.revealPlan.map((step) => (
+                    <div className="context-row" key={step}>
+                      <strong>Reveal Plan</strong>
+                      <p>{step}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="context-list">
+                  {directorDraft.response.canonizationNotes.map((note) => (
+                    <div className="context-row" key={note}>
+                      <strong>Canonization Note</strong>
+                      <p>{note}</p>
+                    </div>
+                  ))}
+                </div>
+                {directorDraft.response.escalationWarning ? (
+                  <div className="validation-list">
+                    <p>{directorDraft.response.escalationWarning}</p>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <p>No director-mode draft run yet.</p>
+            )}
+          </article>
+
+          <article className="panel panel-wide">
+            <div className="panel-header">
+              <h2>AI Activity Log</h2>
+              <span>{aiLogs.length} recent entries</span>
+            </div>
+            <p className="muted-line">
+              This log shows what the AI-facing runtime prepared, validated, queued, or refused. It is mainly for
+              debugging and trust-building while we wire the real adapters in.
+            </p>
+            <div className="event-log">
+              {aiLogs.length ? (
+                aiLogs.map((entry) => (
+                  <div className="event-row" key={entry.id}>
+                    <div>
+                      <strong>{entry.summary}</strong>
+                      <p>
+                        {entry.adapter} · {entry.kind} · {entry.correlationId}
+                      </p>
+                    </div>
+                    <div className="event-meta">
+                      <span className={`event-pill ${entry.kind === "validation_failure" ? "event-validation" : "event-memory"}`}>
+                        {entry.kind.replace(/_/g, " ")}
+                      </span>
+                      <small>{formatTime(entry.createdAt)}</small>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p>No AI activity logged yet.</p>
+              )}
+            </div>
+          </article>
+
+          <article className="panel panel-wide">
+            <div className="panel-header">
+              <h2>Error Log</h2>
+              <span>{errorEvents.length} recent events</span>
+            </div>
+            <p className="muted-line">
+              These are service failures, degraded states, and recoverable errors the runtime detected. They are
+              GM-only so players do not see system problems during a session.
+            </p>
+            <div className="event-log">
+              {errorEvents.length ? (
+                errorEvents.map((entry) => (
+                  <div className="event-row" key={entry.id}>
+                    <div>
+                      <strong>{entry.summary}</strong>
+                      <p>{entry.message}</p>
+                      <p className="helper-note">{entry.recoveryHint}</p>
+                    </div>
+                    <div className="event-meta">
+                      <span className={`event-pill ${entry.severity === "critical" ? "event-validation" : entry.severity === "error" ? "event-state" : "event-memory"}`}>
+                        {entry.severity} · {entry.service}
+                      </span>
+                      <small>{formatTime(entry.createdAt)}</small>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p>No errors logged. Services are running cleanly.</p>
+              )}
+            </div>
+          </article>
+
+          <article className="panel panel-wide">
+            <div className="panel-header">
+              <h2>Table Event History</h2>
+              <span>{snapshot?.eventLog.length ?? 0} recent events</span>
+            </div>
+            <div className="event-log">
+              {snapshot?.eventLog.map((entry) => (
+                <div key={entry.id} className="event-row">
+                  <div>
+                    <strong>{entry.summary}</strong>
+                    <p>
+                      {entry.actor.label} · {formatVisibilityLabel(entry.visibility)}
+                    </p>
+                  </div>
+                  <div className="event-meta">
+                    <span className={`event-pill event-${entry.category}`}>{entry.category}</span>
+                    <small>{formatTime(entry.timestamp)}</small>
+                  </div>
+                </div>
+              )) ?? <p>Waiting for the first state change.</p>}
+            </div>
+          </article>
+      </section>
 
         {galleryFull ? (
           <div
@@ -2243,1389 +3698,9 @@ export default function App() {
             <img src={galleryFull} style={{ maxWidth: "90vw", maxHeight: "90vh", borderRadius: 8 }} />
           </div>
         ) : null}
-
-        <article className="panel">
-          <div className="panel-header">
-            <h2>Party State</h2>
-            <span>{snapshot?.party.length ?? 0} linked</span>
-            {advancedMode ? (
-              <button
-                className="mini-button"
-                disabled={pendingActionKey !== ""}
-                onClick={() => {
-                  snapshot?.party.forEach((character) => {
-                    if (character.initiative !== null) {
-                      void submitStateEvent(
-                        { type: "initiative_set", characterId: character.id, value: null },
-                        `init-clear:${character.id}`,
-                        `init-clear-${character.id}`
-                      );
-                    }
-                  });
-                }}
-                type="button"
-              >
-                Clear Initiative
-              </button>
-            ) : null}
-          </div>
-          {advancedMode ? (
-            <label className="mode-toggle">
-              <input
-                checked={queueApprovalMode}
-                onChange={(event) => setQueueApprovalMode(event.target.checked)}
-                type="checkbox"
-              />
-              <span>Queue risky state changes for approval</span>
-            </label>
-          ) : null}
-
-          {snapshot?.party.some((c) => c.initiative !== null) ? (
-            <div style={{ display: "flex", gap: "8px", marginBottom: "10px" }}>
-              <button
-                className="mini-button"
-                onClick={() => {
-                  setCombatMode(!combatMode);
-                  if (!combatMode) {
-                    setCombatRound(1);
-                    setCombatTurnIndex(0);
-                  }
-                }}
-                type="button"
-              >
-                {combatMode ? "End Combat" : "Start Combat"}
-              </button>
-            </div>
-          ) : null}
-
-          {combatMode && snapshot?.party.some((c) => c.initiative !== null) ? (
-            <div className="combat-tracker" style={{ marginBottom: "14px" }}>
-              <div className="combat-header">
-                <span className="combat-round">Round {combatRound}</span>
-                <button
-                  className="combat-next-btn"
-                  onClick={() => {
-                    const combatants = snapshot.party
-                      .filter((c) => c.initiative !== null)
-                      .sort((a, b) => (b.initiative ?? 0) - (a.initiative ?? 0));
-                    if (combatTurnIndex + 1 >= combatants.length) {
-                      setCombatTurnIndex(0);
-                      setCombatRound((r) => r + 1);
-                    } else {
-                      setCombatTurnIndex((i) => i + 1);
-                    }
-                  }}
-                  type="button"
-                >
-                  Next Turn →
-                </button>
-              </div>
-              <div className="combat-order">
-                {snapshot.party
-                  .filter((c) => c.initiative !== null)
-                  .sort((a, b) => (b.initiative ?? 0) - (a.initiative ?? 0))
-                  .map((character, idx) => (
-                    <div
-                      key={character.id}
-                      className={`combat-turn ${idx === combatTurnIndex ? "combat-active" : ""}`}
-                    >
-                      <span className="combat-init">{character.initiative}</span>
-                      <div>
-                        <strong>{character.name}</strong>
-                        <span className="combat-hp">HP {character.hp.current}/{character.hp.max}</span>
-                        {character.conditions.length > 0 ? (
-                          <span className="combat-conditions">{character.conditions.join(", ")}</span>
-                        ) : null}
-                      </div>
-                      {idx === combatTurnIndex ? <span className="combat-badge">ACTIVE</span> : null}
-                    </div>
-                  ))}
-              </div>
-            </div>
-          ) : null}
-
-          <div className="party-list">
-            {snapshot?.party
-              .slice()
-              .sort((a, b) => {
-                const ai = a.initiative ?? -1;
-                const bi = b.initiative ?? -1;
-                if (ai !== bi) return bi - ai;
-                return a.name.localeCompare(b.name);
-              })
-              .map((character) => {
-                const hpPct = Math.max(0, Math.min(100, Math.round((character.hp.current / character.hp.max) * 100)));
-                const hpClass = character.hp.current <= character.hp.max * 0.25 ? "hp-critical" : character.hp.current <= character.hp.max * 0.5 ? "hp-wounded" : "";
-                return advancedMode ? (
-                  <div key={character.id} className="party-card">
-                    <div>
-                      <h3>{character.name}</h3>
-                      <p>{character.classLabel}</p>
-                    </div>
-                    <div className="party-stats">
-                      <span>HP {character.hp.current}/{character.hp.max}</span>
-                      <span>AC {character.armorClass}</span>
-                      <span>{formatInitiative(character.initiative)}</span>
-                    </div>
-                    <div className="initiative-row">
-                      <input
-                        className="initiative-input"
-                        type="number"
-                        value={character.initiative ?? ""}
-                        onChange={(event) => {
-                          const value = event.target.value ? Number(event.target.value) : null;
-                          void submitStateEvent(
-                            { type: "initiative_set", characterId: character.id, value },
-                            `init:${character.id}:${value}`,
-                            `init-${character.id}`
-                          );
-                        }}
-                        placeholder="Init"
-                      />
-                    </div>
-                    <div className="tag-row">
-                      {character.conditions.length > 0 ? (
-                        character.conditions.map((condition) => (
-                          <span key={condition} className="tag-chip">{condition}</span>
-                        ))
-                      ) : (
-                        <span className="tag-chip muted-chip">No conditions</span>
-                      )}
-                    </div>
-                    <div className="party-detail-grid">
-                      <div>
-                        <p className="detail-label">Resources</p>
-                        <ul className="detail-list">
-                          {character.resources.map((resource) => (
-                            <li key={resource.id}>
-                              <span>{resource.label}</span>
-                              <div className="detail-actions">
-                                <strong>{resource.current}/{resource.max}</strong>
-                                <div className="stepper-row">
-                                  <button className="mini-button" disabled={pendingActionKey !== ""} onClick={() => void submitStateEvent({ type: "resource_set", characterId: character.id, resourceId: resource.id, value: resource.current - 1 }, `resource:${character.id}:${resource.id}:${resource.current - 1}`, `resource-dec-${character.id}-${resource.id}`)} type="button">-</button>
-                                  <button className="mini-button" disabled={pendingActionKey !== ""} onClick={() => void submitStateEvent({ type: "resource_set", characterId: character.id, resourceId: resource.id, value: resource.current + 1 }, `resource:${character.id}:${resource.id}:${resource.current + 1}`, `resource-inc-${character.id}-${resource.id}`)} type="button">+</button>
-                                </div>
-                              </div>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                      <div>
-                        <p className="detail-label">Inventory</p>
-                        <ul className="detail-list">
-                          {character.inventory.map((item) => (
-                            <li key={item.id}><span>{item.name}</span><strong>x{item.quantity}</strong></li>
-                          ))}
-                        </ul>
-                      </div>
-                    </div>
-                    <div className="gm-action-grid">
-                      <div className="action-panel">
-                        <p className="detail-label">Quick HP</p>
-                        <div className="hp-quick-row">
-                          <input
-                            type="number"
-                            className="hp-quick-input"
-                            placeholder="DMG"
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
-                                const val = Number((e.target as HTMLInputElement).value);
-                                if (!isNaN(val) && val !== 0) {
-                                  void submitStateEvent(
-                                    { type: "hp_delta", characterId: character.id, amount: -Math.abs(val) },
-                                    `hp:${character.id}:-${Math.abs(val)}`,
-                                    `hp-dmg-${character.id}`
-                                  );
-                                  (e.target as HTMLInputElement).value = "";
-                                }
-                              }
-                            }}
-                          />
-                          <input
-                            type="number"
-                            className="hp-quick-input heal"
-                            placeholder="HEAL"
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
-                                const val = Number((e.target as HTMLInputElement).value);
-                                if (!isNaN(val) && val !== 0) {
-                                  void submitStateEvent(
-                                    { type: "hp_delta", characterId: character.id, amount: Math.abs(val) },
-                                    `hp:${character.id}:+${Math.abs(val)}`,
-                                    `hp-heal-${character.id}`
-                                  );
-                                  (e.target as HTMLInputElement).value = "";
-                                }
-                              }
-                            }}
-                          />
-                        </div>
-                        <div className="quick-action-row">
-                          <button className="mini-button" disabled={pendingActionKey !== ""} onClick={() => void submitStateEvent({ type: "hp_delta", characterId: character.id, amount: -1 }, `hp:${character.id}:-1`, `hp-1-${character.id}`)} type="button">-1</button>
-                          <button className="mini-button" disabled={pendingActionKey !== ""} onClick={() => void submitStateEvent({ type: "hp_delta", characterId: character.id, amount: -5 }, `hp:${character.id}:-5`, `hp-5-${character.id}`)} type="button">-5</button>
-                          <button className="mini-button" disabled={pendingActionKey !== ""} onClick={() => void submitStateEvent({ type: "hp_delta", characterId: character.id, amount: 1 }, `hp:${character.id}:1`, `hp+1-${character.id}`)} type="button">+1</button>
-                          <button className="mini-button" disabled={pendingActionKey !== ""} onClick={() => void submitStateEvent({ type: "hp_delta", characterId: character.id, amount: 5 }, `hp:${character.id}:5`, `hp+5-${character.id}`)} type="button">+5</button>
-                        </div>
-                      </div>
-                      <div className="action-panel">
-                        <p className="detail-label">Condition Controls</p>
-                        <div className="condition-entry-row">
-                          <input className="inline-input" onChange={(event) => setConditionDrafts((current) => ({ ...current, [character.id]: event.target.value }))} placeholder="Add condition" value={conditionDrafts[character.id] ?? ""} />
-                          <button className="mini-button" disabled={pendingActionKey !== "" || !(conditionDrafts[character.id] ?? "").trim()} onClick={() => void submitStateEvent({ type: "condition_add", characterId: character.id, condition: (conditionDrafts[character.id] ?? "").trim() }, `condition-add:${character.id}:${(conditionDrafts[character.id] ?? "").trim()}`, `condition-add-${character.id}`, { clearConditionDraftFor: character.id })} type="button">Add</button>
-                        </div>
-                        {character.conditions.length > 0 ? (
-                          <div className="removal-chip-row">
-                            {character.conditions.map((condition) => (
-                              <button className="tag-chip removable-chip" disabled={pendingActionKey !== ""} key={`${character.id}-${condition}`} onClick={() => void submitStateEvent({ type: "condition_remove", characterId: character.id, condition }, `condition-remove:${character.id}:${condition}`, `condition-remove-${character.id}-${condition}`)} type="button">{condition} x</button>
-                            ))}
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                    <p className="party-note">{character.notes[0]}</p>
-                    <p className="claim-note">{character.claimedByLabel ? `Claimed by ${character.claimedByLabel}` : "Unclaimed"}</p>
-                    <button className="mini-button secondary-button" disabled={pendingActionKey !== ""} onClick={() => void queueCharacterVisualCanonJob(character.id)} type="button">Queue Visual Canon Job</button>
-                  </div>
-                ) : (
-                  <div key={character.id} className="simple-party-card">
-                    <div className="simple-party-header">
-                      <h3>{character.name}</h3>
-                      <span>{character.classLabel}</span>
-                    </div>
-                    <div className="hp-bar">
-                      <div className={`hp-bar-fill ${hpClass}`} style={{ width: `${hpPct}%` }} />
-                    </div>
-                    <div className="simple-party-stats">
-                      <span>HP<strong>{character.hp.current}/{character.hp.max}</strong></span>
-                      <span>AC<strong>{character.armorClass}</strong></span>
-                      {character.initiative !== null ? <span>INIT<strong>{character.initiative}</strong></span> : null}
-                    </div>
-                    <div className="tag-row">
-                      {character.conditions.length > 0 ? (
-                        character.conditions.map((condition) => (
-                          <span key={condition} className="tag-chip">{condition}</span>
-                        ))
-                      ) : (
-                        <span className="tag-chip muted-chip">No conditions</span>
-                      )}
-                    </div>
-                    <div className="hp-simple-row">
-                      <button className="hp-big-btn dmg" disabled={pendingActionKey !== ""} onClick={() => void submitStateEvent({ type: "hp_delta", characterId: character.id, amount: -5 }, `hp:${character.id}:-5`, `hp-5-${character.id}`)} type="button">-5</button>
-                      <button className="hp-big-btn dmg" disabled={pendingActionKey !== ""} onClick={() => void submitStateEvent({ type: "hp_delta", characterId: character.id, amount: -1 }, `hp:${character.id}:-1`, `hp-1-${character.id}`)} type="button">-1</button>
-                      <button className="hp-big-btn heal" disabled={pendingActionKey !== ""} onClick={() => void submitStateEvent({ type: "hp_delta", characterId: character.id, amount: 1 }, `hp:${character.id}:1`, `hp+1-${character.id}`)} type="button">+1</button>
-                      <button className="hp-big-btn heal" disabled={pendingActionKey !== ""} onClick={() => void submitStateEvent({ type: "hp_delta", characterId: character.id, amount: 5 }, `hp:${character.id}:5`, `hp+5-${character.id}`)} type="button">+5</button>
-                    </div>
-                  </div>
-                );
-              }) ?? <p>No party state yet.</p>}
-          </div>
-        </article>
-
-        {advancedMode ? (
-
-        <article className="panel">
-          <div className="panel-header">
-            <h2>Approval Queue</h2>
-            <span>{snapshot?.approvalQueue.length ?? 0} waiting</span>
-          </div>
-          <p className="muted-line">
-            Risky state changes land here before they become canon. Approve to apply them to the table, or reject
-            to discard them.
-          </p>
-          <div className="approval-list">
-            {snapshot?.approvalQueue.length ? (
-              snapshot.approvalQueue.map((proposal) => (
-                <div className="approval-row" key={proposal.id}>
-                  <div>
-                    <strong>{proposal.summary}</strong>
-                    <p>
-                      queued by {proposal.submittedBy.label} · {formatTime(proposal.createdAt)}
-                    </p>
-                  </div>
-                  <div className="approval-actions">
-                    <button
-                      className="mini-button"
-                      disabled={pendingActionKey !== ""}
-                      onClick={() => void resolveProposal(proposal.id, "approve")}
-                      type="button"
-                    >
-                      Approve
-                    </button>
-                    <button
-                      className="mini-button secondary-button"
-                      disabled={pendingActionKey !== ""}
-                      onClick={() => void resolveProposal(proposal.id, "reject")}
-                      type="button"
-                    >
-                      Reject
-                    </button>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <p>No queued state changes.</p>
-            )}
-          </div>
-        </article>
-
-        ) : null}
-
-        {advancedMode ? (
-
-        <article className="panel">
-          <div className="panel-header">
-            <h2>Scene Packet Draft</h2>
-            <span>{scenePacket ? scenePacket.visibility : "not generated"}</span>
-          </div>
-          <p className="muted-line">
-            This is the working scene bundle for AI and media tools. Start here, then branch into approval,
-            narration, director planning, or queued media.
-          </p>
-          <button className="export-button" onClick={() => void loadScenePacket()} type="button">
-            Generate Scene Packet
-          </button>
-          {scenePacketStatus ? (
-            <p className="export-note">
-              {scenePacketStatus === "loading"
-                ? "Building scene packet..."
-                : scenePacketStatus === "ready"
-                  ? "Scene packet refreshed."
-                  : scenePacketStatus.startsWith("queued:")
-                    ? `${scenePacketStatus.split(":")[1]} proposal(s) added to the approval queue.`
-                  : "Scene packet failed to load."}
-            </p>
-          ) : null}
-          {scenePacket ? (
-            <div className="scene-packet-block">
-              <strong>{scenePacket.sceneTitle}</strong>
-              <p>{scenePacket.summary}</p>
-              <p className="helper-note">
-                Suggested order: 1) Generate the packet. 2) Queue risky state or media work you want to keep. 3)
-                Run Local Model Draft for moment-to-moment narration. 4) Run Director Mode Draft for pacing,
-                reveals, and canon notes. 5) Create a memory entry when the scene settles.
-              </p>
-              <div className="packet-meta-grid">
-                <div>
-                  <span>Beats</span>
-                  <strong>{scenePacket.beats.length}</strong>
-                </div>
-                <div>
-                  <span>Proposed State</span>
-                  <strong>{scenePacket.proposedStateEvents.length}</strong>
-                </div>
-                <div>
-                  <span>Media</span>
-                  <strong>{scenePacket.mediaRequests.length}</strong>
-                </div>
-                <div>
-                  <span>Audio</span>
-                  <strong>{scenePacket.audioCues.length}</strong>
-                </div>
-                <div>
-                  <span>Validation</span>
-                  <strong>{scenePacketValidation?.ok ? "Valid" : "Needs fixes"}</strong>
-                </div>
-              </div>
-              {scenePacketValidation && !scenePacketValidation.ok ? (
-                <div className="validation-list">
-                  {scenePacketValidation.errors.map((error) => (
-                    <p key={error}>{error}</p>
-                  ))}
-                </div>
-              ) : null}
-              <div className="packet-beat-list">
-                {scenePacket.beats.map((beat, index) => (
-                  <div className="packet-beat" key={`${scenePacket.id}-${index}`}>
-                    <span className="event-pill event-state">{beat.kind}</span>
-                    <p>{beat.text}</p>
-                  </div>
-                ))}
-              </div>
-              {scenePacket.proposedStateEvents.length ? (
-                <div className="packet-beat-list">
-                  {scenePacket.proposedStateEvents.map((event) => (
-                    <div className="packet-beat" key={event.id}>
-                      <span className="event-pill event-claim">{event.type}</span>
-                      <p>{event.actor.label} proposed a GM-reviewed state change.</p>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              <button
-                className="export-button"
-                disabled={
-                  pendingActionKey !== "" ||
-                  !scenePacket.proposedStateEvents.length ||
-                  scenePacketValidation?.ok === false
-                }
-                onClick={() => void queueScenePacketProposals()}
-                type="button"
-              >
-                Queue Proposed State Events
-              </button>
-              <button
-                className="export-button secondary-action"
-                disabled={
-                  pendingActionKey !== "" ||
-                  !scenePacket.mediaRequests.length ||
-                  scenePacketValidation?.ok === false
-                }
-                onClick={() => void queueScenePacketMediaJobs()}
-                type="button"
-              >
-                Queue Media Jobs
-              </button>
-              <button
-                className="export-button secondary-action"
-                disabled={
-                  pendingActionKey !== "" ||
-                  !scenePacket.audioCues.length ||
-                  scenePacketValidation?.ok === false
-                }
-                onClick={() => void queueScenePacketAudioCues()}
-                type="button"
-              >
-                Queue Audio Cues
-              </button>
-              {scenePacket.audioCues.length ? (
-                <div className="packet-beat-list">
-                  {scenePacket.audioCues.map((cue, index) => (
-                    <div className="packet-beat" key={`${scenePacket.id}-audio-${index}`}>
-                      <span className="event-pill event-memory">{String(cue.kind ?? "audio")}</span>
-                      <p>
-                        {String(cue.notes ?? "Suggested audio cue")}
-                        {Array.isArray(cue.tags) && cue.tags.length ? (
-                          <span className="tag-row" style={{ marginLeft: 8 }}>
-                            {cue.tags.map((tag: string) => (
-                              <span className="tag-chip" key={tag}>{tag}</span>
-                            ))}
-                          </span>
-                        ) : null}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              {mediaQueueStatus === "queueing" ||
-              mediaQueueStatus.startsWith("queued:") ||
-              mediaQueueStatus === "queueing-visual-canon" ||
-              mediaQueueStatus.startsWith("visual-canon:") ||
-              mediaQueueStatus === "queueing-audio" ||
-              mediaQueueStatus.startsWith("queued-audio:") ||
-              mediaQueueStatus === "failed" ? (
-                <p className="export-note">
-                  {mediaQueueStatus === "queueing"
-                    ? "Queueing media jobs..."
-                    : mediaQueueStatus.startsWith("queued:")
-                      ? `${mediaQueueStatus.split(":")[1]} media job(s) added to the queue.`
-                      : mediaQueueStatus === "queueing-visual-canon"
-                        ? "Queueing character visual-canon job..."
-                        : mediaQueueStatus.startsWith("visual-canon:")
-                          ? `Character visual-canon job ${mediaQueueStatus.split(":")[1]} added to the queue.`
-                          : mediaQueueStatus === "queueing-audio"
-                            ? "Queueing audio cues..."
-                            : mediaQueueStatus.startsWith("queued-audio:")
-                              ? `${mediaQueueStatus.split(":")[1]} audio cue(s) added to the queue.`
-                      : "Media jobs failed to queue."}
-                </p>
-              ) : null}
-            </div>
-          ) : (
-            <p>No scene packet generated yet.</p>
-          )}
-        </article>
-
-        ) : null}
-
-        {advancedMode ? (
-
-        <article className="panel">
-          <div className="panel-header">
-            <h2>Media Job Queue</h2>
-            <span>{snapshot?.mediaJobs.length ?? 0} tracked</span>
-          </div>
-          <p className="muted-line">
-            Jobs auto-submit to ComfyUI when the router is configured. If ComfyUI is offline or the router is
-            unconfigured, Start/Fail/Record remain manual overrides.
-          </p>
-          <div className="memory-entry-list">
-            {snapshot?.mediaJobs.length ? (
-              snapshot.mediaJobs.map((job) => (
-                <div className="memory-entry-card" key={job.id}>
-                  <div className="memory-entry-header">
-                    <strong>{formatMediaJobType(job.type)}</strong>
-                    <span className="event-pill event-memory">{formatMediaJobStatus(job.status)}</span>
-                  </div>
-                  <p>{job.prompt ?? "No prompt attached."}</p>
-                  <div className="memory-entry-meta">
-                    <span>{formatVisibilityLabel(job.visibility)}</span>
-                    <span>{job.priority}</span>
-                    <span>{job.runWhen}</span>
-                    <span>{formatTime(job.createdAt)}</span>
-                  </div>
-                  <div className="memory-entry-meta">
-                    <span>{job.startedAt ? `started ${formatTime(job.startedAt)}` : "not started"}</span>
-                    <span>{job.completedAt ? `completed ${formatTime(job.completedAt)}` : "not completed"}</span>
-                  </div>
-                  <div className="tag-row">
-                    {job.workflowId ? <span className="tag-chip">workflow: {job.workflowId}</span> : null}
-                    {job.sceneId ? <span className="tag-chip">scene: {job.sceneId}</span> : null}
-                    {job.comfyPromptId ? (
-                      <span className="tag-chip">comfy: {job.comfyPromptId.slice(0, 8)}…</span>
-                    ) : null}
-                    {job.settings?.subjectName ? (
-                      <span className="tag-chip">subject: {String(job.settings.subjectName)}</span>
-                    ) : null}
-                    {Array.isArray(job.settings?.variantSet)
-                      ? job.settings.variantSet.map((variant) => (
-                          <span className="tag-chip" key={`${job.id}-${String(variant)}`}>
-                            view: {String(variant).replace(/_/g, " ")}
-                          </span>
-                        ))
-                      : null}
-                  </div>
-                  {job.error ? <p className="export-note">Last error: {job.error}</p> : null}
-                  <div className="approval-actions">
-                    <button
-                      className="mini-button"
-                      disabled={
-                        pendingActionKey !== "" ||
-                        job.status === "running" ||
-                        job.status === "generated" ||
-                        job.status === "archived" ||
-                        job.status === "rejected"
-                      }
-                      onClick={() => void startMediaJob(job.id)}
-                      type="button"
-                    >
-                      {job.status === "failed" ? "Retry Job" : "Start Job"}
-                    </button>
-                    <button
-                      className="mini-button"
-                      disabled={
-                        pendingActionKey !== "" ||
-                        job.status === "failed" ||
-                        job.status === "generated" ||
-                        job.status === "archived" ||
-                        job.status === "rejected"
-                      }
-                      onClick={() => void failMediaJob(job.id)}
-                      type="button"
-                    >
-                      Mark Failed
-                    </button>
-                    <button
-                      className="mini-button"
-                      disabled={
-                        pendingActionKey !== "" ||
-                        job.status === "generated" ||
-                        job.status === "failed" ||
-                        job.status === "archived" ||
-                        job.status === "rejected"
-                      }
-                      onClick={() => void markMediaJobGenerated(job.id)}
-                      type="button"
-                    >
-                      {job.status === "generated" ? "Metadata Recorded" : "Record Generated Metadata"}
-                    </button>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <p>No queued media jobs yet.</p>
-            )}
-          </div>
-          {mediaQueueStatus ? (
-            <p className="export-note">
-              {mediaQueueStatus === "starting"
-                ? "Starting media job..."
-                : mediaQueueStatus === "failing"
-                  ? "Marking media job as failed..."
-                  : mediaQueueStatus === "recording"
-                    ? "Recording generated media metadata..."
-                    : mediaQueueStatus.startsWith("blocked:")
-                      ? mediaQueueStatus.slice("blocked:".length)
-                    : mediaQueueStatus.startsWith("started:")
-                      ? `Media job ${mediaQueueStatus.split(":")[1]} is now running.`
-                      : mediaQueueStatus.startsWith("failed-job:")
-                        ? `Media job ${mediaQueueStatus.split(":")[1]} was marked failed.`
-                        : mediaQueueStatus.startsWith("generated:")
-                          ? `Stored asset metadata as ${mediaQueueStatus.split(":")[1]}.`
-                          : mediaQueueStatus.startsWith("queued:")
-                            ? `${mediaQueueStatus.split(":")[1]} media job(s) added to the queue.`
-                            : mediaQueueStatus === "queueing"
-                              ? "Queueing media jobs..."
-                              : "Media metadata update failed."}
-            </p>
-          ) : null}
-        </article>
-
-        ) : null}
-
-        {advancedMode ? (
-
-        <article className="panel">
-          <div className="panel-header">
-            <h2>Audio Library</h2>
-            <span>{audioTracks.length} tracks</span>
-          </div>
-          <p className="muted-line">
-            Browse the local audio library by kind. Playback controls the host audio service state; the GM
-            dashboard is the default playback source.
-          </p>
-          {audioServiceUrl ? (
-            <div>
-              <div className="panel-header">
-                <h3>Now Playing</h3>
-                <span className={`pill pill-${audioPlayback?.status === "playing" ? "ok" : "degraded"}`}>
-                  {audioPlayback?.status ?? "idle"}
-                </span>
-              </div>
-              {audioPlayback?.currentTrackId ? (
-                <div className="context-row">
-                  <strong>
-                    {audioTracks.find((t) => t.id === audioPlayback.currentTrackId)?.filename ?? "Unknown track"}
-                  </strong>
-                  <p>
-                    Volume: {Math.round((audioPlayback?.volume ?? 0) * 100)}%
-                    {audioPlayback?.muted ? " · muted" : ""}
-                    {audioPlayback?.loop ? " · looping" : ""}
-                  </p>
-                </div>
-              ) : (
-                <p className="muted-line">No track selected.</p>
-              )}
-              <div className="quick-action-row">
-                <button
-                  className="mini-button"
-                  disabled={!audioPlayback?.currentTrackId}
-                  onClick={() => void pauseAudio()}
-                  type="button"
-                >
-                  Pause
-                </button>
-                <button
-                  className="mini-button"
-                  disabled={audioPlayback?.status === "idle"}
-                  onClick={() => void stopAudio()}
-                  type="button"
-                >
-                  Stop
-                </button>
-                <button
-                  className="mini-button"
-                  disabled={audioPlayback?.status === "idle"}
-                  onClick={() => void toggleAudioMute()}
-                  type="button"
-                >
-                  {audioPlayback?.muted ? "Unmute" : "Mute"}
-                </button>
-              </div>
-              <div className="quick-action-row">
-                <button className="mini-button" onClick={() => void setAudioVolume(0.2)} type="button">
-                  Vol 20%
-                </button>
-                <button className="mini-button" onClick={() => void setAudioVolume(0.5)} type="button">
-                  Vol 50%
-                </button>
-                <button className="mini-button" onClick={() => void setAudioVolume(0.8)} type="button">
-                  Vol 80%
-                </button>
-                <button className="mini-button" onClick={() => void setAudioVolume(1.0)} type="button">
-                  Vol 100%
-                </button>
-              </div>
-              <div>
-                <p className="detail-label">Tracks</p>
-                <div className="memory-entry-list">
-                  {audioTracks.length ? (
-                    audioTracks.map((track) => (
-                      <div className="memory-entry-card" key={track.id}>
-                        <div className="memory-entry-header">
-                          <strong>{track.filename}</strong>
-                          <span className="event-pill event-memory">{track.kind}</span>
-                        </div>
-                        <div className="tag-row">
-                          {track.tags.map((tag) => (
-                            <span className="tag-chip" key={`${track.id}-${tag}`}>
-                              {tag}
-                            </span>
-                          ))}
-                        </div>
-                        <div className="approval-actions">
-                          <button
-                            className="mini-button"
-                            onClick={() => void playAudioTrack(track.id, false)}
-                            type="button"
-                          >
-                            Play
-                          </button>
-                          <button
-                            className="mini-button"
-                            onClick={() => void playAudioTrack(track.id, true)}
-                            type="button"
-                          >
-                            Loop
-                          </button>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <p>No audio tracks found in library.</p>
-                  )}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <p>Audio service not configured in runtime status.</p>
-          )}
-        </article>
-
-        ) : null}
-
-        {advancedMode ? (
-
-        <article className="panel">
-          <div className="panel-header">
-            <h2>Audio Cue Queue</h2>
-            <span>{snapshot?.audioCueQueue.length ?? 0} queued</span>
-          </div>
-          <p className="muted-line">
-            Scene-packet audio cues land here. The GM can trigger playback manually; auto-play on scene
-            change is not wired yet.
-          </p>
-          <div className="memory-entry-list">
-            {snapshot?.audioCueQueue.length ? (
-              snapshot.audioCueQueue.map((cue) => (
-                <div className="memory-entry-card" key={cue.id}>
-                  <div className="memory-entry-header">
-                    <strong>{cue.kind}</strong>
-                    <span className="event-pill event-memory">{cue.status}</span>
-                  </div>
-                  <p>{cue.notes ?? "No notes attached."}</p>
-                  <div className="tag-row">
-                    {cue.tags.map((tag) => (
-                      <span className="tag-chip" key={`${cue.id}-${tag}`}>
-                        {tag}
-                      </span>
-                    ))}
-                    {cue.loop ? <span className="tag-chip">loop</span> : null}
-                    <span className="tag-chip">vol: {Math.round(cue.volume * 100)}%</span>
-                  </div>
-                  <div className="approval-actions">
-                    <button
-                      className="mini-button"
-                      disabled={pendingActionKey !== "" || cue.status === "playing"}
-                      onClick={() => void playAudioCue(cue.id)}
-                      type="button"
-                    >
-                      {cue.status === "playing" ? "Playing" : "Play Cue"}
-                    </button>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <p>No audio cues queued yet.</p>
-            )}
-          </div>
-          {audioCuePlayStatus ? (
-            <p className="export-note">
-              {audioCuePlayStatus === "playing"
-                ? "Starting audio cue..."
-                : audioCuePlayStatus.startsWith("playing:")
-                  ? `Playing track: ${audioCuePlayStatus.split(":")[1]}`
-                  : audioCuePlayStatus.startsWith("failed:")
-                    ? `Failed: ${audioCuePlayStatus.slice("failed:".length)}`
-                    : "Audio cue playback updated."}
-            </p>
-          ) : null}
-        </article>
-
-        ) : null}
-
-        {advancedMode ? (
-        <article className="panel">
-          <div className="panel-header">
-            <h2>🎵 YouTube Music</h2>
-            <span>{ytTracks.length} tracks</span>
-          </div>
-          <p className="muted-line">
-            Paste any YouTube URL below. Works with full-length ambience videos, music compilations, or short loops.
-            Premium account = no ads.
-          </p>
-          <div style={{ display: "flex", gap: "8px", marginBottom: "12px" }}>
-            <input
-              type="text"
-              value={ytUrl}
-              onChange={(e) => setYtUrl(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  const url = ytUrl.trim();
-                  const id = extractYtId(url);
-                  if (id) {
-                    setYtTracks((prev) => [...prev, { url, id, label: url }]);
-                    setYtUrl("");
-                  }
-                }
-              }}
-              placeholder="Paste YouTube URL and press Enter..."
-              style={{ flex: 1, fontSize: "0.85rem", padding: "8px 12px" }}
-            />
-          </div>
-          {ytTracks.length > 0 ? (
-            <div className="yt-controls">
-              <div className={`yt-player-wrap ${ytFading ? "yt-fading" : ""}`}>
-                {ytVideoId ? (
-                  <iframe
-                    key={ytVideoId}
-                    src={`https://www.youtube.com/embed/${ytVideoId}?autoplay=1&loop=${ytLoop ? "1" : "0"}${ytLoop ? `&playlist=${ytVideoId}` : ""}&controls=0&enablejsapi=1`}
-                    allow="autoplay"
-                    style={{ width: "100%", height: "120px", border: "none", borderRadius: "4px", opacity: ytFading ? 0 : 1, transition: "opacity 0.5s" }}
-                  />
-                ) : (
-                  <div className="yt-placeholder">Select a track below to play</div>
-                )}
-              </div>
-              <div className="quick-action-row" style={{ marginTop: "8px" }}>
-                <button className="mini-button" disabled={!ytVideoId} onClick={() => { setYtPlaying(!ytPlaying); setYtVideoId(ytPlaying ? "" : ytVideoId); }} type="button">
-                  {ytPlaying ? "⏹ Stop" : "▶ Play"}
-                </button>
-                <button className="mini-button" disabled={!ytVideoId} onClick={() => setYtLoop(!ytLoop)} type="button">
-                  {ytLoop ? "🔁 Looping" : "🔂 Once"}
-                </button>
-                <span style={{ fontSize: "0.78rem", color: "#bca06d", padding: "4px 8px" }}>Vol {ytVolume}%</span>
-                <button className="mini-button" onClick={() => setYtVolume(Math.max(0, ytVolume - 10))} type="button">−</button>
-                <button className="mini-button" onClick={() => setYtVolume(Math.min(100, ytVolume + 10))} type="button">+</button>
-              </div>
-              <div className="tag-row" style={{ marginTop: "8px" }}>
-                {ytTracks.map((track) => (
-                  <span
-                    key={track.id}
-                    className={`tag-chip ${track.id === ytVideoId ? "condition-chip" : ""}`}
-                    style={{ cursor: "pointer" }}
-                    onClick={() => {
-                      if (track.id !== ytVideoId) {
-                        setYtFading(true);
-                        setTimeout(() => {
-                          setYtVideoId(track.id);
-                          setYtPlaying(true);
-                          setYtFading(false);
-                        }, 300);
-                      }
-                    }}
-                  >
-                    {track.id === ytVideoId && ytPlaying ? "▶ " : ""}{formatYtLabel(track.url)}
-                  </span>
-                ))}
-                <span className="tag-chip muted-chip" style={{ cursor: "pointer" }} onClick={() => setYtTracks([])}>Clear all</span>
-              </div>
-            </div>
-          ) : null}
-        </article>
-        ) : null}
-
-        <article className="panel">
-          <div className="panel-header">
-            <h2>Generated Media Metadata</h2>
-            <span>{snapshot?.assetRecords.length ?? 0} tracked</span>
-          </div>
-          <p className="muted-line">
-            These records keep prompts, workflows, and intended local output paths in runtime state while the
-            actual files stay outside Git. Think of this as the campaign's memory of what art exists, not the art
-            files themselves.
-          </p>
-          <div className="memory-entry-list">
-            {snapshot?.assetRecords.length ? (
-              snapshot.assetRecords.map((asset) => (
-                <div className="memory-entry-card" key={asset.id}>
-                  <div className="memory-entry-header">
-                    <strong>{formatAssetKind(asset.kind)}</strong>
-                    <span className="event-pill event-memory">{asset.status}</span>
-                  </div>
-                  <p>{asset.prompt ?? "No prompt attached."}</p>
-                  <div className="memory-entry-meta">
-                    <span>{formatVisibilityLabel(asset.visibility)}</span>
-                    <span>{asset.workflowId ?? "no workflow"}</span>
-                    <span>{asset.localPath ?? "no local path"}</span>
-                  </div>
-                  <div className="tag-row">
-                    {asset.sceneId ? <span className="tag-chip">scene: {asset.sceneId}</span> : null}
-                    <span className="tag-chip">asset: {asset.id}</span>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <p>No generated media metadata recorded yet.</p>
-            )}
-          </div>
-        </article>
-
-        {advancedMode ? (
-
-        <article className="panel">
-          <div className="panel-header">
-            <h2>Cleanup Policy</h2>
-            <span>{cleanupReport ? formatTime(cleanupReport.generatedAt) : "not loaded"}</span>
-          </div>
-          <p className="muted-line">
-            This is a report-only cleanup pass. It shows what should be archived or reviewed later while keeping
-            final files outside Git and untouched for now.
-          </p>
-          <button className="export-button" onClick={() => void loadCleanupReport()} type="button">
-            Refresh Cleanup Report
-          </button>
-          {cleanupReportStatus ? (
-            <p className="export-note">
-              {cleanupReportStatus === "loading"
-                ? "Refreshing cleanup report..."
-                : cleanupReportStatus === "ready"
-                  ? "Cleanup report refreshed."
-                  : "Cleanup report failed to load."}
-            </p>
-          ) : null}
-          {cleanupReport ? (
-            <div className="context-block">
-              <div className="packet-meta-grid">
-                <div>
-                  <span>Tracked Jobs</span>
-                  <strong>{cleanupReport.summary.trackedMediaJobs}</strong>
-                </div>
-                <div>
-                  <span>Tracked Assets</span>
-                  <strong>{cleanupReport.summary.trackedAssets}</strong>
-                </div>
-                <div>
-                  <span>Archive Candidates</span>
-                  <strong>{cleanupReport.summary.archiveCandidateCount}</strong>
-                </div>
-                <div>
-                  <span>Review Candidates</span>
-                  <strong>{cleanupReport.summary.reviewCandidateCount}</strong>
-                </div>
-                <div>
-                  <span>Protected Finals</span>
-                  <strong>{cleanupReport.summary.protectedFinalAssetCount}</strong>
-                </div>
-              </div>
-              <div className="tag-row">
-                <span className="tag-chip">media root: {cleanupReport.outputRoots.mediaOutputRoot}</span>
-                <span className="tag-chip">repo exports: {cleanupReport.outputRoots.repoExportsRoot}</span>
-              </div>
-              <div className="validation-list">
-                {cleanupReport.policy.notes.map((note) => (
-                  <p key={note}>{note}</p>
-                ))}
-              </div>
-              <div>
-                <p className="detail-label">Archive Candidates</p>
-                <div className="memory-entry-list">
-                  {cleanupReport.archiveCandidates.length ? (
-                    cleanupReport.archiveCandidates.map((candidate) => (
-                      <div className="memory-entry-card" key={`archive-${candidate.kind}-${candidate.id}`}>
-                        <div className="memory-entry-header">
-                          <strong>{candidate.kind.replace("_", " ")}</strong>
-                          <span className="event-pill event-memory">{candidate.status}</span>
-                        </div>
-                        <p>{candidate.reason}</p>
-                        <div className="memory-entry-meta">
-                          <span>{candidate.recommendedAction.replace("_", " ")}</span>
-                          <span>{candidate.workflowId ?? "no workflow"}</span>
-                          <span>{candidate.timestamp ? formatTime(candidate.timestamp) : "no timestamp"}</span>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <p>No archive candidates yet.</p>
-                  )}
-                </div>
-              </div>
-              <div>
-                <p className="detail-label">Review / Protected Items</p>
-                <div className="memory-entry-list">
-                  {cleanupReport.reviewCandidates.length ? (
-                    cleanupReport.reviewCandidates.map((candidate) => (
-                      <div className="memory-entry-card" key={`review-${candidate.kind}-${candidate.id}`}>
-                        <div className="memory-entry-header">
-                          <strong>{candidate.kind.replace("_", " ")}</strong>
-                          <span className="event-pill event-state">{candidate.recommendedAction.replace("_", " ")}</span>
-                        </div>
-                        <p>{candidate.reason}</p>
-                        <div className="memory-entry-meta">
-                          <span>{candidate.status}</span>
-                          <span>{candidate.workflowId ?? "no workflow"}</span>
-                          <span>{candidate.localPath ?? "no local path"}</span>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <p>No review candidates yet.</p>
-                  )}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <p>No cleanup report loaded yet.</p>
-          )}
-        </article>
-
-        ) : null}
-
-        {advancedMode ? (
-
-        <article className="panel">
-          <div className="panel-header">
-            <h2>Memory Entry Drafts</h2>
-            <span>{snapshot?.memoryEntries.length ?? 0} saved</span>
-          </div>
-          <p className="muted-line">
-            Use this after a scene settles. It turns the current table state and recent events into a reusable
-            campaign-memory artifact.
-          </p>
-          <button
-            className="export-button"
-            disabled={pendingActionKey !== ""}
-            onClick={() => void createMemoryEntry()}
-            type="button"
-          >
-            Create Memory Entry
-          </button>
-          {memoryEntryStatus ? (
-            <p className="export-note">
-              {memoryEntryStatus === "creating"
-                ? "Building memory entry..."
-                : memoryEntryStatus.startsWith("ready:")
-                  ? memoryEntryExportPath
-                    ? `Memory entry saved to ${memoryEntryExportPath}`
-                    : "Memory entry created."
-                  : "Memory entry generation failed."}
-            </p>
-          ) : null}
-          <div className="memory-entry-list">
-            {snapshot?.memoryEntries.length ? (
-              snapshot.memoryEntries.map((entry) => (
-                <div className="memory-entry-card" key={entry.id}>
-                  <div className="memory-entry-header">
-                    <strong>{entry.source.label}</strong>
-                    <span className="event-pill event-memory">{formatMemoryKind(entry.kind)}</span>
-                  </div>
-                  <p>{entry.summary}</p>
-                  <div className="memory-entry-meta">
-                    <span>{formatVisibilityLabel(entry.visibility)}</span>
-                    <span>{entry.status}</span>
-                    <span>{formatTime(entry.createdAt)}</span>
-                  </div>
-                  {entry.entities.length ? (
-                    <div className="tag-row">
-                      {entry.entities.slice(0, 6).map((entity) => (
-                        <span className="tag-chip" key={`${entry.id}-${entity}`}>
-                          {entity}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              ))
-            ) : (
-              <p>No memory entries generated yet.</p>
-            )}
-          </div>
-        </article>
-
-        ) : null}
-
-        {advancedMode ? (
-
-        <article className="panel">
-          <div className="panel-header">
-            <h2>Local Model Adapter</h2>
-            <span>{localModelDraft?.adapter.mode ?? "placeholder"}</span>
-          </div>
-          <p className="muted-line">
-            This is the fast narrator lane. Use it to preview moment-to-moment scene narration built from the
-            current packet.
-          </p>
-          <button
-            className="export-button"
-            disabled={pendingActionKey !== ""}
-            onClick={() => void runLocalModelDraft()}
-            type="button"
-          >
-            Run Local Model Draft
-          </button>
-          {localModelStatus ? (
-            <p className="export-note">
-              {localModelStatus === "running"
-                ? "Preparing local-model draft..."
-                : localModelStatus === "ready"
-                  ? localModelDraft?.adapter.endpointConfigured
-                    ? `Placeholder contract built for ${localModelDraft.adapter.endpoint}`
-                    : "Placeholder contract built with no local endpoint configured yet."
-                  : "Local-model draft failed."}
-            </p>
-          ) : null}
-          {localModelDraft ? (
-            <div className="context-block">
-              <div className="packet-meta-grid">
-                <div>
-                  <span>Scene Packet</span>
-                  <strong>{localModelDraft.request.sceneTitle}</strong>
-                </div>
-                <div>
-                  <span>State / Media / Audio</span>
-                  <strong>
-                    {localModelDraft.request.proposedStateEventCount} / {localModelDraft.request.mediaRequestCount} /{" "}
-                    {localModelDraft.request.audioCueCount}
-                  </strong>
-                </div>
-              </div>
-              <div className="context-row">
-                <strong>Prompt Preview</strong>
-                <p>{localModelDraft.request.promptPreview}</p>
-              </div>
-              <div className="context-row">
-                <strong>Context Summary</strong>
-                <p>{localModelDraft.request.contextSummary}</p>
-              </div>
-              <div className="context-row">
-                <strong>Draft Narration</strong>
-                <p>{localModelDraft.response.narration}</p>
-              </div>
-              <div className="context-row">
-                <strong>Suggested Next Beat</strong>
-                <p>{localModelDraft.response.suggestedNextBeat}</p>
-              </div>
-              <div className="context-list">
-                {localModelDraft.response.gmNotes.map((note) => (
-                  <div className="context-row" key={note}>
-                    <strong>GM Note</strong>
-                    <p>{note}</p>
-                  </div>
-                ))}
-              </div>
-              {localModelDraft.response.riskyStateChangeWarning ? (
-                <div className="validation-list">
-                  <p>{localModelDraft.response.riskyStateChangeWarning}</p>
-                </div>
-              ) : null}
-            </div>
-          ) : (
-            <p>No local-model draft run yet.</p>
-          )}
-        </article>
-
-        ) : null}
-
-        {advancedMode ? (
-
-        <article className="panel">
-          <div className="panel-header">
-            <h2>Director Mode Adapter</h2>
-            <span>{directorDraft?.adapter.mode ?? "placeholder"}</span>
-          </div>
-          <p className="muted-line">
-            This is the higher-level planning lane. Use it for pacing, reveal order, canon notes, and scene
-            escalation rather than line-by-line narration.
-          </p>
-          <button
-            className="export-button"
-            disabled={pendingActionKey !== ""}
-            onClick={() => void runDirectorModeDraft()}
-            type="button"
-          >
-            Run Director Mode Draft
-          </button>
-          {directorStatus ? (
-            <p className="export-note">
-              {directorStatus === "running"
-                ? "Preparing director-mode draft..."
-                : directorStatus === "ready"
-                  ? directorDraft?.adapter.enabled
-                    ? `Placeholder director contract built for ${directorDraft.adapter.model}`
-                    : "Placeholder director contract built with no director model configured yet."
-                  : "Director-mode draft failed."}
-            </p>
-          ) : null}
-          {directorDraft ? (
-            <div className="context-block">
-              <div className="packet-meta-grid">
-                <div>
-                  <span>Scene Packet</span>
-                  <strong>{directorDraft.request.sceneTitle}</strong>
-                </div>
-                <div>
-                  <span>Memory / Approvals</span>
-                  <strong>
-                    {directorDraft.request.memoryEntryCount} / {directorDraft.request.pendingApprovalCount}
-                  </strong>
-                </div>
-              </div>
-              <div className="context-row">
-                <strong>Prompt Preview</strong>
-                <p>{directorDraft.request.promptPreview}</p>
-              </div>
-              <div className="context-row">
-                <strong>Context Summary</strong>
-                <p>{directorDraft.request.contextSummary}</p>
-              </div>
-              <div className="context-row">
-                <strong>Director Guidance</strong>
-                <p>{directorDraft.response.directorGuidance}</p>
-              </div>
-              <div className="context-list">
-                {directorDraft.response.revealPlan.map((step) => (
-                  <div className="context-row" key={step}>
-                    <strong>Reveal Plan</strong>
-                    <p>{step}</p>
-                  </div>
-                ))}
-              </div>
-              <div className="context-list">
-                {directorDraft.response.canonizationNotes.map((note) => (
-                  <div className="context-row" key={note}>
-                    <strong>Canonization Note</strong>
-                    <p>{note}</p>
-                  </div>
-                ))}
-              </div>
-              {directorDraft.response.escalationWarning ? (
-                <div className="validation-list">
-                  <p>{directorDraft.response.escalationWarning}</p>
-                </div>
-              ) : null}
-            </div>
-          ) : (
-            <p>No director-mode draft run yet.</p>
-          )}
-        </article>
-
-        ) : null}
-
-        {advancedMode ? (
-
-        <article className="panel panel-wide">
-          <div className="panel-header">
-            <h2>AI Activity Log</h2>
-            <span>{aiLogs.length} recent entries</span>
-          </div>
-          <p className="muted-line">
-            This log shows what the AI-facing runtime prepared, validated, queued, or refused. It is mainly for
-            debugging and trust-building while we wire the real adapters in.
-          </p>
-          <div className="event-log">
-            {aiLogs.length ? (
-              aiLogs.map((entry) => (
-                <div className="event-row" key={entry.id}>
-                  <div>
-                    <strong>{entry.summary}</strong>
-                    <p>
-                      {entry.adapter} · {entry.kind} · {entry.correlationId}
-                    </p>
-                  </div>
-                  <div className="event-meta">
-                    <span className={`event-pill ${entry.kind === "validation_failure" ? "event-validation" : "event-memory"}`}>
-                      {entry.kind.replace(/_/g, " ")}
-                    </span>
-                    <small>{formatTime(entry.createdAt)}</small>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <p>No AI activity logged yet.</p>
-            )}
-          </div>
-        </article>
-
-        ) : null}
-
-        {advancedMode ? (
-
-        <article className="panel panel-wide">
-          <div className="panel-header">
-            <h2>Error Log</h2>
-            <span>{errorEvents.length} recent events</span>
-          </div>
-          <p className="muted-line">
-            These are service failures, degraded states, and recoverable errors the runtime detected. They are
-            GM-only so players do not see system problems during a session.
-          </p>
-          <div className="event-log">
-            {errorEvents.length ? (
-              errorEvents.map((entry) => (
-                <div className="event-row" key={entry.id}>
-                  <div>
-                    <strong>{entry.summary}</strong>
-                    <p>{entry.message}</p>
-                    <p className="helper-note">{entry.recoveryHint}</p>
-                  </div>
-                  <div className="event-meta">
-                    <span className={`event-pill ${entry.severity === "critical" ? "event-validation" : entry.severity === "error" ? "event-state" : "event-memory"}`}>
-                      {entry.severity} · {entry.service}
-                    </span>
-                    <small>{formatTime(entry.createdAt)}</small>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <p>No errors logged. Services are running cleanly.</p>
-            )}
-          </div>
-        </article>
-
-        ) : null}
-
-        <article className="panel panel-wide">
-          <div className="panel-header">
-            <h2>Live Roll Log</h2>
-            <span>In-memory truth</span>
-          </div>
-          <div className="roll-log">
-            {snapshot?.rollLog.map((roll) => (
-              <div key={roll.id} className="roll-row">
-                <div>
-                  <strong>{roll.actorName}</strong>
-                  <p>{roll.note}</p>
-                </div>
-                <div className="roll-values">
-                  <span>{roll.dice}</span>
-                  <strong>{roll.total}</strong>
-                  <small>{formatTime(roll.timestamp)}</small>
-                </div>
-              </div>
-            )) ?? <p>Waiting for the first roll.</p>}
-          </div>
-        </article>
-
-        {advancedMode ? (
-
-        <article className="panel panel-wide">
-          <div className="panel-header">
-            <h2>Table Event History</h2>
-            <span>{snapshot?.eventLog.length ?? 0} recent events</span>
-          </div>
-          <div className="event-log">
-            {snapshot?.eventLog.map((entry) => (
-              <div key={entry.id} className="event-row">
-                <div>
-                  <strong>{entry.summary}</strong>
-                  <p>
-                    {entry.actor.label} · {formatVisibilityLabel(entry.visibility)}
-                  </p>
-                </div>
-                <div className="event-meta">
-                  <span className={`event-pill event-${entry.category}`}>{entry.category}</span>
-                  <small>{formatTime(entry.timestamp)}</small>
-                </div>
-              </div>
-            )) ?? <p>Waiting for the first state change.</p>}
-          </div>
-        </article>
-
-        ) : null}
-
-        {diceAnimation ? (
-          <DiceOverlay roll={diceAnimation} onClose={() => setDiceAnimation(null)} />
-        ) : null}
-      </section>
+      {diceAnimation && tab !== "stage" ? (
+        <DiceOverlay roll={diceAnimation} onClose={() => setDiceAnimation(null)} />
+      ) : null}
     </main>
   );
 }
