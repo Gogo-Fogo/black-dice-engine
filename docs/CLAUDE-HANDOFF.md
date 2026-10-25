@@ -1,5 +1,7 @@
 # Claude handoff — October 25, 2026
 
+Latest follow-up: [the $0.30 campaign simulation report](deepseek-campaign-simulation-2026-10-25.md) records forty live synthetic DeepSeek calls, $0.0279468 estimated peak cost, two continuity slips and their rechecks. Narration now explicitly preserves open gates/owned rewards; proposals let earned keys work without invented lock checks. The harness supports immutable per-ledger budgets and exclusive run ownership. All twenty latest distinct scenarios passed automated checks and were manually reviewed; sixteen affected regressions and server lint/build passed. No further paid calls are needed. These code changes require a deliberate server restart to reach an already running session. Keep model suggestions GM-reviewed; optional celebration rolls and descriptive inventions remain limitations.
+
 Read `AGENTS.md` first, then this file. This handoff covers the accumulated Party reliability/refactor work, incoming Mac feature adaptations, campaign continuity, character creation and local AI/media upgrades. Historical check counts in other reports describe their own checkpoints; the latest pre-publication source suite is 182 tests.
 
 ## Current product and boundaries

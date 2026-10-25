@@ -1,5 +1,5 @@
 // Explicit paid opt-in only. Never imported by npm test or a launcher.
-import {readFileSync,writeFileSync,mkdirSync,existsSync,rmSync} from 'node:fs';
+import {readFileSync,writeFileSync,mkdirSync,existsSync,rmSync,openSync,closeSync} from 'node:fs';
 import {parseEnv} from 'node:util';
 import {resolve,dirname,relative} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -19,12 +19,23 @@ assert.ok(process.env.OPENAI_API_KEY,'Configure the existing key locally; never 
 // Each new spending authorization gets its own ledger; the original one stays exhausted.
 const ledger=process.argv.find(arg=>arg.startsWith('--ledger='))?.slice(9);
 if(ledger!==undefined&&!/^[a-z0-9-]{1,40}$/.test(ledger))throw Error('Ledger names use lowercase letters, digits and dashes.');
+const budgetArg=process.argv.find(arg=>arg.startsWith('--budget-usd='))?.slice(13);
+if(budgetArg!==undefined&&(!ledger||!/^0\.\d{1,2}$/.test(budgetArg)))throw Error('A custom budget requires a named ledger and a decimal USD amount.');
+const budgetUsd=budgetArg===undefined?0.50:Number(budgetArg);
+assert.ok(budgetUsd>0&&budgetUsd<=0.50,'Budget must be greater than zero and at most $0.50.');
+const reservationCeilingUsd=budgetUsd*0.90;
 const reportPath=resolve(root,dryRun?'tmp/deepseek-dry-run.json':ledger?`tmp/deepseek-${ledger}.json`:'tmp/deepseek-campaign-live.json');
+mkdirSync(dirname(reportPath),{recursive:true});
+// Hold ownership across the whole run: concurrent processes must never overwrite
+// reservations or scenario evidence from the same spending authorization.
+const lockPath=reportPath+'.lock';
+let lock;
+try{lock=openSync(lockPath,'wx');}catch{throw Error('Ledger already locked; no request sent. Inspect the owning run before recovering a stale lock.');}
+process.on('exit',()=>{closeSync(lock);rmSync(lockPath,{force:true});});
 if(dryRun)rmSync(reportPath,{force:true});
 const maxCalls=ledger?60:16;
-mkdirSync(dirname(reportPath),{recursive:true});
-const report=existsSync(reportPath)?JSON.parse(readFileSync(reportPath,'utf8')):{budgetUsd:0.50,rateBasis:'Peak, uncached: input $0.30/M; output $1.20/M. Verified official pricing 2026-10-25.',calls:[],scenarios:[]};
-assert.equal(report.budgetUsd,0.50);
+const report=existsSync(reportPath)?JSON.parse(readFileSync(reportPath,'utf8')):{budgetUsd,rateBasis:'Peak, uncached: input $0.30/M; output $1.20/M. Verified official pricing 2026-10-25.',calls:[],scenarios:[]};
+assert.equal(report.budgetUsd,budgetUsd,'An existing ledger budget cannot be changed.');
 const persist=()=>writeFileSync(reportPath,JSON.stringify(report,null,2)+'\n');
 let label='';
 const cannedProposal=JSON.stringify({action:'Dry-run action',skill:'Investigation',difficulty:'medium',description:'Dry-run description.',consequences:'Dry-run consequences.'});
@@ -44,7 +55,7 @@ const metered=async(url,init)=>{
   // the whole request before sending, including requests that time out ambiguously.
   const reservedUsd=((bytes+2048)*0.30+body.max_tokens*1.20)/1e6;
   const spent=report.calls.reduce((sum,call)=>sum+call.reservedUsd,0);
-  assert.ok(report.calls.length<maxCalls&&spent+reservedUsd<0.45,'Paid check budget exhausted; no request sent.');
+  assert.ok(report.calls.length<maxCalls&&spent+reservedUsd<reservationCeilingUsd,'Paid check budget exhausted; no request sent.');
   const call={label,reservedUsd,startedAt:new Date().toISOString(),maxTokens:body.max_tokens,thinking:body.thinking?.type??'provider-default'};
   report.calls.push(call);persist();
   const start=performance.now();

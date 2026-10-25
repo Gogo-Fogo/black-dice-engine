@@ -294,7 +294,7 @@ function buildNarrationPrompt(context: SceneContext, roll: RollResultContext): s
     `## Task`,
     `Write a vivid, cinematic narration (2-4 sentences) of what happens when ${roll.actorName} attempts this action.`,
     `Reflect each recorded outcome exactly. If the DC is unknown, describe the attempt without deciding success. Do not infer an overall group result unless a GM ruling specifies it.`,
-    `Keep it concise for live play. Do not invent permanent state changes.`,
+    `Keep it concise for live play. Do not invent permanent state changes. Preserve recorded physical facts literally: an open gate stays open, a retained item stays owned, and an available route stays available. Do not add a closing gate, lost reward, new injury or blocked route as cinematic texture.`,
     `Return ONLY the narration text, no markdown, no labels.`
   );
 
@@ -320,7 +320,7 @@ function buildActionPrompt(
     context.activeCharacters.map((c) => `- ${c.name} (${c.raceClass}) HP ${c.hp}/${c.maxHp}`).join("\n"),
     ``,
     `## Task`,
-    `Propose a meaningful next action. A roll is optional: do not add a check to an already resolved obstacle. If pacing.stalled is true, offer a concrete payoff, consequence or alternative route for GM approval rather than another equivalent check.`
+    `Propose a meaningful next action. A roll is optional: do not add a check to an already resolved obstacle. An earned key works on its intended door without a new roll or invented frozen/jammed lock unless a new GM-approved obstacle explicitly says otherwise. Put any proposed check on the next genuinely unresolved objective. If pacing.stalled is true, offer a concrete payoff, consequence or alternative route for GM approval rather than another equivalent check.`
   ];
 
   if (previousAction) {
