@@ -1,694 +1,1111 @@
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { DiceHandle, preloadDice, renderDiceOverlay } from "./dice3d";
-import { playDiceRollSound } from "./diceSound";
+import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { preloadDice } from "./dice3d";
+import { DiceOverlay } from "./DiceOverlay";
+import {
+  abilities,
+  abilityName,
+  actionKey,
+  characterAbilityMod,
+  clearPendingRequestId,
+  diceWithMode,
+  formatMod,
+  formatTime,
+  getJson,
+  getOrCreateClientId,
+  getPendingRequestId,
+  haptic,
+  hpTone,
+  naturalRolls,
+  postJson,
+  proficiencyBonus,
+  readPref,
+  skillInfo,
+  writePref
+} from "./lib";
+import type {
+  Character,
+  ConnectionState,
+  CurrentAction,
+  PlayerSocketEnvelope,
+  RollMode,
+  RollRecord,
+  SessionSnapshot
+} from "./types";
 
-// Preload dice models on startup
 preloadDice();
 
-const _originalFetch = window.fetch;
-window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
-  const url = typeof input === "string" ? input : input.toString();
-  if (url.startsWith("/api/")) {
-    init = init || {};
-    const headers = new Headers(init.headers);
-    headers.set("x-bde-role", "player");
-    init.headers = headers;
-  }
-  return _originalFetch(input, init);
-};
+type Tab = "play" | "sheet" | "table" | "lore";
 
-type Character = {
-  id: string;
-  name: string;
-  classLabel: string;
-  hp: { current: number; max: number };
-  armorClass: number;
-  initiative: number | null;
-  conditions: string[];
-  resources: Array<{
-    id: string;
-    label: string;
-    current: number;
-    max: number;
-  }>;
-  inventory: Array<{
-    id: string;
-    name: string;
-    quantity: number;
-    detail?: string;
-  }>;
-  notes: string[];
-  image?: string | null;
-  stats?: { str: number; dex: number; con: number; int: number; wis: number; cha: number; skills: string[] };
-  claimedByClientId: string | null;
-  claimedByLabel: string | null;
-};
-
-type RollRecord = {
-  id: string;
-  actorId: string;
-  actorName: string;
+type RollIntent = {
   dice: string;
   modifier: number;
-  rolled: number | number[];
-  total: number;
-  advantage: boolean | null;
   note: string;
-  timestamp: string;
+  /** DC to compare against in the result overlay, when this roll answers the GM's call. */
+  dc?: number | null;
 };
 
-type MemoryEntry = {
-  id: string;
-  kind: string;
-  visibility: string;
-  summary: string;
-  createdAt: string;
-};
-
-type SessionSnapshot = {
-  campaignId: string;
-  campaignTitle: string;
-  currentScene: string;
-  tablePin: string;
-  joinUrl: string;
-  party: Character[];
-  rollLog: RollRecord[];
-  memoryEntries: MemoryEntry[];
-  currentAction?: { type: string; description: string; ability: string; dc: number | null } | null;
-};
-
-type PlayerSocketEnvelope =
-  | { type: "connected"; payload: { sessionSnapshot: SessionSnapshot } }
-  | { type: "session_snapshot"; payload: SessionSnapshot }
-  | { type: "roll_recorded"; payload: RollRecord };
-
-type RollRequest = {
-  actorId: string;
-  actorName: string;
-  modifier: number;
-  dice?: string;
-  note: string;
-  requestId: string;
-};
-
-const storageKey = "black-dice-engine-player-client-id";
-const pendingRequestStorageKey = "black-dice-engine-pending-requests";
-
-function createClientId() {
-  const randomPart = Math.random().toString(36).slice(2, 10);
-  return `client-${Date.now().toString(36)}-${randomPart}`;
-}
-
-function getOrCreateClientId() {
-  const existing = window.localStorage.getItem(storageKey);
-
-  if (existing) {
-    return existing;
+const tabs: Array<{ id: Tab; label: string; icon: ReactNode }> = [
+  {
+    id: "play",
+    label: "Play",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 2.5 20.5 7.4v9.2L12 21.5 3.5 16.6V7.4Z" />
+        <path d="M12 2.5v6.3m0 0L3.5 16.6M12 8.8l8.5 7.8M3.5 16.6h17" />
+      </svg>
+    )
+  },
+  {
+    id: "sheet",
+    label: "Sheet",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M6 3h9l3 3v15H6Z" />
+        <path d="M9 9h6M9 13h6M9 17h4" />
+      </svg>
+    )
+  },
+  {
+    id: "table",
+    label: "Table",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="8" cy="9" r="3" />
+        <circle cx="16.5" cy="9.5" r="2.5" />
+        <path d="M2.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5M14 14.6c.8-.4 1.6-.6 2.5-.6 2.3 0 4.2 1.6 4.8 4.5" />
+      </svg>
+    )
+  },
+  {
+    id: "lore",
+    label: "Lore",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 5.5C6.5 4 9.5 4 12 5.5v14C9.5 18 6.5 18 4 19.5Z" />
+        <path d="M20 5.5C17.5 4 14.5 4 12 5.5v14c2.5-1.5 5.5-1.5 8 0Z" />
+      </svg>
+    )
   }
+];
 
-  const created = createClientId();
-  window.localStorage.setItem(storageKey, created);
-  return created;
-}
-
-function createRequestId() {
-  const randomPart = Math.random().toString(36).slice(2, 10);
-  return `request-${Date.now().toString(36)}-${randomPart}`;
-}
-
-function readPendingRequests() {
-  try {
-    const raw = window.sessionStorage.getItem(pendingRequestStorageKey);
-    return raw ? (JSON.parse(raw) as Record<string, string>) : {};
-  } catch {
-    return {};
-  }
-}
-
-function writePendingRequests(value: Record<string, string>) {
-  window.sessionStorage.setItem(pendingRequestStorageKey, JSON.stringify(value));
-}
-
-function getOrCreatePendingRequestId(fingerprint: string) {
-  const pending = readPendingRequests();
-  const existing = pending[fingerprint];
-
-  if (existing) {
-    return existing;
-  }
-
-  const created = createRequestId();
-  writePendingRequests({
-    ...pending,
-    [fingerprint]: created
-  });
-  return created;
-}
-
-function clearPendingRequestId(fingerprint: string) {
-  const pending = readPendingRequests();
-
-  if (!(fingerprint in pending)) {
-    return;
-  }
-
-  delete pending[fingerprint];
-  writePendingRequests(pending);
-}
-
-function formatTime(value: string) {
-  return new Date(value).toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit"
-  });
-}
-
-function DiceOverlay({ roll, onClose }: { roll: RollRecord; onClose: () => void }) {
-  const sceneRef = useRef<HTMLDivElement | null>(null);
-  const handleRef = useRef<DiceHandle | null>(null);
-  const thrownRef = useRef(false);
-  const [showResult, setShowResult] = useState(false);
-  const [canThrow, setCanThrow] = useState(false);
-  const [thrown, setThrown] = useState(false);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const el = sceneRef.current;
-    if (!el) return;
-    try {
-      handleRef.current = renderDiceOverlay(el, roll.dice, () => {
-        setLoading(false);
-        setShowResult(true);
-      });
-      // Poll for when the model is loaded
-      const checkLoaded = setInterval(() => {
-        if (handleRef.current) {
-          // If we have a handle, the overlay is initialized
-          // Check if we can throw (model loaded)
-          setLoading(false);
-          clearInterval(checkLoaded);
-        }
-      }, 200);
-      const timer = setTimeout(() => {
-        setCanThrow(true);
-        clearInterval(checkLoaded);
-        setLoading(false);
-      }, 3000); // Max 3s wait before showing button
-      return () => {
-        clearTimeout(timer);
-        clearInterval(checkLoaded);
-        handleRef.current?.dispose();
-        handleRef.current = null;
-      };
-    } catch {
-      setLoading(false);
-      setShowResult(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!showResult) return;
-    const timer = setTimeout(onClose, 7000);
-    return () => clearTimeout(timer);
-  }, [showResult]);
-
-  // Shake detection
-  useEffect(() => {
-    if (!canThrow || thrown) return;
-    let lastShake = 0;
-    const onMotion = (e: DeviceMotionEvent) => {
-      if (thrownRef.current) return;
-      const acc = e.accelerationIncludingGravity;
-      if (!acc || acc.x == null || acc.y == null || acc.z == null) return;
-      const mag = Math.sqrt(acc.x ** 2 + acc.y ** 2 + acc.z ** 2);
-      if (mag > 25 && performance.now() - lastShake > 800) {
-        lastShake = performance.now();
-        if (!thrownRef.current) {
-          thrownRef.current = true;
-          setThrown(true);
-          playDiceRollSound();
-          handleRef.current?.throwDice();
-        }
-      }
-    };
-    if (typeof (DeviceMotionEvent as any).requestPermission === "function") {
-      (DeviceMotionEvent as any)
-        .requestPermission()
-        .then((s: string) => { if (s === "granted") window.addEventListener("devicemotion", onMotion); })
-        .catch(() => {});
-    } else {
-      window.addEventListener("devicemotion", onMotion);
-    }
-    return () => { window.removeEventListener("devicemotion", onMotion); };
-  }, [canThrow, thrown]);
-
-  const doThrow = useCallback(() => {
-    if (thrownRef.current) return;
-    thrownRef.current = true;
-    setThrown(true);
-    playDiceRollSound();
-    handleRef.current?.throwDice();
-  }, []);
-
-  return (
-    <div className="dice-overlay">
-      <div className="dice-overlay-bg" />
-      <div className="dice-roll-card">
-        <div className="dice-3d-container" ref={sceneRef} />
-        {loading ? (
-          <div className="dice-loading">Loading dice...</div>
-        ) : canThrow && !thrown ? (
-          <button className="dice-throw-btn" onClick={(e) => { e.stopPropagation(); doThrow(); }}>
-            TAP TO THROW
-          </button>
-        ) : null}
-        {showResult ? (
-          <div className="dice-result-wrap" onClick={onClose}>
-            <div className="dice-result-number">{roll.total}</div>
-            <p className="dice-roll-who">{roll.actorName}</p>
-            <p className="dice-roll-what">{roll.dice} — {roll.note}</p>
-            <p className="dice-roll-tap">tap to close</p>
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function useAdvancedMode() {
-  const [advancedMode, setAdvancedMode] = useState(() => {
-    try {
-      return window.localStorage.getItem("bde-player-advanced") === "true";
-    } catch {
-      return false;
-    }
-  });
-  const toggle = useCallback(() => {
-    setAdvancedMode((prev) => {
-      const next = !prev;
-      try {
-        window.localStorage.setItem("bde-player-advanced", String(next));
-      } catch {
-        // ignore
-      }
-      return next;
-    });
-  }, []);
-  return { advancedMode, toggle };
+function isTab(value: string): value is Tab {
+  return tabs.some((tab) => tab.id === value);
 }
 
 export default function App() {
-  const { advancedMode, toggle: toggleAdvancedMode } = useAdvancedMode();
+  const [clientId] = useState(getOrCreateClientId);
   const [snapshot, setSnapshot] = useState<SessionSnapshot | null>(null);
-  const [selectedCharacterId, setSelectedCharacterId] = useState("");
-  const [note, setNote] = useState("Perception");
-  const [dice, setDice] = useState("d20");
-  const [modifier, setModifier] = useState(3);
-  const [advantage, setAdvantage] = useState<boolean | null>(null);
-  const [connectionLabel, setConnectionLabel] = useState("connecting");
-  const [submitting, setSubmitting] = useState(false);
-  const [playerLabel, setPlayerLabel] = useState(() => {
-    try { return localStorage.getItem("bde-player-label") || "Player"; } catch { return "Player"; }
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [connection, setConnection] = useState<ConnectionState>("connecting");
+  const [tab, setTabState] = useState<Tab>(() => {
+    const saved = readPref("bde-player-tab", "play");
+    return isTab(saved) ? saved : "play";
   });
-  const [clientId, setClientId] = useState("");
-  const [claimBusy, setClaimBusy] = useState(false);
-  const [diceAnimation, setDiceAnimation] = useState<RollRecord | null>(null);
-  const [preset, setPreset] = useState<string>("custom");
-
-  useEffect(() => {
-    let mounted = true;
-
-    async function load() {
-      const localClientId = getOrCreateClientId();
-      const response = await fetch("/api/session-snapshot");
-      const sessionSnapshot = (await response.json()) as SessionSnapshot;
-
-      if (!mounted) {
-        return;
-      }
-
-      setClientId(localClientId);
-      setSnapshot(sessionSnapshot);
-      const alreadyClaimed = sessionSnapshot.party.find(
-        (character) => character.claimedByClientId === localClientId
-      );
-      if (alreadyClaimed) {
-        setSelectedCharacterId(alreadyClaimed.id);
-      } else {
-        // NEVER auto-claim. Player must claim manually.
-        setSelectedCharacterId("");
-      }
+  const [playerLabel, setPlayerLabel] = useState(() => readPref("bde-player-label", ""));
+  const [soundOn, setSoundOn] = useState(() => readPref("bde-player-sound", "on") === "on");
+  const [rollMode, setRollMode] = useState<RollMode>("normal");
+  const [rolling, setRolling] = useState(false);
+  const [claimingId, setClaimingId] = useState<string | null>(null);
+  const [overlay, setOverlay] = useState<{ roll: RollRecord; dc: number | null } | null>(null);
+  const [toast, setToast] = useState<{ text: string; tone: "error" | "info" } | null>(null);
+  const [answeredActionKey, setAnsweredActionKey] = useState(() => {
+    try {
+      return window.sessionStorage.getItem("bde-player-answered-action") ?? "";
+    } catch {
+      return "";
     }
+  });
 
-    void load();
+  const shownRollIds = useRef(new Set<string>());
+  const pendingDc = useRef(new Map<string, number | null>());
+  const claimedIdRef = useRef<string | null>(null);
 
-    return () => {
-      mounted = false;
-    };
+  const claimed = snapshot?.party.find((c) => c.claimedByClientId === clientId) ?? null;
+  claimedIdRef.current = claimed?.id ?? null;
+  const action = snapshot?.currentAction ?? null;
+  const actionPending = !!action && actionKey(action) !== answeredActionKey;
+
+  const setTab = useCallback((next: Tab) => {
+    setTabState(next);
+    writePref("bde-player-tab", next);
+    window.scrollTo({ top: 0 });
+  }, []);
+
+  const showToast = useCallback((text: string, tone: "error" | "info" = "error") => {
+    setToast({ text, tone });
   }, []);
 
   useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 3500);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  const showRoll = useCallback((roll: RollRecord, dc: number | null) => {
+    if (shownRollIds.current.has(roll.id)) return;
+    shownRollIds.current.add(roll.id);
+    setOverlay({ roll, dc });
+  }, []);
+
+  // Initial snapshot over HTTP
+  const loadSnapshot = useCallback(async () => {
+    setLoadError(null);
+    try {
+      setSnapshot(await getJson<SessionSnapshot>("/api/session-snapshot"));
+    } catch {
+      setLoadError("Can't reach the table host. Make sure you're on the same Wi-Fi as the GM.");
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSnapshot();
+  }, [loadSnapshot]);
+
+  // Live updates over WebSocket with automatic reconnect
+  useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const localClientId = getOrCreateClientId();
-    setClientId(localClientId);
     let active = true;
     let socket: WebSocket | null = null;
     let reconnectTimer: number | null = null;
     let heartbeatTimer: number | null = null;
 
     function clearTimers() {
-      if (reconnectTimer !== null) {
-        window.clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-      }
-
-      if (heartbeatTimer !== null) {
-        window.clearInterval(heartbeatTimer);
-        heartbeatTimer = null;
-      }
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      if (heartbeatTimer !== null) window.clearInterval(heartbeatTimer);
+      reconnectTimer = heartbeatTimer = null;
     }
 
     function connect() {
-      if (!active) {
-        return;
-      }
-
-      setConnectionLabel((current) => (current === "connected" ? "reconnecting" : "connecting"));
+      if (!active) return;
+      setConnection((current) => (current === "connected" ? "reconnecting" : current));
       socket = new WebSocket(
-        `${protocol}://${window.location.host}/ws?role=player&clientId=${encodeURIComponent(localClientId)}`
+        `${protocol}://${window.location.host}/ws?role=player&clientId=${encodeURIComponent(clientId)}`
       );
 
       socket.addEventListener("open", () => {
-        setConnectionLabel("connected");
+        setConnection("connected");
+        setLoadError(null);
         heartbeatTimer = window.setInterval(() => {
-          if (socket?.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ type: "heartbeat" }));
-          }
+          if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "heartbeat" }));
         }, 5000);
       });
 
       socket.addEventListener("close", () => {
         clearTimers();
-        setConnectionLabel("reconnecting");
-
-        if (active) {
-          reconnectTimer = window.setTimeout(() => {
-            connect();
-          }, 1500);
-        }
+        if (!active) return;
+        setConnection("reconnecting");
+        reconnectTimer = window.setTimeout(connect, 1500);
       });
 
       socket.addEventListener("message", (event) => {
-        const message = JSON.parse(event.data) as PlayerSocketEnvelope;
-
+        let message: PlayerSocketEnvelope;
+        try {
+          message = JSON.parse(event.data) as PlayerSocketEnvelope;
+        } catch {
+          return;
+        }
         if (message.type === "connected") {
           setSnapshot(message.payload.sessionSnapshot);
-          return;
-        }
-
-        if (message.type === "session_snapshot") {
+        } else if (message.type === "session_snapshot") {
           setSnapshot(message.payload);
-          return;
-        }
-
-        if (message.type === "roll_recorded") {
+        } else if (message.type === "roll_recorded") {
+          const roll = message.payload;
           setSnapshot((current) =>
-            current
-              ? {
-                  ...current,
-                  rollLog: [message.payload, ...current.rollLog].slice(0, 8)
-                }
+            current && !current.rollLog.some((r) => r.id === roll.id)
+              ? { ...current, rollLog: [roll, ...current.rollLog].slice(0, 12) }
               : current
           );
-          // Only show dice animation for this player's claimed character
-          const char = snapshot?.party.find(c => c.claimedByClientId === clientId);
-          if (char && message.payload.actorId === char.id) {
-            setDiceAnimation(message.payload as RollRecord);
+          if (roll.actorId === claimedIdRef.current) {
+            showRoll(roll, pendingDc.current.get(roll.note) ?? null);
           }
         }
       });
     }
 
     connect();
-
     return () => {
       active = false;
       clearTimers();
       socket?.close();
     };
-  }, []);
+  }, [clientId, showRoll]);
 
-  const selectedCharacter =
-    snapshot?.party.find((character) => character.id === selectedCharacterId) ?? null;
-  const claimedCharacter =
-    snapshot?.party.find((character) => character.claimedByClientId === clientId) ?? null;
+  // Nudge the player when the GM calls for a roll
+  const lastActionKey = useRef<string | null>(null);
+  useEffect(() => {
+    const key = action ? actionKey(action) : null;
+    if (key && key !== lastActionKey.current && actionPending && claimed) haptic([20, 60, 20]);
+    lastActionKey.current = key;
+  }, [action, actionPending, claimed]);
 
-  async function submitRollWith(diceStr: string, noteText: string, mod: number) {
-    if (!claimedCharacter) return;
-    setSubmitting(true);
+  async function roll(intent: RollIntent) {
+    if (!claimed || rolling) return;
+    setRolling(true);
+    haptic(10);
+    const dice = intent.dice.startsWith("1d20") || intent.dice === "d20" ? diceWithMode(intent.dice, rollMode) : intent.dice;
+    const fingerprint = `roll:${claimed.id}:${intent.note}:${dice}:${intent.modifier}`;
+    pendingDc.current.set(intent.note, intent.dc ?? null);
     try {
-      const fingerprint = `roll:${claimedCharacter.id}:${noteText}:${diceStr}:${mod}`;
-      await fetch("/api/rolls", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          actorId: claimedCharacter.id,
-          actorName: claimedCharacter.name,
-          modifier: mod,
-          dice: diceStr,
-          note: noteText,
-          requestId: getOrCreatePendingRequestId(fingerprint)
-        })
+      const record = await postJson<RollRecord>("/api/rolls", {
+        actorId: claimed.id,
+        actorName: claimed.name,
+        modifier: intent.modifier,
+        dice,
+        note: intent.note,
+        requestId: getPendingRequestId(fingerprint)
       });
-    } finally { setSubmitting(false); }
-  }
-
-  async function claimCharacter() {
-    if (!selectedCharacterId || !clientId) {
-      return;
-    }
-
-    setClaimBusy(true);
-    const fingerprint = `claim:${clientId}:${selectedCharacterId}:${playerLabel.trim() || "Player"}`;
-    const requestId = getOrCreatePendingRequestId(fingerprint);
-
-    try {
-      const response = await fetch("/api/claim-character", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          clientId,
-          characterId: selectedCharacterId,
-          playerLabel,
-          requestId
-        })
-      });
-
-      if (response.ok) {
-        const json = (await response.json()) as { sessionSnapshot: SessionSnapshot };
-        setSnapshot(json.sessionSnapshot);
-        clearPendingRequestId(fingerprint);
+      clearPendingRequestId(fingerprint);
+      setRollMode("normal");
+      showRoll(record, intent.dc ?? null);
+      if (action && intent.note === action.type) {
+        const key = actionKey(action);
+        setAnsweredActionKey(key);
+        try {
+          window.sessionStorage.setItem("bde-player-answered-action", key);
+        } catch {
+          // ignore
+        }
       }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Roll failed. Try again.");
     } finally {
-      setClaimBusy(false);
+      setRolling(false);
     }
   }
 
-  async function releaseCharacter() {
-    if (!clientId) {
+  async function claim(character: Character) {
+    const label = playerLabel.trim();
+    if (!label) {
+      showToast("Add your name first so the GM knows who's playing.");
+      document.getElementById("player-name")?.focus();
       return;
     }
+    setClaimingId(character.id);
+    const fingerprint = `claim:${clientId}:${character.id}:${label}`;
+    try {
+      const result = await postJson<{ sessionSnapshot: SessionSnapshot }>("/api/claim-character", {
+        clientId,
+        characterId: character.id,
+        playerLabel: label,
+        requestId: getPendingRequestId(fingerprint)
+      });
+      clearPendingRequestId(fingerprint);
+      setSnapshot(result.sessionSnapshot);
+      setTab("play");
+      haptic(20);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Couldn't claim that character.");
+    } finally {
+      setClaimingId(null);
+    }
+  }
 
-    setClaimBusy(true);
+  async function release() {
     const fingerprint = `release:${clientId}`;
-    const requestId = getOrCreatePendingRequestId(fingerprint);
-
     try {
-      const response = await fetch("/api/release-character", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          clientId,
-          requestId
-        })
+      const result = await postJson<{ sessionSnapshot: SessionSnapshot }>("/api/release-character", {
+        clientId,
+        requestId: getPendingRequestId(fingerprint)
       });
-
-      if (response.ok) {
-        const json = (await response.json()) as { sessionSnapshot: SessionSnapshot };
-        setSnapshot(json.sessionSnapshot);
-        clearPendingRequestId(fingerprint);
-      }
-    } finally {
-      setClaimBusy(false);
+      clearPendingRequestId(fingerprint);
+      setSnapshot(result.sessionSnapshot);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Couldn't release the character.");
     }
+  }
+
+  function toggleSound() {
+    setSoundOn((on) => {
+      writePref("bde-player-sound", on ? "off" : "on");
+      return !on;
+    });
+  }
+
+  let body: ReactNode;
+  if (!snapshot) {
+    body = <Splash error={loadError} onRetry={loadSnapshot} />;
+  } else if (!claimed) {
+    body = (
+      <JoinScreen
+        snapshot={snapshot}
+        clientId={clientId}
+        playerLabel={playerLabel}
+        onLabelChange={(value) => {
+          setPlayerLabel(value);
+          writePref("bde-player-label", value);
+        }}
+        claimingId={claimingId}
+        onClaim={claim}
+      />
+    );
+  } else {
+    body = (
+      <div className="app">
+        <TopBar
+          character={claimed}
+          connection={connection}
+          actionPending={actionPending && tab !== "play"}
+          onActionTap={() => setTab("play")}
+        />
+        <main className="content" id="main">
+          {tab === "play" ? (
+            <PlayTab
+              snapshot={snapshot}
+              character={claimed}
+              action={action}
+              actionPending={actionPending}
+              rollMode={rollMode}
+              onRollMode={setRollMode}
+              rolling={rolling}
+              onRoll={roll}
+            />
+          ) : null}
+          {tab === "sheet" ? (
+            <SheetTab
+              character={claimed}
+              rollMode={rollMode}
+              onRollMode={setRollMode}
+              rolling={rolling}
+              onRoll={roll}
+              soundOn={soundOn}
+              onToggleSound={toggleSound}
+              onRelease={release}
+            />
+          ) : null}
+          {tab === "table" ? <TableTab snapshot={snapshot} clientId={clientId} /> : null}
+          {tab === "lore" ? <LoreTab snapshot={snapshot} /> : null}
+        </main>
+        <nav className="tabbar" aria-label="Sections">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className={`tab ${tab === t.id ? "active" : ""}`}
+              aria-current={tab === t.id ? "page" : undefined}
+              onClick={() => setTab(t.id)}
+            >
+              <span className="tab-icon">
+                {t.icon}
+                {t.id === "play" && actionPending ? <span className="tab-badge" aria-label="Roll requested" /> : null}
+              </span>
+              <span className="tab-label">{t.label}</span>
+            </button>
+          ))}
+        </nav>
+      </div>
+    );
   }
 
   return (
-    <main className="player-shell">
-      <section className="player-header">
-        <div>
-          <p className="eyebrow">Black Dice Engine</p>
-          <h1>Player Companion</h1>
-          <p className="subline">
-            Phone-first state, quick rolls, and reconnect-safe table access.
-          </p>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: "8px", alignItems: "flex-end" }}>
-          <div className="status-chip">{connectionLabel}</div>
-          <button
-            onClick={toggleAdvancedMode}
-            type="button"
-            style={{
-              fontSize: "0.7rem",
-              padding: "4px 10px",
-              borderRadius: "4px",
-              border: "1px solid #5a4a2a",
-              background: "linear-gradient(135deg, #3a2a1a 0%, #1a1209 100%)",
-              color: "#bca06d",
-              cursor: "pointer"
-            }}
-          >
-            {advancedMode ? "🔽 Simple" : "🔧 Advanced"}
+    <>
+      {body}
+      {overlay ? (
+        <DiceOverlay roll={overlay.roll} dc={overlay.dc} soundOn={soundOn} onClose={() => setOverlay(null)} />
+      ) : null}
+      <div className="toast-region" aria-live="polite">
+        {toast ? <div className={`toast ${toast.tone}`}>{toast.text}</div> : null}
+      </div>
+    </>
+  );
+}
+
+// --- Shared bits -----------------------------------------------------------------------
+
+/** Character art lives outside the repo, so treat a missing image like no image. */
+function useImageOk(src: string | null | undefined) {
+  const [failed, setFailed] = useState<string | null>(null);
+  return { ok: !!src && failed !== src, onError: () => setFailed(src ?? null) };
+}
+
+function Portrait({ character, size = 44 }: { character: Character; size?: number }) {
+  const image = useImageOk(character.image);
+  const initials = character.name
+    .split(/\s+/)
+    .map((part) => part.replace(/[^A-Za-z]/g, "")[0] ?? "")
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  return (
+    <span className="portrait" style={{ width: size, height: size }}>
+      {image.ok ? <img src={character.image!} alt="" loading="lazy" onError={image.onError} /> : <span>{initials}</span>}
+    </span>
+  );
+}
+
+function HpBar({ hp }: { hp: Character["hp"] }) {
+  const pct = hp.max > 0 ? Math.max(0, Math.min(100, (hp.current / hp.max) * 100)) : 0;
+  return (
+    <span
+      className={`hp-bar ${hpTone(hp)}`}
+      role="meter"
+      aria-label="Hit points"
+      aria-valuemin={0}
+      aria-valuemax={hp.max}
+      aria-valuenow={hp.current}
+    >
+      <span style={{ width: `${pct}%` }} />
+    </span>
+  );
+}
+
+function SectionHeader({ title, hint }: { title: string; hint?: string }) {
+  return (
+    <div className="section-header">
+      <h2>{title}</h2>
+      {hint ? <span>{hint}</span> : null}
+    </div>
+  );
+}
+
+function ModeSwitch({ value, onChange }: { value: RollMode; onChange: (mode: RollMode) => void }) {
+  const options: Array<{ id: RollMode; label: string }> = [
+    { id: "dis", label: "Disadv." },
+    { id: "normal", label: "Normal" },
+    { id: "adv", label: "Advantage" }
+  ];
+  return (
+    <div className="segmented" role="radiogroup" aria-label="Roll mode for d20 rolls">
+      {options.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          role="radio"
+          aria-checked={value === option.id}
+          className={`${value === option.id ? "active" : ""} ${option.id}`}
+          onClick={() => onChange(option.id)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function RollRow({ roll, highlight }: { roll: RollRecord; highlight?: boolean }) {
+  const natural = naturalRolls(roll.rolled);
+  const isD20 = /d20/.test(roll.dice) && natural.length === 1;
+  const flag = isD20 && natural[0] === 20 ? "crit" : isD20 && natural[0] === 1 ? "fumble" : "";
+  return (
+    <li className={`roll-row ${highlight ? "mine" : ""}`}>
+      <div className="roll-main">
+        <strong>{roll.actorName}</strong>
+        <span>
+          {roll.note} · {roll.dice}
+        </span>
+      </div>
+      <div className="roll-side">
+        <span className={`roll-total ${flag}`}>{roll.total}</span>
+        <time dateTime={roll.timestamp}>{formatTime(roll.timestamp)}</time>
+      </div>
+    </li>
+  );
+}
+
+// --- Screens ---------------------------------------------------------------------------
+
+function Splash({ error, onRetry }: { error: string | null; onRetry: () => void }) {
+  return (
+    <div className="splash">
+      <div className="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24">
+          <path d="M12 2.5 20.5 7.4v9.2L12 21.5 3.5 16.6V7.4Z" />
+          <path d="M12 2.5v6.3m0 0L3.5 16.6M12 8.8l8.5 7.8M3.5 16.6h17" />
+        </svg>
+      </div>
+      <p className="eyebrow">Black Dice Engine</p>
+      {error ? (
+        <>
+          <h1>Table not found</h1>
+          <p className="muted">{error}</p>
+          <button type="button" className="btn primary" onClick={onRetry}>
+            Try again
           </button>
-        </div>
+        </>
+      ) : (
+        <>
+          <h1>Joining the table…</h1>
+          <span className="spinner" aria-label="Loading" />
+        </>
+      )}
+    </div>
+  );
+}
+
+function JoinScreen({
+  snapshot,
+  clientId,
+  playerLabel,
+  onLabelChange,
+  claimingId,
+  onClaim
+}: {
+  snapshot: SessionSnapshot;
+  clientId: string;
+  playerLabel: string;
+  onLabelChange: (value: string) => void;
+  claimingId: string | null;
+  onClaim: (character: Character) => void;
+}) {
+  const nameMissing = !playerLabel.trim();
+  return (
+    <div className="join">
+      <header className="join-hero">
+        <p className="eyebrow">You're joining</p>
+        <h1>{snapshot.campaignTitle}</h1>
+        <p className="muted">{snapshot.currentScene}</p>
+        <span className="pin-chip">Table PIN · {snapshot.tablePin}</span>
+      </header>
+
+      <section className="join-step">
+        <label className="step-label" htmlFor="player-name">
+          <span className="step-num">1</span> Your name
+        </label>
+        <input
+          id="player-name"
+          className="text-input"
+          value={playerLabel}
+          autoComplete="given-name"
+          enterKeyHint="done"
+          placeholder="What should the table call you?"
+          maxLength={32}
+          onChange={(event) => onLabelChange(event.target.value)}
+        />
       </section>
 
-      <section className="companion-stack">
-        <article className="panel">
-          <p className="eyebrow">Campaign</p>
-          <h2>{snapshot?.campaignTitle ?? "Loading..."}</h2>
-          <p>{snapshot?.currentScene ?? "Waiting for session snapshot..."}</p>
-          <p className="table-pin">Table PIN {snapshot?.tablePin ?? "----"}</p>
-        </article>
-
-        <article className="panel">
-          <label className="label">Your name</label>
-          <input value={playerLabel} onChange={(e) => { setPlayerLabel(e.target.value); try { localStorage.setItem("bde-player-label", e.target.value); } catch {} }} style={{ fontSize: "1rem", padding: "8px" }} />
-
-          {!claimedCharacter ? (
-            <div style={{ marginTop: 10 }}>
-              <p className="eyebrow" style={{ marginBottom: 8 }}>Tap your character:</p>
-              {snapshot?.party.map((c) => (
+      <section className="join-step">
+        <p className="step-label">
+          <span className="step-num">2</span> Pick your character
+        </p>
+        <ul className="claim-list">
+          {snapshot.party.map((character) => {
+            const takenBy = character.claimedByClientId && character.claimedByClientId !== clientId;
+            const busy = claimingId === character.id;
+            return (
+              <li key={character.id}>
                 <button
-                  key={c.id}
-                  onClick={() => { setSelectedCharacterId(c.id); void (async () => { setClaimBusy(true); try { const r = await fetch("/api/claim-character", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId, characterId: c.id, playerLabel, requestId: `claim-${Date.now()}` }) }); if (r.ok) { const j = await r.json(); setSnapshot(j.sessionSnapshot); } } finally { setClaimBusy(false); } })(); }}
-                  disabled={!!(c.claimedByClientId && c.claimedByClientId !== clientId) || claimBusy}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 10, width: "100%", padding: 10, marginBottom: 8,
-                    border: "1px solid #4a3a2a", borderRadius: 8, background: c.claimedByClientId === clientId ? "rgba(60,120,60,0.3)" : "rgba(30,20,10,0.6)",
-                    color: c.claimedByClientId && c.claimedByClientId !== clientId ? "#666" : "#f0dcaf",
-                    cursor: c.claimedByClientId && c.claimedByClientId !== clientId ? "default" : "pointer",
-                    fontSize: "0.95rem"
-                  }}
                   type="button"
+                  className={`claim-card ${takenBy ? "taken" : ""}`}
+                  disabled={!!takenBy || !!claimingId}
+                  aria-disabled={nameMissing || undefined}
+                  onClick={() => onClaim(character)}
                 >
-                  {c.image ? <img src={c.image} alt="" style={{ width: 48, height: 48, borderRadius: 6, objectFit: "cover" }} /> : null}
-                  <div style={{ flex: 1, textAlign: "left" }}>
-                    <strong>{c.name}</strong>
-                    <div style={{ fontSize: "0.75rem", color: "#8a7a4a" }}>{c.classLabel} · HP {c.hp.current}/{c.hp.max} · AC {c.armorClass}</div>
-                  </div>
-                  {c.claimedByClientId && c.claimedByClientId !== clientId ? <span style={{ fontSize: "0.7rem", color: "#e44" }}>{c.claimedByLabel || "taken"}</span> : c.claimedByClientId === clientId ? <span style={{ color: "#7bc47f" }}>✓</span> : <span style={{ color: "#c9a45f", fontSize: "0.8rem" }}>CLAIM</span>}
+                  <Portrait character={character} size={64} />
+                  <span className="claim-body">
+                    <strong>{character.name}</strong>
+                    <span className="muted">{character.classLabel}</span>
+                    <span className="claim-stats">
+                      <span>HP {character.hp.max}</span>
+                      <span>AC {character.armorClass}</span>
+                    </span>
+                  </span>
+                  <span className="claim-cta">
+                    {takenBy ? (character.claimedByLabel || "Taken") : busy ? "Joining…" : "Play"}
+                  </span>
                 </button>
-              ))}
-            </div>
-          ) : (
-            <div>
-              <div style={{ background: "rgba(60,120,60,0.2)", border: "1px solid #3a6b3a", borderRadius: 8, padding: 12, marginTop: 10, marginBottom: 10, textAlign: "center" }}>
-                <strong style={{ color: "#7bc47f", fontSize: "1.1rem" }}>{claimedCharacter.name}</strong>
-                <div style={{ fontSize: "0.8rem", color: "#8a8a6a" }}>{claimedCharacter.classLabel} · HP {claimedCharacter.hp.current}/{claimedCharacter.hp.max} · AC {claimedCharacter.armorClass}</div>
-              </div>
-              {claimedCharacter.image ? <img src={claimedCharacter.image} alt="" style={{ width: "100%", maxHeight: 200, objectFit: "cover", borderRadius: 8, marginBottom: 10 }} /> : null}
-            </div>
-          )}
-        </article>
-
-        {diceAnimation ? (
-          <DiceOverlay roll={diceAnimation} onClose={() => setDiceAnimation(null)} />
-        ) : null}
-
-        <article className="panel">
-          {snapshot?.currentAction ? (
-            <div style={{ marginBottom: 10 }}>
-              <div style={{ background: "rgba(40,30,10,0.8)", border: "1px solid #5a4a2a", borderRadius: 8, padding: "10px 12px" }}>
-                <strong style={{ color: "#c9a45f" }}>{snapshot.currentAction.type.toUpperCase()}</strong>
-                <p style={{ fontSize: "0.85rem", color: "#f0dcaf", margin: "4px 0 0" }}>{snapshot.currentAction.description}</p>
-                {snapshot.currentAction.dc !== null ? <p style={{ fontSize: "0.75rem", color: "#8a7a4a" }}>DC {snapshot.currentAction.dc}</p> : null}
-              </div>
-            </div>
-          ) : (
-            <p style={{ color: "#8a7a4a", fontSize: "0.85rem", fontStyle: "italic", marginBottom: 8 }}>Waiting for the GM to set an action...</p>
-          )}
-
-          <button
-            className="big-roll-btn"
-            disabled={!claimedCharacter || submitting}
-            onClick={(e) => { e.preventDefault(); if (snapshot?.currentAction && claimedCharacter) {
-              const ability = snapshot.currentAction.ability;
-              const abiModMap: Record<string, string> = { str: "str", dex: "dex", con: "con", int: "int", wis: "wis", cha: "cha" };
-              const abiKey = abiModMap[ability] || "wis";
-              const statVal = claimedCharacter.stats?.[abiKey as keyof typeof claimedCharacter.stats] ?? 10;
-              const mod = Math.floor(((statVal as number) - 10) / 2);
-              void submitRollWith(dice, snapshot.currentAction.type, mod);
-            }}}
-            type="button"
-            style={{ width: "100%", padding: "18px", fontSize: "1.4rem", fontWeight: "bold" }}
-          >
-            {submitting ? "Rolling..." : snapshot?.currentAction ? `ROLL d20 + ${((): number => {
-              if (!claimedCharacter?.stats || !snapshot?.currentAction) return 0;
-              const ability = snapshot.currentAction.ability;
-              const map: Record<string, keyof typeof claimedCharacter.stats> = { str: "str", dex: "dex", con: "con", int: "int", wis: "wis", cha: "cha" };
-              const key = map[ability] || "wis";
-              return Math.floor((Number(claimedCharacter.stats![key]) - 10) / 2);
-            })()}` : "WAITING..."}
-          </button>
-        </article>
-
-        <article className="panel">
-          <div className="panel-header">
-            <h2>Recent table rolls</h2>
-          </div>
-          <div className="roll-log">
-            {snapshot?.rollLog.map((roll) => (
-              <div className="roll-row" key={roll.id}>
-                <div>
-                  <strong>{roll.actorName}</strong>
-                  <p>{roll.note} — {roll.dice}</p>
-                </div>
-                <div className="roll-values">
-                  <strong>{roll.total}</strong>
-                  <small>{formatTime(roll.timestamp)}</small>
-                </div>
-              </div>
-            )) ?? <p>Waiting for live rolls.</p>}
-          </div>
-        </article>
-
-        {snapshot?.memoryEntries?.filter((e) => e.visibility === "player_visible").length ? (
-          <article className="panel">
-            <div className="panel-header">
-              <h2>Session memory</h2>
-            </div>
-            <div className="roll-log">
-              {snapshot.memoryEntries
-                .filter((e) => e.visibility === "player_visible")
-                .map((entry) => (
-                  <div className="roll-row" key={entry.id}>
-                    <div>
-                      <span style={{ color: "#c9a45f", fontSize: "0.7rem", textTransform: "uppercase" }}>
-                        {entry.kind}
-                      </span>
-                      <p>{entry.summary}</p>
-                    </div>
-                  </div>
-                ))}
-            </div>
-          </article>
-        ) : null}
+              </li>
+            );
+          })}
+        </ul>
+        {nameMissing ? <p className="hint">Add your name above, then tap a character.</p> : null}
       </section>
-    </main>
+    </div>
+  );
+}
+
+function TopBar({
+  character,
+  connection,
+  actionPending,
+  onActionTap
+}: {
+  character: Character;
+  connection: ConnectionState;
+  actionPending: boolean;
+  onActionTap: () => void;
+}) {
+  return (
+    <header className="topbar">
+      <div className="topbar-row">
+        <Portrait character={character} size={40} />
+        <div className="topbar-id">
+          <strong>{character.name}</strong>
+          <span>{character.classLabel}</span>
+        </div>
+        <div className="topbar-vitals">
+          <span className="vital">
+            <small>HP</small>
+            <b className={`hp-text ${hpTone(character.hp)}`}>
+              {character.hp.current}
+              <i>/{character.hp.max}</i>
+            </b>
+          </span>
+          <span className="vital">
+            <small>AC</small>
+            <b>{character.armorClass}</b>
+          </span>
+        </div>
+        <span
+          className={`conn-dot ${connection}`}
+          role="status"
+          aria-label={connection === "connected" ? "Connected to table" : "Reconnecting to table"}
+          title={connection}
+        />
+      </div>
+      <HpBar hp={character.hp} />
+      {connection !== "connected" ? (
+        <div className="conn-banner" role="status">
+          <span className="spinner small" aria-hidden="true" />
+          {connection === "connecting" ? "Connecting to the table…" : "Connection lost — reconnecting…"}
+        </div>
+      ) : null}
+      {actionPending ? (
+        <button type="button" className="action-pill" onClick={onActionTap}>
+          The GM is asking for a roll <span aria-hidden="true">→</span>
+        </button>
+      ) : null}
+    </header>
+  );
+}
+
+function PlayTab({
+  snapshot,
+  character,
+  action,
+  actionPending,
+  rollMode,
+  onRollMode,
+  rolling,
+  onRoll
+}: {
+  snapshot: SessionSnapshot;
+  character: Character;
+  action: CurrentAction | null;
+  actionPending: boolean;
+  rollMode: RollMode;
+  onRollMode: (mode: RollMode) => void;
+  rolling: boolean;
+  onRoll: (intent: RollIntent) => void;
+}) {
+  const [count, setCount] = useState(1);
+  const myRolls = snapshot.rollLog.filter((r) => r.actorId === character.id).slice(0, 3);
+  const actionMod = action ? characterAbilityMod(character, action.ability) : 0;
+  const answered = action && !actionPending ? myRolls.find((r) => r.note === action.type) : undefined;
+
+  return (
+    <div className="stack">
+      <section className="scene-card">
+        <p className="eyebrow">Current scene</p>
+        <h1>{snapshot.currentScene}</h1>
+        <p className="muted">{snapshot.campaignTitle}</p>
+      </section>
+
+      {action ? (
+        <section className={`action-card ${actionPending ? "live" : "done"}`} aria-live="polite">
+          <p className="eyebrow">{actionPending ? "The GM calls for" : "You answered"}</p>
+          <h2>{action.type}</h2>
+          {action.description && action.description !== action.type ? <p>{action.description}</p> : null}
+          <div className="chip-row">
+            <span className="chip">{abilityName(action.ability)}</span>
+            {action.dc !== null ? <span className="chip">DC {action.dc}</span> : null}
+          </div>
+          {actionPending ? (
+            <>
+              <ModeSwitch value={rollMode} onChange={onRollMode} />
+              <button
+                type="button"
+                className="btn primary roll-cta"
+                disabled={rolling}
+                onClick={() =>
+                  onRoll({ dice: "1d20", modifier: actionMod, note: action.type, dc: action.dc })
+                }
+              >
+                {rolling ? (
+                  "Rolling…"
+                ) : (
+                  <>
+                    Roll d20 <span className="roll-cta-mod">{formatMod(actionMod)}</span>
+                  </>
+                )}
+              </button>
+            </>
+          ) : (
+            <p className="answered">
+              {answered ? (
+                <>
+                  You rolled <b>{answered.total}</b>
+                  {action.dc !== null ? (answered.total >= action.dc ? " — that meets the DC." : " — short of the DC.") : "."}{" "}
+                </>
+              ) : null}
+              Waiting for the rest of the table.
+            </p>
+          )}
+        </section>
+      ) : (
+        <section className="waiting-card">
+          <span className="waiting-glyph" aria-hidden="true" />
+          <div>
+            <h2>Listen to the GM</h2>
+            <p className="muted">When a roll is needed it will appear here and your phone will buzz.</p>
+          </div>
+        </section>
+      )}
+
+      <section className="card">
+        <SectionHeader title="Free roll" hint="no modifiers" />
+        <div className="count-row" role="radiogroup" aria-label="Number of dice">
+          {[1, 2, 3, 4].map((n) => (
+            <button
+              key={n}
+              type="button"
+              role="radio"
+              aria-checked={count === n}
+              className={count === n ? "active" : ""}
+              onClick={() => setCount(n)}
+            >
+              ×{n}
+            </button>
+          ))}
+        </div>
+        <div className="dice-grid">
+          {[4, 6, 8, 10, 12, 20, 100].map((sides) => (
+            <button
+              key={sides}
+              type="button"
+              className="die-btn"
+              disabled={rolling}
+              onClick={() => onRoll({ dice: `${count}d${sides}`, modifier: 0, note: "Free roll" })}
+            >
+              <span className="die-count">{count > 1 ? `${count}` : ""}</span>d{sides}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {myRolls.length ? (
+        <section className="card">
+          <SectionHeader title="Your last rolls" />
+          <ul className="roll-list">
+            {myRolls.map((r) => (
+              <RollRow key={r.id} roll={r} />
+            ))}
+          </ul>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+function SheetTab({
+  character,
+  rollMode,
+  onRollMode,
+  rolling,
+  onRoll,
+  soundOn,
+  onToggleSound,
+  onRelease
+}: {
+  character: Character;
+  rollMode: RollMode;
+  onRollMode: (mode: RollMode) => void;
+  rolling: boolean;
+  onRoll: (intent: RollIntent) => void;
+  soundOn: boolean;
+  onToggleSound: () => void;
+  onRelease: () => void;
+}) {
+  const [confirmRelease, setConfirmRelease] = useState(false);
+  const heroImage = useImageOk(character.image);
+  const skills = useMemo(
+    () => (character.stats?.skills ?? []).map((skill) => ({ id: skill, ...skillInfo(character, skill) })),
+    [character]
+  );
+
+  useEffect(() => {
+    if (!confirmRelease) return;
+    const timer = window.setTimeout(() => setConfirmRelease(false), 4000);
+    return () => window.clearTimeout(timer);
+  }, [confirmRelease]);
+
+  return (
+    <div className="stack">
+      <section className="sheet-hero">
+        {heroImage.ok ? (
+          <img src={character.image!} alt={`Portrait of ${character.name}`} onError={heroImage.onError} />
+        ) : null}
+        <div className="sheet-hero-text">
+          <h1>{character.name}</h1>
+          <p>{character.classLabel}</p>
+        </div>
+      </section>
+
+      <section className="vitals">
+        <div className="vital-box hp">
+          <small>Hit points</small>
+          <b className={`hp-text ${hpTone(character.hp)}`}>
+            {character.hp.current}
+            <i> / {character.hp.max}</i>
+          </b>
+          <HpBar hp={character.hp} />
+        </div>
+        <div className="vital-box">
+          <small>Armor</small>
+          <b>{character.armorClass}</b>
+        </div>
+        <div className="vital-box">
+          <small>Init</small>
+          <b>{character.initiative ?? "—"}</b>
+        </div>
+        <div className="vital-box">
+          <small>Prof</small>
+          <b>{formatMod(proficiencyBonus(character))}</b>
+        </div>
+      </section>
+
+      <section className="card">
+        <SectionHeader title="Conditions" />
+        {character.conditions.length ? (
+          <div className="chip-row">
+            {character.conditions.map((condition) => (
+              <span key={condition} className="chip warn">
+                {condition}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p className="muted small">None — you're in fighting shape.</p>
+        )}
+      </section>
+
+      {character.stats ? (
+        <section className="card">
+          <SectionHeader title="Abilities" hint="tap to roll a check" />
+          <ModeSwitch value={rollMode} onChange={onRollMode} />
+          <div className="ability-grid">
+            {abilities.map((ability) => {
+              const score = character.stats![ability.key];
+              const mod = characterAbilityMod(character, ability.key);
+              return (
+                <button
+                  key={ability.key}
+                  type="button"
+                  className="ability"
+                  disabled={rolling}
+                  aria-label={`Roll ${ability.name} check, ${formatMod(mod)}`}
+                  onClick={() => onRoll({ dice: "1d20", modifier: mod, note: `${ability.name} check` })}
+                >
+                  <small>{ability.short}</small>
+                  <b>{formatMod(mod)}</b>
+                  <span>{score}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {skills.length ? (
+            <>
+              <h3 className="subhead">Proficient skills</h3>
+              <ul className="list">
+                {skills.map((skill) => (
+                  <li key={skill.id}>
+                    <button
+                      type="button"
+                      className="list-row tappable"
+                      disabled={rolling}
+                      onClick={() => onRoll({ dice: "1d20", modifier: skill.modifier, note: skill.label })}
+                    >
+                      <span>
+                        {skill.label} <small className="muted">{skill.ability.toUpperCase()}</small>
+                      </span>
+                      <b>{formatMod(skill.modifier)}</b>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </section>
+      ) : null}
+
+      {character.resources.length ? (
+        <section className="card">
+          <SectionHeader title="Resources" />
+          <ul className="list">
+            {character.resources.map((resource) => (
+              <li key={resource.id} className="list-row">
+                <span>{resource.label}</span>
+                {resource.max <= 8 ? (
+                  <span className="pips" aria-label={`${resource.current} of ${resource.max}`}>
+                    {Array.from({ length: resource.max }, (_, i) => (
+                      <i key={i} className={i < resource.current ? "on" : ""} />
+                    ))}
+                  </span>
+                ) : (
+                  <b>
+                    {resource.current}/{resource.max}
+                  </b>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {character.inventory.length ? (
+        <section className="card">
+          <SectionHeader title="Inventory" hint={`${character.inventory.length} items`} />
+          <ul className="list">
+            {character.inventory.map((item) => (
+              <li key={item.id} className="list-row">
+                <span>
+                  {item.name}
+                  {item.detail ? <small className="muted block">{item.detail}</small> : null}
+                </span>
+                {item.quantity > 1 ? <b>×{item.quantity}</b> : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {character.notes.length ? (
+        <section className="card">
+          <SectionHeader title="Character notes" />
+          <ul className="notes">
+            {character.notes.map((note, index) => (
+              <li key={index}>{note}</li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      <section className="card">
+        <SectionHeader title="This device" />
+        <ul className="list">
+          <li className="list-row">
+            <span>Playing as</span>
+            <b>{character.claimedByLabel || "Player"}</b>
+          </li>
+          <li>
+            <button type="button" className="list-row tappable" role="switch" aria-checked={soundOn} onClick={onToggleSound}>
+              <span>Dice sound</span>
+              <span className={`switch ${soundOn ? "on" : ""}`} aria-hidden="true" />
+            </button>
+          </li>
+        </ul>
+        <button
+          type="button"
+          className={`btn ${confirmRelease ? "danger" : "ghost"}`}
+          onClick={() => (confirmRelease ? onRelease() : setConfirmRelease(true))}
+        >
+          {confirmRelease ? "Tap again to leave this character" : "Switch character"}
+        </button>
+      </section>
+    </div>
+  );
+}
+
+function TableTab({ snapshot, clientId }: { snapshot: SessionSnapshot; clientId: string }) {
+  const mineId = snapshot.party.find((c) => c.claimedByClientId === clientId)?.id;
+  return (
+    <div className="stack">
+      <section className="card">
+        <SectionHeader title="Party" hint={`${snapshot.party.filter((c) => c.claimedByClientId).length}/${snapshot.party.length} at the table`} />
+        <ul className="party-list">
+          {snapshot.party.map((member) => (
+            <li key={member.id} className={`party-row ${member.id === mineId ? "mine" : ""}`}>
+              <Portrait character={member} size={44} />
+              <div className="party-body">
+                <div className="party-top">
+                  <strong>{member.name}</strong>
+                  <span className="muted small">
+                    {member.id === mineId ? "You" : member.claimedByLabel || "Open seat"}
+                  </span>
+                </div>
+                <HpBar hp={member.hp} />
+                <div className="party-meta">
+                  <span>
+                    HP {member.hp.current}/{member.hp.max}
+                  </span>
+                  <span>AC {member.armorClass}</span>
+                  {member.initiative !== null ? <span>Init {member.initiative}</span> : null}
+                  {member.conditions.map((condition) => (
+                    <span key={condition} className="chip warn tiny">
+                      {condition}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="card">
+        <SectionHeader title="Roll feed" />
+        {snapshot.rollLog.length ? (
+          <ul className="roll-list">
+            {snapshot.rollLog.map((r) => (
+              <RollRow key={r.id} roll={r} highlight={r.actorId === mineId} />
+            ))}
+          </ul>
+        ) : (
+          <p className="muted small">No rolls yet tonight.</p>
+        )}
+      </section>
+
+      <section className="card subtle">
+        <SectionHeader title="Invite a friend" />
+        <p className="muted small">
+          Join at <span className="mono">{snapshot.joinUrl}</span> with PIN <b className="mono">{snapshot.tablePin}</b>
+        </p>
+      </section>
+    </div>
+  );
+}
+
+function LoreTab({ snapshot }: { snapshot: SessionSnapshot }) {
+  const entries = (snapshot.memoryEntries ?? []).filter((entry) => entry.visibility === "player_visible");
+  const kinds = Array.from(new Set(entries.map((entry) => entry.kind)));
+  const [filter, setFilter] = useState<string>("all");
+  const shown = filter === "all" ? entries : entries.filter((entry) => entry.kind === filter);
+
+  return (
+    <div className="stack">
+      <section className="card">
+        <SectionHeader title="What the party knows" hint={entries.length ? `${entries.length} entries` : undefined} />
+        {kinds.length > 1 ? (
+          <div className="filter-row" role="tablist" aria-label="Filter lore">
+            {["all", ...kinds].map((kind) => (
+              <button
+                key={kind}
+                type="button"
+                role="tab"
+                aria-selected={filter === kind}
+                className={filter === kind ? "active" : ""}
+                onClick={() => setFilter(kind)}
+              >
+                {kind === "all" ? "All" : kind.replace(/_/g, " ")}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {shown.length ? (
+          <ul className="lore-list">
+            {shown.map((entry) => (
+              <li key={entry.id}>
+                <span className="lore-kind">{entry.kind.replace(/_/g, " ")}</span>
+                <p>{entry.summary}</p>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="empty">
+            <p>Nothing recorded yet.</p>
+            <p className="muted small">Discoveries, NPCs and clues the GM shares will collect here.</p>
+          </div>
+        )}
+      </section>
+    </div>
   );
 }

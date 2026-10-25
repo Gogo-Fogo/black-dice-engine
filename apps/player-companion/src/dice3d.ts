@@ -7,7 +7,7 @@ const loadingPromises: Record<string, Promise<THREE.Group>> = {};
 
 // Preload the most common dice on page load
 export function preloadDice() {
-  ["./dice/d20_low_003.glb", "./dice/d6_low_003.glb", "./dice/d4_low_003.glb"].forEach(loadModel);
+  ["./dice/d20_low_003.glb", "./dice/d6_low_003.glb", "./dice/d4_low_003.glb"].forEach((path) => loadModel(path).catch(() => {}));
 }
 
 function parseDiceNotation(notation: string): { count: number; sides: number } {
