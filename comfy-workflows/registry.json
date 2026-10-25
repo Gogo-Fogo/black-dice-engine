@@ -5,61 +5,82 @@
       "id": "scene-reveal",
       "type": "image",
       "label": "Scene Reveal",
-      "description": "Fantasy scene illustration using SDXL Lightning (4 steps, ~7GB, fast and VRAM-safe).",
+      "description": "Local FLUX.2 Klein distilled 4B scene, four steps.",
       "runWhen": "background",
       "visibility": "player_visible",
       "promptTemplateId": "scene-reveal",
-      "workflowPath": "scene-sdxl-lightning.json",
+      "workflowPath": "scene-flux2-klein.json",
       "outputCategory": "scenes",
-      "tags": ["scene", "location", "fantasy"]
+      "tags": [
+        "scene",
+        "location",
+        "fantasy"
+      ]
     },
     {
       "id": "portrait-variant",
       "type": "image",
       "label": "Portrait Variant",
-      "description": "Character portrait using SDXL Lightning (4 steps, ~7GB, fast and VRAM-safe).",
+      "description": "Local FLUX.2 Klein distilled 4B portrait, four steps.",
       "runWhen": "manual",
       "visibility": "gm_only",
       "promptTemplateId": "portrait-variant",
-      "workflowPath": "portrait-sdxl-lightning.json",
+      "workflowPath": "portrait-flux2-klein.json",
       "outputCategory": "portraits",
-      "tags": ["portrait", "character-creation", "visual-canon"]
+      "tags": [
+        "portrait",
+        "character-creation",
+        "visual-canon"
+      ]
     },
     {
       "id": "character-visual-canon",
-      "type": "image",
+      "type": "visual_canon",
       "label": "Character Visual Canon",
-      "description": "Character reference portrait using SDXL Lightning (4 steps, fast). Use detailed descriptions for consistency.",
+      "description": "One portrait conditioned on the approved reference using local FLUX.2 Klein distilled 4B.",
       "runWhen": "manual",
       "visibility": "gm_only",
       "promptTemplateId": "character-visual-canon",
-      "workflowPath": "portrait-sdxl-lightning.json",
+      "workflowPath": "character-consistency-flux2-klein.json",
       "outputCategory": "visual-canon",
-      "tags": ["character", "visual-canon", "ipadapter", "consistent"]
+      "tags": [
+        "character",
+        "visual-canon",
+        "flux2",
+        "consistent"
+      ]
     },
     {
       "id": "location-study",
       "type": "image",
       "label": "Location Study",
-      "description": "Environmental still focused on layout, landmarks, and atmosphere using SDXL Lightning.",
+      "description": "Local FLUX.2 Klein distilled 4B scene, four steps.",
       "runWhen": "background",
       "visibility": "player_visible",
       "promptTemplateId": "location-study",
-      "workflowPath": "scene-sdxl-lightning.json",
+      "workflowPath": "scene-flux2-klein.json",
       "outputCategory": "locations",
-      "tags": ["location", "study", "environment"]
+      "tags": [
+        "location",
+        "study",
+        "environment"
+      ]
     },
     {
       "id": "item-clue",
       "type": "image",
       "label": "Item Or Clue",
-      "description": "Close-up prop or clue shot using SDXL Lightning.",
+      "description": "Local FLUX.2 Klein distilled 4B scene, four steps.",
       "runWhen": "background",
       "visibility": "player_visible",
       "promptTemplateId": "item-clue",
-      "workflowPath": "scene-sdxl-lightning.json",
+      "workflowPath": "scene-flux2-klein.json",
       "outputCategory": "items",
-      "tags": ["item", "clue", "prop"]
+      "tags": [
+        "item",
+        "clue",
+        "prop"
+      ]
     },
     {
       "id": "cinematic-boss-intro",
@@ -71,7 +92,28 @@
       "promptTemplateId": "boss-intro",
       "workflowPath": "PLACEHOLDER.txt",
       "outputCategory": "cinematics",
-      "tags": ["boss", "cinematic", "video"]
+      "tags": [
+        "boss",
+        "cinematic",
+        "video"
+      ]
+    },
+    {
+      "id": "character-scene",
+      "type": "image",
+      "label": "Character in campaign scene",
+      "description": "Campaign scene conditioned on one approved reference using local FLUX.2 Klein distilled 4B.",
+      "runWhen": "manual",
+      "visibility": "gm_only",
+      "promptTemplateId": "character-visual-canon",
+      "workflowPath": "character-scene-flux2-klein.json",
+      "outputCategory": "scenes",
+      "tags": [
+        "character",
+        "visual-canon",
+        "flux2",
+        "consistent"
+      ]
     }
   ]
 }

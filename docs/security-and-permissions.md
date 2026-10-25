@@ -44,12 +44,15 @@ Never commit or expose:
 - Generated private images or videos.
 - Player personal information.
 
-## Future Hardening
+## Implemented Local Session Boundary
 
-- Session tokens for player clients.
+The game server now issues host, player and read-only display capabilities; role declarations no longer authenticate a request. See [local session access](local-session-access.md) for joining, credential storage, resume/revoke/expiry, host recovery, projections, verification and remaining limits. The default bind is loopback. Tests cover actual response/frame filtering, not only UI visibility.
+
+## Remaining Hardening
+
 - Explicit host allowlist for LAN binding.
 - Read-only demo mode.
 - Redaction tools for logs and exports.
 - Local backup and restore workflows.
-- Connection heartbeat and reconnect tokens for player clients.
+- Review async/legacy adapter mutations outside the covered durable command boundary; synchronous table/Party commands already commit state/outcomes/receipts atomically.
 - Player-safe error messages with private details kept in local logs.

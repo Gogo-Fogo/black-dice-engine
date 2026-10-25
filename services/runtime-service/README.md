@@ -1,16 +1,7 @@
-# Runtime Service
+# Runtime service
 
-Future service for health checks, resource awareness, reconnect state, backup status, and graceful degradation.
+This optional Node service exposes health/runtime diagnostics. It does not start external models or own the game database.
 
-Planned responsibilities:
+Backup endpoints now delegate to the running game server with the caller's Bearer credential: `POST /api/backup`, `GET /api/backups`, and `POST /api/backups/:backupId/validate`. The database owner uses SQLite online backup, not a raw copy of the main file. Missing/invalid credentials fail; player credentials cannot create, list or validate backups. Runtime health no longer returns database/backup paths.
 
-- expose `/health` and runtime status data
-- track service availability for game server, dice, state, memory, LLM, ComfyUI, audio, and import tools
-- report queue depth and resource pressure
-- prevent heavy jobs from blocking live play
-- support client heartbeat and reconnect status
-- record error events with player-safe visibility
-- trigger or report manual/session backup status
-- drive the GM dashboard status strip
-
-The runtime service should help the table keep playing when a non-critical subsystem fails.
+The old unauthenticated five-second startup copy is removed. Backups are currently explicit host operations; automatic session start/end policy remains unfinished under CAP-10. See [backup operations and restore limits](../../docs/backups.md). Resource telemetry and some diagnostic contracts also remain incomplete; configured URLs are not readiness evidence.

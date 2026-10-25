@@ -1,45 +1,17 @@
-import { config } from "dotenv";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-const currentDir = dirname(fileURLToPath(import.meta.url));
-config({ path: join(currentDir, "../../../../.env") });
+import type { AudioTrack, PlaybackState } from "../../../packages/contracts/dist/index.js";
+import { readServiceConfig } from "../../../packages/runtime-config/dist/index.js";
+import { basename, dirname, extname, join, relative, sep } from "node:path";
 
 import cors from "cors";
 import express from "express";
 import { createServer } from "node:http";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, extname, join, relative, sep } from "node:path";
-import { fileURLToPath } from "node:url";
 
-const host = process.env.BDE_HOST ?? "0.0.0.0";
-const port = Number(process.env.BDE_AUDIO_SERVICE_PORT ?? 4321);
-const audioDir = process.env.BDE_AUDIO_DIR?.trim() || "";
+const { host, port, audioDir } = readServiceConfig("audio");
 
 const audioExtensions = new Set([".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac", ".webm", ".opus"]);
 
-type AudioTrackKind = "music" | "ambience" | "stinger" | "unknown";
-
-type AudioTrack = {
-  id: string;
-  filename: string;
-  relativePath: string;
-  localPath: string;
-  urlPath: string;
-  kind: AudioTrackKind;
-  tags: string[];
-  durationSeconds?: number;
-  notes?: string;
-};
-
-type PlaybackState = {
-  status: "idle" | "playing" | "paused";
-  currentTrackId: string | null;
-  volume: number;
-  muted: boolean;
-  loop: boolean;
-  startedAt: string | null;
-  pausedAt: string | null;
-};
+type AudioTrackKind = AudioTrack["kind"];
 
 function inferKindFromPath(pathLower: string): AudioTrackKind {
   if (pathLower.includes("stinger")) return "stinger";
@@ -61,7 +33,7 @@ function decodeTrackId(id: string) {
 }
 
 function scanLibrary(root: string): AudioTrack[] {
-  if (!existsSync(root)) {
+  if (!root || !existsSync(root)) {
     return [];
   }
 
@@ -299,7 +271,8 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
 });
 
 server.listen(port, host, () => {
-  console.log(`[audio-service] listening on http://${host}:${port}`);
+  const address = server.address();
+  console.log(`[audio-service] listening on http://${host}:${typeof address === "object" && address ? address.port : port}`);
   console.log(`[audio-service] library root: ${audioDir || "(not configured)"}`);
   console.log(`[audio-service] tracks loaded: ${library.length}`);
 });

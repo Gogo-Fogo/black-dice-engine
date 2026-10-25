@@ -1,0 +1,76 @@
+# Claude handoff — October 25, 2026
+
+Read `AGENTS.md` first, then this file. This handoff covers the accumulated Party reliability/refactor work, incoming Mac feature adaptations, campaign continuity, character creation and local AI/media upgrades. Historical check counts in other reports describe their own checkpoints; the latest pre-publication source suite is 182 tests.
+
+## Current product and boundaries
+
+- Party Mode is a complete prepared-content host/display/phone game with optional AI/media/audio disabled. It has its own database and launcher. Keep it separate from the full campaign profile.
+- Full TTRPG uses `/host/?mode=ttrpg` and `/player/?mode=ttrpg`. The table Stage is `/host/?mode=ttrpg&view=stage`, with a separate spectator identity; `/display/` remains the Party display.
+- Host, spectator and player sessions have server-checked credentials. Audience projections, authenticated asset delivery and WebSocket filtering keep GM notes, pending AI drafts, private choices and unapproved portraits out of other clients.
+- Durable command receipts, payload-conflict checks and database transactions preserve retries and acknowledged state across restart. Party rounds, pause/resume and reconnects are covered by isolated tests. Backups, diagnostics and measured resource pressure were added.
+- No TTS is wanted for the event. Automatic dashboard speech is disabled. Existing explicit speech controls are retained; do not enable/download voice models by default.
+
+## What changed
+
+### Structure and startup
+
+Shared browser contracts live in `packages/contracts`; Node-only runtime configuration lives in `packages/runtime-config`. Apps use extracted hooks/panels; the server uses focused session, command, projection, state, media and campaign modules. Database imports are safe until explicitly opened. Services emit runnable JS with NodeNext paths. Root lint/test prerequisites build the shared packages first.
+
+Use `scripts/party-launch.mjs` / `start-party.bat` for Party, and `scripts/session-launch.mjs` / `start-session.bat` for full sessions. Optional external runtimes are explicit. Five obsolete machine-specific rewriting/download/generation helpers were removed after caller review; see `script-retirement.md`. Skills and their licenses/source notices are in `.agents/skills/`.
+
+### Incoming branches
+
+The phone tab redesign (`629722f`, PR #1), dashboard/TV redesign (`40d5b64`, PR #2), Character Forge (`f30d4c9`) and Dice Styles (`7499bfa`) were manually adapted into the refactored modules before publication. The original branch tips and the two pre-squash UI branches are reconciled in Git history with a deliberate `ours` merge: the working implementation already contains their intended features, while their old unauthenticated route calls and monolithic components must not replace it. This is not a claim that the incoming files were copied verbatim. Archive tags retain feature branch history after integration.
+
+Phone tabs are Play/Sheet/Table/Lore. Dashboard tabs are Stage/Run/Media/Audio/System. Forge has bounded authenticated drafts, three proposals, rerolls, optional flavor and portraits, transactional selection and automatic claim. Six cosmetic dice styles and a practice/calibration lab do not change authoritative server totals. Browser-only imports remain lazy.
+
+### Campaign continuity and DeepSeek
+
+Actual roll outcomes use the real DC; unknown difficulty stays unresolved. Group context includes all participants. Audience-filtered memory, attempted actions and GM-approved consequences reach AI context. A deterministic progress ledger records objectives, clues, obstacles, milestones and scene completion; completed work is retained across restart. The GM approves authoritative effects; the model cannot freely mutate state.
+
+Director instructions distinguish offered routes from traversed routes, a stalled scene from a closed scene, and an earned payoff from an extra mandatory gate. These controls reduce loops but do not prove reliability over hours of play.
+
+The purchased DeepSeek provider remains active in this PC's ignored configuration. Official DeepSeek requests disable thinking for short interactive replies; empty/token-truncated completions fail with sanitized errors. There are no automatic paid retries/fallbacks. See `deepseek-campaign-live-check.md` for synthetic scenario evidence and limitations.
+
+**Budget:** user authorized $0.50 maximum for this test session. The shared live harness has used all 16 allowed calls: 15 campaign checks plus one Forge flavor request. Conservative usage estimate is $0.0134742; this is not an account invoice. Do not reset reservations or make further paid calls without new authorization. `npm test` uses synthetic providers and does not need API keys.
+
+### Character artwork and mechanics
+
+Only normalized, bounded PNG portraits can become approved references. GM approval controls sharing with companions, other players and Stage. Reference metadata/hash/seed feed later generation. Tests cover permission denial, exact approved bytes, persistence and replay.
+
+Forge's choose endpoint now accepts a bounded 750 KB JSON envelope before Express's default parser; real portraits previously exceeded the default 100 KB body limit. Full-caster and half-caster slots, warlock pact slots, fighter Action Surge availability and hide armor AC were corrected. Existing characters are not rewritten.
+
+These are **quick-start characters**, not complete 5e builds. Spell selection, subclasses/backgrounds, attack entries and level-up ability choices still require work/GM review. The synthetic table was level five; its saved sheets correctly use that level even though the independent flavor proposal started at level three.
+
+### Local models and image pipeline
+
+Installed official portable Ollama 0.40.11 without replacing the old desktop installation. Installed Qwen3.5 4B and 9B alongside existing models. Added FLUX.2 Klein distilled 4B using existing Qwen3 text encoder and Flux2 VAE; the existing ComfyUI 0.31.0 core supports this workflow. No Python/npm dependency installation was performed. No old models were deleted.
+
+Forge and the workflow registry now use committed Flux2 templates instead of requesting an absent SDXL checkpoint. Reference workflows use `VAEEncode -> ReferenceLatent -> BasicGuider`. Three real 768x1024 portraits completed in 32.3 seconds total including first load. A real reference scene also completed through the router. Likeness and genre details can drift; this is reference conditioning, not guaranteed identity preservation.
+
+An explicit `BDE_DIRECTOR_MODE_MODEL` now actually selects loopback Ollama, with thinking off and unload-after-reply to release GPU memory. Failure does not fall back to paid inference. **Both Qwen variants failed the manual continuity/genre gate** in two synthetic scenarios: they suggested unnecessary access obstacles or unrelated sci-fi complications. The 9B replies took 4.9/4.3 seconds. Leave the director override empty so DeepSeek remains active. A local call with image models resident timed out; shared-GPU scheduling remains a concern.
+
+`scripts/start-local-ai.ps1` starts hidden loopback runtimes from explicit existing paths, preserves occupied ports and downloads nothing. See `local-ai-upgrade-2026-10-25.md` for versions, hashes, startup and evidence. Local models/runtime executables and generated examples are deliberately excluded from Git; a Mac/other PC must configure its own existing tools. Do not assume these Windows paths or models exist there.
+
+## Verification and rollout limits
+
+- Latest implementation checks: 182/182 source tests; 33 affected tests against emitted modules; game-server and Comfy-router lint/build. The publication checkpoint also runs root workspace lint/build/test after history reconciliation; record any different result below.
+- Real generation was performed locally with original synthetic characters. Their flavor used one real DeepSeek call and was then replayed for authenticated HTTP/persistence checks. Three images were saved, approved, fetched through spectator credentials and preserved across restart.
+- Local-only outputs: ignored `tmp/character-creation-results/sheets.html`, `sheets.json`, three portraits and `reference-scene.png`. HTML renders the actual sheet component statically; it is not an interactive browser test. These artifacts will not appear on GitHub.
+- Browser automation is disabled in this Work environment. Actual phone gestures, PNG canvas normalization, responsive layouts, WebGL dice, cellular access and TV/HDMI still need a physical-device smoke test. Earlier Party layout/network checks do not establish the new campaign UI.
+- Existing live Party process and approved temporary Cloudflare tunnel were preserved. Changes are not hot-deployed into that process. Its profile deliberately disables campaign inference. Do not start another server on its port or switch databases without a deliberate rollout.
+
+## Recommended next work
+
+1. **Rehearse the full campaign on disposable data and real devices.** Verify host, Stage, two phones, Forge selection/upload/approval, shared portraits, rolls, approved narration/progress and reconnect. Start only explicitly selected services with isolated paths. Do not open real campaign data for a smoke test.
+2. **Complete quick-start character choices.** Implement validated spells, subclasses/backgrounds, attacks and ability progression if needed for play; otherwise label the sheets clearly and have the GM review them.
+3. **Expand continuity checks.** Test long synthetic sessions, competing objectives, failed checks with alternative routes, payoff delivery and scene transitions. Director prompt assembly currently reuses the scene-packet director prompt as part of short guidance; inspect that contract mismatch before trying another local-model switch. Two scenarios are not a broad model benchmark.
+4. **Serialize/schedule GPU work.** Check director/image overlap, cold loads, timeouts and queue cancellation before enabling a local director. The hosted director avoids that GPU competition today.
+5. **Improve reference fidelity.** Evaluate several characters across multiple scenes and group shots; preserve the approval/privacy boundary. Do not promise perfect identity or swap to heavier/newer weights without checking VRAM, runtime compatibility and user authorization.
+6. **Reduce remaining technical debt deliberately.** Large Vite bundle warnings, some compact UI code, broader CI and deferred acceptance items remain. The original backlog is preserved under `archive/overhaul-plan-2026-10-24.md`; use `../PARTY-PLAN.md` for the short event checklist.
+
+## Safe commands and operational rules
+
+Use existing dependencies: `npm run lint`, `npm run build`, `npm test`. Build contracts/config before direct workspace commands. Never run the paid live harness as a normal test. Avoid default full-session startup during verification because it opens the configured/default persistent database.
+
+Do not commit `.env`, host/display keys, databases/backups, tunnel URLs, original attachments, private campaign sources, generated artwork, downloaded models or portable binaries. Preserve the existing local copies; they are not cleanup targets. A public tunnel URL changes on restart and is not part of the handoff. No pushes should include local access sheets or credentials.

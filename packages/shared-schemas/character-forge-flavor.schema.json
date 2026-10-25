@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Character Forge player-visible flavor",
+  "type": "array",
+  "minItems": 3,
+  "maxItems": 3,
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["name", "appearance", "personality", "hook", "visual"],
+    "properties": {
+      "name": {"type": "string", "minLength": 1, "maxLength": 40},
+      "appearance": {"type": "string", "minLength": 1, "maxLength": 220},
+      "personality": {"type": "string", "minLength": 1, "maxLength": 220},
+      "hook": {"type": "string", "minLength": 1, "maxLength": 220},
+      "visual": {"type": "string", "minLength": 1, "maxLength": 240}
+    }
+  }
+}

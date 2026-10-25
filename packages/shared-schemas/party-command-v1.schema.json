@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-dice-engine.local/schemas/party-command-v1.schema.json",
+  "title": "Party Mode command v1",
+  "description": "POST /api/party-game/:action; runtime action/role/phase guards live in party-service.ts and party-game.ts. Fields ready, choice and seconds are allowed only for their matching action.",
+  "type": "object",
+  "required": ["requestId", "_command"],
+  "additionalProperties": false,
+  "properties": {
+    "requestId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$" },
+    "ready": { "type": "boolean" },
+    "choice": { "enum": ["mend", "dare", "guard", "pass"] },
+    "seconds": { "type": "integer", "minimum": 1, "maximum": 300 },
+    "_command": {
+      "type": "object",
+      "required": ["schemaVersion", "sessionId", "mode", "actorId", "roundId", "stage"],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "mode": { "const": "party" },
+        "actorId": { "type": "string", "minLength": 1 },
+        "roundId": { "type": "integer", "minimum": 0, "maximum": 5 },
+        "stage": { "enum": ["lobby", "briefing", "choosing", "locked", "reveal", "resolving", "summary", "ending"] },
+        "expectedRevision": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+      }
+    }
+  }
+}

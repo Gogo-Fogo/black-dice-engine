@@ -1,0 +1,3 @@
+interface:
+  display_name: "BDE Realtime Server"
+  short_description: "Maintain sessions, WebSockets, and SQLite state"

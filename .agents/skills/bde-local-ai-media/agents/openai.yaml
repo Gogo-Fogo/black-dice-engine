@@ -1,0 +1,3 @@
+interface:
+  display_name: "BDE Local AI and Media"
+  short_description: "Maintain local model, media, and audio adapters"

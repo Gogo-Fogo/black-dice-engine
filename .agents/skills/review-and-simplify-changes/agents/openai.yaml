@@ -1,0 +1,3 @@
+interface:
+  display_name: "Review and Simplify Changes"
+  short_description: "Review diffs for reuse, quality, and simplicity"

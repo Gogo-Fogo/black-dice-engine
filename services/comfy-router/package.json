@@ -9,7 +9,9 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "dotenv": "^17.4.2"
+    "dotenv": "^17.4.2",
+    "@black-dice-engine/runtime-config": "0.1.0",
+    "@black-dice-engine/contracts": "0.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.17",

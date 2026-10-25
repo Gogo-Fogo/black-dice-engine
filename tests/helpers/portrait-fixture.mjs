@@ -1,0 +1,7 @@
+import {deflateSync} from 'node:zlib';
+const crc=bytes=>{let n=0xffffffff;for(const b of bytes){n^=b;for(let i=0;i<8;i++)n=(n>>>1)^(n&1?0xedb88320:0);}return(n^0xffffffff)>>>0;};
+const chunk=(type,data)=>{const b=Buffer.alloc(data.length+12);b.writeUInt32BE(data.length);b.write(type,4);data.copy(b,8);b.writeUInt32BE(crc(b.subarray(4,-4)),b.length-4);return b;};
+/** Deterministic noisy PNG exercises uploads larger than the default JSON limit. */
+export function largePng(){const header=Buffer.alloc(13);header.writeUInt32BE(256);header.writeUInt32BE(256,4);header[8]=8;header[9]=6;const rows=Buffer.alloc((256*4+1)*256);let seed=12345;for(let y=0;y<256;y++)for(let x=1;x<=1024;x++){seed=(Math.imul(seed,1664525)+1013904223)>>>0;rows[y*1025+x]=seed>>>24;}return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',header),chunk('IDAT',deflateSync(rows)),chunk('IEND',Buffer.alloc(0))]);}
+/** Original 2×2 flat-color synthetic image; no external image/source material. */
+export function png(color=120,metadata=false){const header=Buffer.alloc(13);header.writeUInt32BE(2);header.writeUInt32BE(2,4);header[8]=8;header[9]=6;return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',header),...(metadata?[chunk('tEXt',Buffer.from('Private metadata\0DEMO_CANARY'))]:[]),chunk('IDAT',deflateSync(Buffer.from([0,...Array(8).fill(color),0,...Array(8).fill(color)]))),chunk('IEND',Buffer.alloc(0))]);}

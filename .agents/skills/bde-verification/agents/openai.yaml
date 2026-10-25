@@ -1,0 +1,3 @@
+interface:
+  display_name: "BDE Change Verification"
+  short_description: "Verify workspace changes using isolated demo data"

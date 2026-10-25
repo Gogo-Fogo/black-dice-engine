@@ -1,473 +1,61 @@
-import { config } from "dotenv";
+import { installForgeRoutes } from "./forge-routes.js";
+import { loadCampaignProgress, installProgressRoutes } from "./campaign-progress.js";
+import { buildAiSceneContext } from "./ai-context.js";
+import {characterOutputPath} from './character-output.js';
+import { createCharacterPortraits, installCharacterPortraitRoutes } from "./character-portraits.js";
+import { createAssetDelivery, assetVisible } from "./asset-delivery.js";
+import { createDiagnostics } from "./diagnostics.js";
+import { createResourceMonitor, resourcePressure } from "./resource-monitor.js";
+import { createBackups, BackupError } from "./backups.js";
+import { createSceneImages } from "./scene-images.js";
+import { createSpeech, SpeechError } from "./speech.js";
+import { createCapabilityHealth, probeService } from "./capability-health.js";
+import { createNarration } from "./narration.js";
+import { installCharacterCreationRoute, installCharacterClaimRoutes } from "./character-routes.js";
+import { createStateEvents } from "./state-events.js";
+import { installStateEventRoutes } from "./state-event-routes.js";
+import { installTableReadRoutes } from "./table-read-routes.js";
+import { sanitizeFilePart } from "./session-summary.js";
+import { createServerWork, createServerShutdown } from "./server-lifecycle.js";
+import { installTtrpgActionRoutes } from "./ttrpg-action-routes.js";
+import { createMediaRouterClient, createMediaJobPoller, MediaRouterError } from "./media-router-client.js";
+import { createAudioCuePlayback, AudioTrackNotFound } from "./audio-cue-playback.js";
+import { parseActionProposal } from "./ai-proposals.js";
+import { isRollRecord, sceneBeatKinds } from "../../../packages/contracts/dist/index.js";
+import type {
+  Character, RollRecord, CurrentAction, ServiceState, RuntimeStatus,
+  TableEventRecord, MemoryEntry, CampaignFact, CampaignBible, CampaignLocation,
+  CampaignNpc, ActiveSceneContext, LocalModelAdapterDraft, DirectorModeAdapterDraft,
+  MediaJob, AssetRecord, CleanupPolicy, CleanupCandidate,
+  CleanupReport, StateEventProposal, ScenePacket, ScenePacketValidation, SessionSnapshot,
+  StateEventRequest, AudioCue
+} from "../../../packages/contracts/dist/index.js";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-const currentDir = dirname(fileURLToPath(import.meta.url));
-config({ path: join(currentDir, "../../../../.env") });
+import { readRuntimeConfig } from "./config.js";
+import { SessionAuthority, SessionError, requestCredential, type LocalCredential } from "./session-authority.js";
+import { identityFor, installSessionAccess, sessionErrorHandler } from "./session-http.js";
+import { projectSnapshot, projectRuntime } from "./projections.js";
+import { CommandStore } from "./command-store.js";
+import { CommandBoundary } from "./command-boundary.js";
+import { PartyService, installPartyRoutes } from "./party-service.js";
+import { projectParty, type PartyState } from "./party-game.js";
 
 import cors from "cors";
 import express from "express";
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { networkInterfaces } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { WebSocketServer } from "ws";
-import {
-  initDb,
-  loadTable,
-  saveTable,
-  loadRollLog,
-  saveRollLog,
-  loadEventLog,
-  saveEventLog,
-  loadMediaJobs,
-  saveMediaJobs,
-  loadMemoryEntries,
-  saveMemoryEntries,
-  loadApprovalQueue,
-  saveApprovalQueue,
-  loadAudioCues,
-  saveAudioCues
-} from "./db.js";
+import { WebSocketServer, type WebSocket } from "ws";
+import { openGameStore } from "./db.js";
 import {
   generateNarration,
   proposeSceneAction,
   generateDirectorGuidance,
-  getAiAdapterStatus,
+  getAiAdapterStatus, probeAiReadiness,
   type SceneContext,
   type RollResultContext
 } from "./ai-adapter.js";
-
-type ServiceState = {
-  name: string;
-  status: "ok" | "degraded" | "offline" | "unknown";
-  latencyMs?: number;
-  message?: string;
-};
-
-type RuntimeStatus = {
-  id: string;
-  status: "ok" | "degraded" | "offline" | "maintenance";
-  mode: "fast" | "scene" | "cinematic" | "prep" | "offline";
-  updatedAt: string;
-  services: ServiceState[];
-  clients: Array<{
-    id: string;
-    role: ClientSession["role"];
-    clientId: string;
-    status: "active" | "stale";
-    connectedAt: string;
-    lastSeenAt: string;
-    playerLabel: string | null;
-    claimedCharacterName: string | null;
-  }>;
-  mediaPressure: {
-    level: "low" | "elevated" | "high";
-    summary: string;
-    reasons: string[];
-    blockedJobTypes: MediaJob["type"][];
-  };
-  warnings: string[];
-};
-
-type Character = {
-  id: string;
-  name: string;
-  classLabel: string;
-  hp: { current: number; max: number };
-  armorClass: number;
-  initiative: number | null;
-  conditions: string[];
-  resources: Array<{
-    id: string;
-    label: string;
-    current: number;
-    max: number;
-  }>;
-  inventory: Array<{
-    id: string;
-    name: string;
-    quantity: number;
-    detail?: string;
-  }>;
-  notes: string[];
-  image?: string | null;
-  stats?: {
-    str: number; dex: number; con: number;
-    int: number; wis: number; cha: number;
-    skills: string[];
-  };
-  claimedByClientId: string | null;
-  claimedByLabel: string | null;
-};
-
-type CurrentAction = {
-  type: string;
-  description: string;
-  ability: string;
-  dc: number | null;
-};
-
-type RollRecord = {
-  id: string;
-  actorId: string;
-  actorName: string;
-  dice: string;
-  modifier: number;
-  rolled: number | number[];
-  total: number;
-  advantage: boolean | null;
-  note: string;
-  timestamp: string;
-};
-
-type TableEventRecord = {
-  id: string;
-  category: "roll" | "state" | "claim" | "memory" | "media";
-  type:
-    | "roll_recorded"
-    | "hp_changed"
-    | "resource_changed"
-    | "condition_added"
-    | "condition_removed"
-    | "character_created"
-    | "character_claimed"
-    | "character_released"
-    | "proposal_approved"
-    | "proposal_rejected"
-    | "memory_entry_created"
-    | "media_job_started"
-    | "media_job_failed"
-    | "media_metadata_recorded"
-    | "initiative_set";
-  actor: {
-    id: string;
-    kind: "gm" | "player" | "system" | "ai_assistant";
-    label: string;
-  };
-  visibility: "gm_only" | "player_visible" | "public_demo";
-  timestamp: string;
-  summary: string;
-  payload: Record<string, unknown>;
-};
-
-type MemoryEntry = {
-  id: string;
-  campaignId: string;
-  sceneId?: string;
-  sessionId?: string;
-  kind:
-    | "campaign_fact"
-    | "scene_summary"
-    | "session_summary"
-    | "npc_fact"
-    | "location_fact"
-    | "faction_change"
-    | "character_development"
-    | "open_thread"
-    | "resolved_thread"
-    | "rules_note";
-  visibility: "gm_only" | "player_visible" | "public_demo";
-  status: "proposed" | "confirmed" | "rejected" | "superseded";
-  summary: string;
-  entities: string[];
-  stateEventIds: string[];
-  assetIds: string[];
-  source: {
-    kind: "session" | "scene" | "campaign_bible" | "import" | "manual" | "ai_summary";
-    label: string;
-    sourcePath?: string;
-    license?: string;
-    pageOrLocation?: string;
-  };
-  createdAt: string;
-};
-
-type CampaignFact = {
-  id: string;
-  text: string;
-  source: string;
-};
-
-type CampaignBible = {
-  id: string;
-  title: string;
-  subtitle: string;
-  visibility: "gm_only" | "player_visible" | "public_demo";
-  tone: string[];
-  safety: {
-    rating: string;
-    lines: string[];
-    veils: string[];
-  };
-  facts: CampaignFact[];
-};
-
-type CampaignLocation = {
-  id: string;
-  name: string;
-  visibility: "gm_only" | "player_visible" | "public_demo";
-  summary: string;
-  features: string[];
-};
-
-type CampaignNpc = {
-  id: string;
-  name: string;
-  role: string;
-  visibility: "gm_only" | "player_visible" | "public_demo";
-  motive: string;
-  detail: string;
-};
-
-type ActiveSceneContext = {
-  title: string;
-  location: CampaignLocation | null;
-  npcs: CampaignNpc[];
-  facts: CampaignFact[];
-  tone: string[];
-  safety: CampaignBible["safety"];
-};
-
-type LocalModelAdapterDraft = {
-  adapter: {
-    mode: "placeholder" | "live";
-    provider: "local_llm" | "ollama" | "openai";
-    endpointConfigured: boolean;
-    endpoint: string | null;
-  };
-  request: {
-    scenePacketId: string;
-    sceneTitle: string;
-    promptPreview: string;
-    contextSummary: string;
-    proposedStateEventCount: number;
-    mediaRequestCount: number;
-    audioCueCount: number;
-  };
-  response: {
-    narration: string;
-    gmNotes: string[];
-    suggestedNextBeat: string;
-    riskyStateChangeWarning: string | null;
-  };
-};
-
-type DirectorModeAdapterDraft = {
-  adapter: {
-    mode: "placeholder" | "live";
-    provider: "chatgpt_director" | "ollama" | "openai";
-    enabled: boolean;
-    model: string | null;
-  };
-  request: {
-    scenePacketId: string;
-    sceneTitle: string;
-    promptPreview: string;
-    contextSummary: string;
-    memoryEntryCount: number;
-    pendingApprovalCount: number;
-  };
-  response: {
-    directorGuidance: string;
-    revealPlan: string[];
-    canonizationNotes: string[];
-    escalationWarning: string | null;
-  };
-};
-
-type AiLogEntry = {
-  id: string;
-  kind: "input_packet" | "output_packet" | "tool_call" | "validation_failure";
-  adapter: "scene_packet" | "local_model" | "director_mode";
-  createdAt: string;
-  summary: string;
-  correlationId: string;
-  details: Record<string, unknown>;
-};
-
-type ErrorEvent = {
-  id: string;
-  severity: "warning" | "error" | "critical";
-  service: string;
-  summary: string;
-  message: string;
-  recoveryHint: string;
-  visibility: "gm_only" | "player_visible" | "public_demo";
-  createdAt: string;
-  resolvedAt?: string;
-  correlationId?: string;
-};
-
-type MediaJob = {
-  id: string;
-  campaignId: string;
-  sceneId?: string;
-  type: "image" | "video" | "audio" | "upscale" | "interpolation" | "visual_canon";
-  status: "draft" | "queued" | "running" | "generated" | "failed" | "rejected" | "archived";
-  priority: "low" | "normal" | "high" | "session_break";
-  visibility: "gm_only" | "player_visible" | "public_demo";
-  prompt?: string;
-  negativePrompt?: string;
-  workflowId?: string;
-  linkedAssetId?: string;
-  runWhen: "now" | "background" | "session_break" | "manual";
-  outputPath?: string;
-  createdAt: string;
-  startedAt?: string;
-  completedAt?: string;
-  error?: string;
-  settings: Record<string, unknown>;
-  comfyRouterJobId?: string;
-  comfyPromptId?: string;
-};
-
-type AssetRecord = {
-  id: string;
-  campaignId: string;
-  sceneId?: string;
-  kind: "image" | "video" | "audio" | "map" | "handout";
-  visibility: "gm_only" | "player_visible" | "public_demo";
-  status: "requested" | "approved" | "queued" | "generated" | "rejected" | "failed";
-  prompt?: string;
-  workflowId?: string;
-  localPath?: string;
-  metadata: Record<string, unknown>;
-};
-
-type CleanupPolicy = {
-  failedJobArchiveAfterHours: number;
-  draftJobArchiveAfterHours: number;
-  rejectedJobArchiveAfterHours: number;
-  protectedGeneratedAssetCount: number;
-  notes: string[];
-};
-
-type CleanupCandidate = {
-  kind: "media_job" | "asset_record";
-  id: string;
-  status: string;
-  reason: string;
-  recommendedAction: "archive_metadata" | "review_output" | "keep_final";
-  workflowId?: string | null;
-  localPath?: string | null;
-  timestamp?: string | null;
-};
-
-type CleanupReport = {
-  generatedAt: string;
-  policy: CleanupPolicy;
-  outputRoots: {
-    mediaOutputRoot: string;
-    repoExportsRoot: string;
-  };
-  summary: {
-    trackedMediaJobs: number;
-    trackedAssets: number;
-    archiveCandidateCount: number;
-    reviewCandidateCount: number;
-    protectedFinalAssetCount: number;
-  };
-  archiveCandidates: CleanupCandidate[];
-  reviewCandidates: CleanupCandidate[];
-};
-
-type StateEventProposal = {
-  id: string;
-  createdAt: string;
-  summary: string;
-  submittedBy: {
-    id: string;
-    kind: "gm" | "player" | "system" | "ai_assistant";
-    label: string;
-  };
-  event: StateEventRequest;
-};
-
-type ScenePacket = {
-  id: string;
-  campaignId: string;
-  sceneTitle: string;
-  visibility: "gm_only" | "player_visible" | "public_demo";
-  summary: string;
-  beats: Array<{
-    kind: "description" | "choice" | "threat" | "clue" | "consequence" | "memory";
-    text: string;
-  }>;
-  proposedStateEvents: Array<{
-    id: string;
-    campaignId: string;
-    type: "hp_changed" | "resource_changed" | "condition_added" | "condition_removed";
-    actor: {
-      id: string;
-      kind: "gm" | "player" | "system" | "ai_assistant";
-      label: string;
-    };
-    visibility: "gm_only" | "player_visible" | "public_demo";
-    timestamp: string;
-    payload: Record<string, unknown>;
-  }>;
-  mediaRequests: Array<Record<string, unknown>>;
-  audioCues: Array<Record<string, unknown>>;
-};
-
-type ScenePacketValidation = {
-  ok: boolean;
-  errors: string[];
-};
-
-type SessionSnapshot = {
-  campaignId: string;
-  campaignTitle: string;
-  currentScene: string;
-  tablePin: string;
-  joinUrl: string;
-  campaignBible: CampaignBible;
-  activeSceneContext: ActiveSceneContext;
-  party: Character[];
-  rollLog: RollRecord[];
-  eventLog: TableEventRecord[];
-  approvalQueue: StateEventProposal[];
-  mediaJobs: MediaJob[];
-  assetRecords: AssetRecord[];
-  memoryEntries: MemoryEntry[];
-  audioCueQueue: typeof audioCueQueue;
-  currentAction: CurrentAction | null;
-};
-
-type StateEventRequest =
-  | {
-      type: "hp_delta";
-      characterId: string;
-      amount: number;
-      requestId?: string;
-    }
-  | {
-      type: "condition_add";
-      characterId: string;
-      condition: string;
-      requestId?: string;
-    }
-  | {
-      type: "condition_remove";
-      characterId: string;
-      condition: string;
-      requestId?: string;
-    }
-  | {
-      type: "resource_set";
-      characterId: string;
-      resourceId: string;
-      value: number;
-      requestId?: string;
-    }
-  | {
-      type: "initiative_set";
-      characterId: string;
-      value: number | null;
-      requestId?: string;
-    };
 
 type ClientSession = {
   id: string;
@@ -477,43 +65,81 @@ type ClientSession = {
   lastSeenAt: string;
 };
 
-type CachedMutationResponse = {
-  statusCode: number;
-  body: unknown;
-  expiresAt: number;
-};
 
-const host = process.env.BDE_HOST ?? "0.0.0.0";
-const gameServerPort = Number(process.env.BDE_GAME_SERVER_PORT ?? 4310);
-const playerCompanionPort = Number(process.env.BDE_PLAYER_COMPANION_PORT ?? 4311);
-const comfyRouterEndpoint = process.env.BDE_COMFY_ROUTER_ENDPOINT?.trim() || "http://127.0.0.1:4320";
-const mediaOutputRoot =
-  process.env.BDE_MEDIA_OUTPUT_ROOT?.trim() || "G:\\AI-DM\\04_assets\\generated";
-const localModelEndpoint = process.env.BDE_LOCAL_MODEL_ENDPOINT?.trim() || "";
-const directorModeModel = process.env.BDE_DIRECTOR_MODE_MODEL?.trim() || "";
-const audioServiceEndpoint = process.env.BDE_AUDIO_SERVICE_ENDPOINT?.trim() || "";
-const ttsServiceEndpoint = "http://127.0.0.1:4323";
-const comfyOutputRoot = process.env.BDE_COMFY_OUTPUT_ROOT?.trim() || join(currentDir, "../../../../.env"); // bogus, replaced below
-const comfyOutputBDEDir = "G:\\AI_Tools\\ComfyUI_windows_portable\\ComfyUI\\output\\bde";
-const playerCompanionDistDir = join(currentDir, "../../../apps/player-companion/dist");
-const sessionSummaryExportDir = join(currentDir, "../../../_exports/session-summaries");
-const memoryEntryExportDir = join(currentDir, "../../../_exports/memory-entries");
-const aiLogExportDir = join(currentDir, "../../../_exports/ai-logs");
-const repoExportsRoot = join(currentDir, "../../../_exports");
-const sampleCampaignDir = join(currentDir, "../../../campaigns/sample-campaign");
-const gmSystemPromptPath = join(currentDir, "../../../prompts/gm-system-prompt.md");
-const directorPromptPath = join(currentDir, "../../../prompts/director-prompt.md");
+const {
+  profile, publicOrigin, host, gameServerPort, databasePath, backupsDir, automaticBackups, comfyRouterEndpoint, comfyApiBase, mediaOutputRoot, localModelEndpoint,
+  directorModeModel, audioServiceEndpoint, ttsServiceEndpoint, comfyOutputBDEDir,
+  playerCompanionDistDir, hostDashboardDistDir, sessionSummaryExportDir, memoryEntryExportDir,
+  aiLogExportDir, repoExportsRoot, sampleCampaignDir, gmSystemPromptPath, directorPromptPath
+} = readRuntimeConfig();
 
+const work = createServerWork({ onError: () => console.error("[game-server] Scheduled work failed.") });
+const resourceMonitor = createResourceMonitor({ now: work.now });
+const serviceRequest = work.request;
+const mediaRouterClient = createMediaRouterClient(serviceRequest, {
+  reference: job => {
+    const characterId = job.settings.subjectCharacterId, referenceId = job.settings.referenceId;
+    if (typeof characterId !== 'string' || typeof referenceId !== 'string') return undefined;
+    const reference = portraits.read(characterId, referenceId);
+    if (!reference) throw new MediaRouterError('failed', 'The saved character reference is unavailable.');
+    return { referenceImage: reference.image, seed: reference.seed, referenceId };
+  },
+  scope: () => `${authority.room().id}:${getSessionSnapshot().mode}`,
+  current: job => mediaJobIsCurrent(job), enabled: () => profile !== "party" && work.active
+});
+const sceneImages = createSceneImages({ request: serviceRequest, endpoint: comfyApiBase, current: getSessionSnapshot, active: () => work.active });
+const speech = createSpeech({ request: serviceRequest, endpoint: ttsServiceEndpoint, current: getSessionSnapshot, active: () => work.active, now: work.now });
+const aiCapability = getAiAdapterStatus();
+const capabilityHealth = createCapabilityHealth([
+  { name: "ai-adapter", enabled: profile !== "party" && aiCapability.provider !== "disabled", configured: aiCapability.endpointConfigured,
+    probe: signal => probeAiReadiness(serviceRequest, signal), busy: () => narration.busy },
+  ...([['comfy-router', comfyRouterEndpoint], ['audio-service', audioServiceEndpoint], ['tts', ttsServiceEndpoint]] as const).map(([name, endpoint]) => ({
+    name, enabled: profile !== "party", configured: Boolean(endpoint), probe: (signal: AbortSignal) => probeService(serviceRequest, endpoint, name, signal)
+  }))
+], { now: work.now });
+const narration = createNarration({
+  current: () => getSessionSnapshot(), active: () => work.active,
+  generate: (input: { scene: SceneContext; roll: RollResultContext }, signal) =>
+    generateNarration(input.scene, input.roll, { temperature: 0.85, maxTokens: 350, timeoutMs: 10000, signal, request: serviceRequest })
+});
+const gameStore = openGameStore(databasePath);
+const { database: db, loadTable, saveTable, loadRollLog, saveRollLog, loadEventLog, saveEventLog,
+  loadMediaJobs, saveMediaJobs, loadMemoryEntries, saveMemoryEntries, loadApprovalQueue, saveApprovalQueue,
+  loadAudioCues, saveAudioCues, getMeta, setMeta } = gameStore;
+const portraits = createCharacterPortraits(db);
+
+const authority = new SessionAuthority(db, work.now);
+const commandStore = new CommandStore(db, work.now);
+const commands = new CommandBoundary(commandStore, {
+  capture: captureTableState,
+  restore: state => restoreTableState(state as ReturnType<typeof captureTableState>),
+  persist: persistStateOrThrow
+});
+function saveHostCredential(credential: LocalCredential) {
+  const credentialPath = `${databasePath}.host.key`;
+  mkdirSync(dirname(credentialPath), { recursive: true });
+  writeFileSync(credentialPath, credential.token, { encoding: "utf8", mode: 0o600 });
+}
+const initialHost = authority.bootstrap(process.env.BDE_RECOVER_HOST === "1");
+if (initialHost) saveHostCredential(initialHost);
 const app = express();
 const server = createServer(app);
-const wss = new WebSocketServer({ server, path: "/ws" });
+const wss = new WebSocketServer({ server, path: "/ws", maxPayload: 8192,
+  handleProtocols: protocols => protocols.has("bde.session") ? "bde.session" : false,
+  verifyClient: ({ req }, done) => {
+    try {
+      authority.authenticate(requestCredential(req.headers));
+      done(true);
+    } catch { done(false, 401, "Session credential required"); }
+  }
+});
+const socketTokens = new WeakMap<WebSocket, string>();
 const staleClientThresholdMs = 15000;
 
 const clientSessions = new Map<string, ClientSession>();
-const recentMutationResponses = new Map<string, CachedMutationResponse>();
 
-// Initialize SQLite and load persisted state
-initDb();
+
+// The explicitly opened store is initialized before persisted state is loaded.
 
 const defaultParty: Character[] = [
   {
@@ -608,6 +234,13 @@ const defaultParty: Character[] = [
 
 const loadedParty = loadTable<Character>("party");
 const party: Character[] = loadedParty.length ? loadedParty : defaultParty;
+if (initialHost && process.env.BDE_RECOVER_HOST !== "1") {
+  // A fresh/expired room has no valid old memberships. Preserve sheets, release seats.
+  for (const character of party) {
+    character.claimedByClientId = null;
+    character.claimedByLabel = null;
+  }
+}
 
 const defaultRoll: RollRecord = {
   id: randomUUID(),
@@ -640,59 +273,18 @@ const assetRecords: AssetRecord[] = loadedAssets;
 const loadedMemoryEntries = loadMemoryEntries<MemoryEntry>();
 const memoryEntries: MemoryEntry[] = loadedMemoryEntries;
 
-type AudioCue = {
-  id: string;
-  kind: string;
-  status: "queued" | "playing" | "played" | "skipped";
-  visibility: "gm_only" | "player_visible" | "public_demo";
-  trigger: string;
-  tags: string[];
-  loop: boolean;
-  volume: number;
-  fadeInSeconds: number;
-  fadeOutSeconds: number;
-  notes?: string;
-  sceneId?: string;
-  createdAt: string;
-};
 
 const loadedAudioCues = loadAudioCues<AudioCue>();
 const audioCueQueue: AudioCue[] = loadedAudioCues;
 
-const aiLogs: AiLogEntry[] = [];
-const errorEvents: ErrorEvent[] = [];
-
-function recordErrorEvent(entry: Omit<ErrorEvent, "id" | "createdAt">) {
-  const event: ErrorEvent = {
-    id: randomUUID(),
-    createdAt: new Date().toISOString(),
-    ...entry
-  };
-  errorEvents.unshift(event);
-  errorEvents.splice(24);
-  return event;
-}
-
-function recordAiLog(entry: Omit<AiLogEntry, "id" | "createdAt">) {
-  const logEntry: AiLogEntry = {
-    id: randomUUID(),
-    createdAt: new Date().toISOString(),
-    ...entry
-  };
-  aiLogs.unshift(logEntry);
-  aiLogs.splice(24);
-  mkdirSync(aiLogExportDir, { recursive: true });
-  writeFileSync(
-    join(aiLogExportDir, "recent-ai-log.jsonl"),
-    aiLogs
-      .slice()
-      .reverse()
-      .map((item) => JSON.stringify(item))
-      .join("\n"),
-    "utf8"
-  );
-  return logEntry;
-}
+const { aiLogs, errorEvents, recordAiLog, recordErrorEvent } = createDiagnostics({
+  now: work.now,
+  exportAi(jsonl) {
+    mkdirSync(aiLogExportDir, { recursive: true });
+    writeFileSync(join(aiLogExportDir, "recent-ai-log.jsonl"), jsonl, "utf8");
+  },
+  onExportFailure: () => console.error("[game-server] Diagnostic export unavailable; core play remains available.")
+});
 
 function parseQuotedValue(line: string) {
   const quotedMatch = line.match(/:\s*"([^"]*)"/);
@@ -823,6 +415,7 @@ function loadSampleCampaignContext() {
 }
 
 const sampleCampaignContext = loadSampleCampaignContext();
+let campaignProgress = loadCampaignProgress(getMeta(`campaign-progress:${sampleCampaignContext.campaignBible.id}`), sampleCampaignContext.campaignBible.id);
 
 function buildActiveSceneContext(currentScene: string): ActiveSceneContext {
   const sceneLower = currentScene.toLowerCase();
@@ -860,35 +453,68 @@ function buildActiveSceneContext(currentScene: string): ActiveSceneContext {
   };
 }
 
+app.use((_request, response, next) => {
+  if (!work.active) { response.status(503).json({ error: "Server is stopping." }); return; }
+  next();
+});
 app.use(cors());
+app.use('/api/characters/:id/portrait', express.json({limit:'750kb'}));
+app.use('/api/character-forge/sessions/:id/choose', express.json({limit:'750kb'}));
 app.use(express.json());
 app.use("/player", express.static(playerCompanionDistDir));
-if (comfyOutputBDEDir) {
-  app.use("/images", express.static(comfyOutputBDEDir));
-}
+app.use("/host", express.static(hostDashboardDistDir));
+app.use("/display", express.static(hostDashboardDistDir));
+app.get("/host/*rest", (request, response, next) => {
+  if (request.path.includes(".")) { next(); return; }
+  response.sendFile(join(hostDashboardDistDir, "index.html"));
+});
+installSessionAccess(app, authority, {
+  snapshot: () => getSessionSnapshot(),
+  character: id => resolveCharacter(id),
+  release: actorId => {
+    for (const character of party) {
+      if (actorId === undefined || character.claimedByClientId === actorId) {
+        character.claimedByClientId = null;
+        character.claimedByLabel = null;
+      }
+    }
+    persistState();
+  },
+  hostCredential: saveHostCredential,
+  disconnectRevoked: () => broadcast("session_snapshot", getSessionSnapshot())
+});
+// Enforce the lightweight profile on the server, including direct requests from
+// legacy tabs. Endpoint configuration and persisted jobs cannot override it.
+app.use("/api", (request, response, next) => {
+  const optional = /^\/(?:ai(?:\/|$)|ai-logs(?:\/|$)|local-model(?:\/|$)|director-mode(?:\/|$)|speak(?:\/|$)|audio-cues(?:\/|$)|media-jobs(?:\/|$)|images(?:\/|$)|scene-packet\/queue-(?:media|audio)(?:\/|$)|characters\/[^/]+\/(?:visual-canon-job|scene-job)(?:\/|$))/;
+  if (profile === "party" && optional.test(request.path)) {
+    response.status(503).json({ error: "Optional AI, media and audio services are disabled in the Party profile.", code: "CAPABILITY_DISABLED" });
+    return;
+  }
+  next();
+});
+app.use("/api", commands.middleware);
+app.get("/api/session/join-info", (request, response) => {
+  if (!["gm", "spectator"].includes(identityFor(request).role)) throw new SessionError(403, "Host or public display access required.");
+  const room = authority.room();
+  response.json({ code: room.code, url: sessionJoinUrl("party"), localOnly: !publicOrigin && (host === "127.0.0.1" || host === "localhost") });
+});
+const partyGame = new PartyService(commandStore, state => broadcast("party_snapshot", state), work.now);
+partyGame.recover(authority.room().id);
+installPartyRoutes(app, partyGame);
+let partyDeadlineFailureReported = false;
+work.every(() => {
+  try { partyGame.tick(authority.room().id); partyDeadlineFailureReported = false; }
+  catch {
+    if (!partyDeadlineFailureReported) console.error("[game-server] Party deadline could not be committed; the host should check room/storage status.");
+    partyDeadlineFailureReported = true;
+  }
+}, 1000);
+// Legacy filenames no longer expose an output directory.
+app.use("/images", (_request, response) => { response.status(404).json({ error: "Use an approved asset record." }); });
 
 function extractRoleFromRequest(request: express.Request): ClientSession["role"] {
-  const headerRole = request.headers["x-bde-role"];
-  const queryRole = request.query.role;
-  let raw: string;
-
-  if (typeof headerRole === "string") {
-    raw = headerRole;
-  } else if (typeof queryRole === "string") {
-    raw = queryRole;
-  } else if (Array.isArray(queryRole) && typeof queryRole[0] === "string") {
-    raw = queryRole[0];
-  } else {
-    raw = "spectator";
-  }
-
-  const normalized = raw.toLowerCase().trim();
-
-  if (["gm", "player", "spectator", "ai", "admin"].includes(normalized)) {
-    return normalized as ClientSession["role"];
-  }
-
-  return "spectator";
+  return identityFor(request).role;
 }
 
 function requireRole(...allowed: ClientSession["role"][]) {
@@ -958,12 +584,22 @@ function getMediaPressure() {
     }
   }
 
+  const measured = resourcePressure(resourceMonitor.sample());
+  reasons.push(...measured.reasons);
+  if (measured.level === "high") {
+    level = "high";
+    for (const type of ["image", "visual_canon", "video", "upscale", "interpolation"] as const) blocked.add(type);
+  } else if (measured.level === "elevated") {
+    if (level === "low") level = "elevated";
+    for (const type of ["video", "upscale", "interpolation"] as const) blocked.add(type);
+  }
+
   const summary =
     level === "high"
       ? "Media pressure is high. Keep expensive jobs paused until running work clears."
       : level === "elevated"
         ? "Media pressure is elevated. Be careful about starting more expensive jobs."
-        : "Media pressure looks safe for another job.";
+        : "Queue, host memory and event-loop measurements are within limits. GPU capacity is unmeasured.";
 
   return {
     level,
@@ -992,7 +628,7 @@ function getAgeHours(isoValue?: string | null) {
     return 0;
   }
 
-  return Math.max(0, (Date.now() - new Date(isoValue).getTime()) / 36e5);
+  return Math.max(0, (work.now() - new Date(isoValue).getTime()) / 36e5);
 }
 
 function buildCleanupReport(): CleanupReport {
@@ -1136,7 +772,7 @@ function buildCleanupReport(): CleanupReport {
 
 function getRuntimeStatus(): RuntimeStatus {
   const now = new Date().toISOString();
-  const nowMs = Date.now();
+  const nowMs = work.now();
   const clients = Array.from(clientSessions.values())
     .map((session) => {
       const claimedCharacter =
@@ -1158,24 +794,26 @@ function getRuntimeStatus(): RuntimeStatus {
     .sort((left, right) => left.role.localeCompare(right.role) || left.connectedAt.localeCompare(right.connectedAt));
   const staleCount = clients.filter((client) => client.status === "stale").length;
   const mediaPressure = getMediaPressure();
-  const warnings = [...mediaPressure.reasons];
+  const resources = resourceMonitor.sample();
+  const capabilityServices = capabilityHealth.status();
+  const failedCapabilities = capabilityServices.filter(service => service.capability?.state === "failed");
+  const warnings = [...mediaPressure.reasons, ...failedCapabilities.map(service => `${service.name} health check failed; core play remains available.`),
+    ...(backupWarning ? ["Automatic backup failed. Check storage and create a manual backup."] : [])];
 
   return {
     id: "runtime-main",
-    status: staleCount > 0 || mediaPressure.level !== "low" ? "degraded" : "ok",
+    status: staleCount > 0 || mediaPressure.level !== "low" || failedCapabilities.length > 0 || backupWarning ? "degraded" : "ok",
     mode: "fast",
     updatedAt: now,
     services: [
       {
         name: "game-server",
         status: "ok",
-        latencyMs: 2,
         message: "Accepting HTTP requests"
       },
       {
         name: "websocket",
         status: staleCount > 0 ? "degraded" : "ok",
-        latencyMs: 5,
         message:
           staleCount > 0
             ? `${clientSessions.size} session(s), ${staleCount} stale`
@@ -1184,7 +822,6 @@ function getRuntimeStatus(): RuntimeStatus {
       {
         name: "dice-service",
         status: "ok",
-        latencyMs: 1,
         message: `${rollLog.length} roll(s) in memory`
       },
       {
@@ -1197,7 +834,7 @@ function getRuntimeStatus(): RuntimeStatus {
       {
         name: "resource-pressure",
         status: mediaPressure.level === "high" ? "degraded" : mediaPressure.level === "elevated" ? "degraded" : "ok",
-        message: mediaPressure.summary
+        message: `${mediaPressure.summary} RSS ${Math.round(resources.rssBytes / 1024 ** 2)} MiB; host free ${Math.round(resources.hostFreeMemoryBytes / 1024 ** 2)} MiB; event-loop p95 ${resources.eventLoopDelayP95Ms ?? "not sampled"} ms.`
       },
       {
         name: "asset-metadata",
@@ -1206,33 +843,11 @@ function getRuntimeStatus(): RuntimeStatus {
           ? `${assetRecords.filter((asset) => asset.status === "generated").length} generated / ${assetRecords.length} tracked`
           : "No media metadata recorded yet"
       },
-      {
-        name: "comfy-router",
-        status: comfyRouterEndpoint ? "ok" : "unknown",
-        message: comfyRouterEndpoint
-          ? `Router configured at ${comfyRouterEndpoint}; submits to ComfyUI when workflow files are present`
-          : "No comfy-router endpoint configured yet; media queue remains internal only"
-      },
-      (() => {
-        const aiStatus = getAiAdapterStatus();
-        return {
-          name: "ai-adapter",
-          status: aiStatus.endpointConfigured ? "ok" : "unknown",
-          message: aiStatus.endpointConfigured
-            ? `AI adapter ready (${aiStatus.provider} / ${aiStatus.model})`
-            : `AI adapter not configured (provider: ${aiStatus.provider}, model: ${aiStatus.model})`
-        };
-      })(),
-      {
-        name: "audio-service",
-        status: audioServiceEndpoint ? "ok" : "unknown",
-        message: audioServiceEndpoint
-          ? `Audio service configured at ${audioServiceEndpoint}`
-          : "No audio service endpoint configured yet"
-      }
+      ...capabilityServices
     ],
     clients,
     mediaPressure,
+    resources,
     warnings
   };
 }
@@ -1266,19 +881,62 @@ let currentSceneTitle = "Lantern Gate, just before the watchtower ascent";
 let currentAction: CurrentAction | null = null;
 let currentActionSetAt: number = 0;
 let pendingNarration: { text: string; timestamp: number } | null = null;
-let aiNarrationEnabled = true;
+let aiNarrationEnabled = profile !== "party";
+
+function captureTableState() {
+  return { campaignProgress, party, rollLog, eventLog, approvalQueue, mediaJobs, assetRecords, memoryEntries, audioCueQueue,
+    aiLogs, errorEvents, currentSceneTitle, currentAction, currentActionSetAt, pendingNarration, aiNarrationEnabled };
+}
+function restoreTableState(state: ReturnType<typeof captureTableState>) {
+  for (const key of ["party", "rollLog", "eventLog", "approvalQueue", "mediaJobs", "assetRecords", "memoryEntries", "audioCueQueue", "aiLogs", "errorEvents"] as const) {
+    const target: unknown[] = captureTableState()[key];
+    target.splice(0, target.length, ...state[key]);
+  }
+  ({ campaignProgress, currentSceneTitle, currentAction, currentActionSetAt, pendingNarration, aiNarrationEnabled } = state);
+}
+// Collection tables remain the legacy read model. Restore only the command-owned
+// controls here, so newer optional-service writes are not replaced by an old receipt.
+const savedControls = commandStore.state(authority.room().id, "ttrpg");
+if (savedControls && typeof savedControls === "object") {
+  const saved = savedControls as Record<string, unknown>;
+  if (typeof saved.currentSceneTitle === "string") currentSceneTitle = saved.currentSceneTitle;
+  if (profile !== "party" && typeof saved.aiNarrationEnabled === "boolean") aiNarrationEnabled = saved.aiNarrationEnabled;
+  if (typeof saved.currentActionSetAt === "number" && Number.isFinite(saved.currentActionSetAt)) currentActionSetAt = saved.currentActionSetAt;
+  const action = saved.currentAction;
+  if (action && typeof action === "object" && "type" in action && typeof action.type === "string" &&
+      "description" in action && typeof action.description === "string" && "ability" in action && typeof action.ability === "string" &&
+      (!("rolls" in action) || Array.isArray(action.rolls) && action.rolls.every(isRollRecord)) &&
+      "dc" in action && (action.dc === null || typeof action.dc === "number" && Number.isFinite(action.dc))) currentAction = action as CurrentAction;
+  const narration = saved.pendingNarration;
+  if (narration && typeof narration === "object" && "text" in narration && typeof narration.text === "string" &&
+      "timestamp" in narration && typeof narration.timestamp === "number" && Number.isFinite(narration.timestamp)) pendingNarration = { text: narration.text, timestamp: narration.timestamp };
+}
+
+function sessionJoinUrl(mode: "party" | "ttrpg") {
+  if (publicOrigin) return `${publicOrigin}/player/?mode=${mode}&pin=${authority.room().code}`;
+  const joinHost = host === "0.0.0.0" ? getLanJoinHost() : host;
+  const address = server.address();
+  const port = address && typeof address === "object" ? address.port : gameServerPort;
+  return `http://${joinHost}:${port}/player/?mode=${mode}&pin=${authority.room().code}`;
+}
 
 function getSessionSnapshot(): SessionSnapshot {
-  const joinHost = host === "0.0.0.0" ? getLanJoinHost() : host;
   const campaignBible = sampleCampaignContext.campaignBible;
   const activeSceneContext = buildActiveSceneContext(currentSceneTitle);
 
   return {
+    schemaVersion: 1,
+    sessionId: authority.room().id,
+    mode: "ttrpg",
+    roundId: null,
+    stage: "table",
+    revision: commandStore.revision(authority.room().id, "ttrpg") + (commands.pending() ? 1 : 0),
+    campaignProgress,
     campaignId: campaignBible.id,
     campaignTitle: campaignBible.title,
     currentScene: activeSceneContext.title,
-    tablePin: "BD20",
-    joinUrl: `http://${joinHost}:${gameServerPort}/player/?pin=BD20`,
+    tablePin: authority.room().code,
+    joinUrl: sessionJoinUrl("ttrpg"),
     campaignBible,
     activeSceneContext,
     party,
@@ -1291,10 +949,6 @@ function getSessionSnapshot(): SessionSnapshot {
     audioCueQueue,
     currentAction
   };
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max);
 }
 
 function resolveCharacter(characterId: string) {
@@ -1321,385 +975,8 @@ function publishSessionState() {
   return sessionSnapshot;
 }
 
-function applyStateEvent(event: StateEventRequest, actorLabel = "GM Dashboard") {
-  const character = resolveCharacter(event.characterId);
-
-  if (!character) {
-    return {
-      ok: false as const,
-      statusCode: 404,
-      body: {
-        error: "Character not found"
-      }
-    };
-  }
-
-  if (event.type === "hp_delta") {
-    if (typeof event.amount !== "number" || Number.isNaN(event.amount)) {
-      return {
-        ok: false as const,
-        statusCode: 400,
-        body: {
-          error: "Numeric amount is required"
-        }
-      };
-    }
-
-    const previous = character.hp.current;
-    character.hp.current = clamp(character.hp.current + event.amount, 0, character.hp.max);
-    recordTableEvent({
-      category: "state",
-      type: "hp_changed",
-      actor: {
-        id: "gm-dashboard",
-        kind: "gm",
-        label: actorLabel
-      },
-      visibility: "player_visible",
-      summary: `${character.name} HP ${previous} -> ${character.hp.current}`,
-      payload: {
-        characterId: character.id,
-        characterName: character.name,
-        previous,
-        current: character.hp.current,
-        delta: event.amount
-      }
-    });
-    return {
-      ok: true as const,
-      statusCode: 200,
-      body: {
-        ok: true,
-        sessionSnapshot: publishSessionState()
-      }
-    };
-  }
-
-  if (event.type === "condition_add") {
-    const condition = typeof event.condition === "string" ? event.condition.trim() : "";
-
-    if (!condition) {
-      return {
-        ok: false as const,
-        statusCode: 400,
-        body: {
-          error: "Condition is required"
-        }
-      };
-    }
-
-    if (!character.conditions.includes(condition)) {
-      character.conditions.push(condition);
-      recordTableEvent({
-        category: "state",
-        type: "condition_added",
-        actor: {
-          id: "gm-dashboard",
-          kind: "gm",
-          label: actorLabel
-        },
-        visibility: "player_visible",
-        summary: `${character.name} gained condition: ${condition}`,
-        payload: {
-          characterId: character.id,
-          characterName: character.name,
-          condition
-        }
-      });
-    }
-
-    return {
-      ok: true as const,
-      statusCode: 200,
-      body: {
-        ok: true,
-        sessionSnapshot: publishSessionState()
-      }
-    };
-  }
-
-  if (event.type === "condition_remove") {
-    const condition = typeof event.condition === "string" ? event.condition.trim() : "";
-
-    if (!condition) {
-      return {
-        ok: false as const,
-        statusCode: 400,
-        body: {
-          error: "Condition is required"
-        }
-      };
-    }
-
-    const hadCondition = character.conditions.includes(condition);
-    character.conditions = character.conditions.filter((entry) => entry !== condition);
-    if (hadCondition) {
-      recordTableEvent({
-        category: "state",
-        type: "condition_removed",
-        actor: {
-          id: "gm-dashboard",
-          kind: "gm",
-          label: actorLabel
-        },
-        visibility: "player_visible",
-        summary: `${character.name} cleared condition: ${condition}`,
-        payload: {
-          characterId: character.id,
-          characterName: character.name,
-          condition
-        }
-      });
-    }
-    return {
-      ok: true as const,
-      statusCode: 200,
-      body: {
-        ok: true,
-        sessionSnapshot: publishSessionState()
-      }
-    };
-  }
-
-  if (event.type === "resource_set") {
-    if (typeof event.resourceId !== "string" || typeof event.value !== "number" || Number.isNaN(event.value)) {
-      return {
-        ok: false as const,
-        statusCode: 400,
-        body: {
-          error: "resourceId and numeric value are required"
-        }
-      };
-    }
-
-    const resource = character.resources.find((entry) => entry.id === event.resourceId);
-
-    if (!resource) {
-      return {
-        ok: false as const,
-        statusCode: 404,
-        body: {
-          error: "Resource not found"
-        }
-      };
-    }
-
-    const previous = resource.current;
-    resource.current = clamp(event.value, 0, resource.max);
-    recordTableEvent({
-      category: "state",
-      type: "resource_changed",
-      actor: {
-        id: "gm-dashboard",
-        kind: "gm",
-        label: actorLabel
-      },
-      visibility: "player_visible",
-      summary: `${character.name} ${resource.label} ${previous}/${resource.max} -> ${resource.current}/${resource.max}`,
-      payload: {
-        characterId: character.id,
-        characterName: character.name,
-        resourceId: resource.id,
-        resourceLabel: resource.label,
-        previous,
-        current: resource.current,
-        max: resource.max
-      }
-    });
-    return {
-      ok: true as const,
-      statusCode: 200,
-      body: {
-        ok: true,
-        sessionSnapshot: publishSessionState()
-      }
-    };
-  }
-
-  if (event.type === "initiative_set") {
-    const value = typeof event.value === "number" && !Number.isNaN(event.value) ? event.value : null;
-
-    character.initiative = value;
-    recordTableEvent({
-      category: "state",
-      type: "initiative_set",
-      actor: {
-        id: "gm-dashboard",
-        kind: "gm",
-        label: actorLabel
-      },
-      visibility: "player_visible",
-      summary: value !== null ? `${character.name} initiative set to ${value}` : `${character.name} initiative cleared`,
-      payload: {
-        characterId: character.id,
-        characterName: character.name,
-        initiative: event.value
-      }
-    });
-    return {
-      ok: true as const,
-      statusCode: 200,
-      body: {
-        ok: true,
-        sessionSnapshot: publishSessionState()
-      }
-    };
-  }
-
-  return {
-    ok: false as const,
-    statusCode: 400,
-    body: {
-      error: "Unsupported state event type"
-    }
-  };
-}
-
-function summarizeStateEvent(event: StateEventRequest) {
-  const character = resolveCharacter(event.characterId);
-  const characterName = character?.name ?? "Unknown character";
-
-  if (event.type === "hp_delta") {
-    const direction = event.amount >= 0 ? "+" : "";
-    return `${characterName} HP ${direction}${event.amount}`;
-  }
-
-  if (event.type === "condition_add") {
-    return `${characterName} add condition: ${event.condition}`;
-  }
-
-  if (event.type === "condition_remove") {
-    return `${characterName} remove condition: ${event.condition}`;
-  }
-
-  return `${characterName} set resource`;
-}
-
-function formatIsoForMarkdown(value: string) {
-  return new Date(value).toLocaleString([], {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit"
-  });
-}
-
-function sanitizeFilePart(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-function buildSessionSummaryMarkdown() {
-  const snapshot = getSessionSnapshot();
-  const runtime = getRuntimeStatus();
-  const generatedAt = new Date().toISOString();
-  const fileStamp = generatedAt.slice(0, 10);
-  const lines: string[] = [];
-
-  lines.push(`# Session Summary - ${snapshot.campaignTitle}`);
-  lines.push("");
-  lines.push(`- Generated: ${formatIsoForMarkdown(generatedAt)}`);
-  lines.push(`- Current Scene: ${snapshot.currentScene}`);
-  lines.push(`- Table PIN: ${snapshot.tablePin}`);
-  lines.push(`- Join URL: ${snapshot.joinUrl}`);
-  lines.push(`- Runtime Status: ${runtime.status} (${runtime.mode})`);
-  lines.push("");
-  lines.push("## Party State");
-  lines.push("");
-
-  for (const character of snapshot.party) {
-    lines.push(`### ${character.name} - ${character.classLabel}`);
-    lines.push(`- HP: ${character.hp.current}/${character.hp.max}`);
-    lines.push(`- AC: ${character.armorClass}`);
-    lines.push(
-      `- Conditions: ${character.conditions.length ? character.conditions.join(", ") : "None"}`
-    );
-    lines.push(
-      `- Claimed By: ${character.claimedByLabel ? character.claimedByLabel : "Unclaimed"}`
-    );
-    lines.push(
-      `- Resources: ${
-        character.resources.length
-          ? character.resources.map((resource) => `${resource.label} ${resource.current}/${resource.max}`).join(", ")
-          : "None"
-      }`
-    );
-    lines.push(
-      `- Inventory: ${
-        character.inventory.length
-          ? character.inventory
-              .map((item) => `${item.name} x${item.quantity}${item.detail ? ` (${item.detail})` : ""}`)
-              .join(", ")
-          : "None"
-      }`
-    );
-    if (character.notes.length) {
-      lines.push(`- Notes: ${character.notes.join(" | ")}`);
-    }
-    lines.push("");
-  }
-
-  lines.push("## Recent Rolls");
-  lines.push("");
-  if (snapshot.rollLog.length) {
-    for (const roll of snapshot.rollLog) {
-      lines.push(
-        `- ${formatIsoForMarkdown(roll.timestamp)} - ${roll.actorName} rolled ${roll.total} (${roll.rolled} + ${roll.modifier}) for ${roll.note}`
-      );
-    }
-  } else {
-    lines.push("- No rolls recorded.");
-  }
-  lines.push("");
-
-  lines.push("## Recent Table Events");
-  lines.push("");
-  if (snapshot.eventLog.length) {
-    for (const entry of snapshot.eventLog) {
-      lines.push(
-        `- ${formatIsoForMarkdown(entry.timestamp)} - [${entry.category}] ${entry.summary} (${entry.actor.label}; ${entry.visibility})`
-      );
-    }
-  } else {
-    lines.push("- No table events recorded.");
-  }
-  lines.push("");
-
-  lines.push("## Pending Approval Queue");
-  lines.push("");
-  if (snapshot.approvalQueue.length) {
-    for (const proposal of snapshot.approvalQueue) {
-      lines.push(
-        `- ${formatIsoForMarkdown(proposal.createdAt)} - ${proposal.summary} (queued by ${proposal.submittedBy.label})`
-      );
-    }
-  } else {
-    lines.push("- No queued state changes.");
-  }
-  lines.push("");
-
-  lines.push("## Presence Snapshot");
-  lines.push("");
-  if (runtime.clients.length) {
-    for (const client of runtime.clients) {
-      lines.push(
-        `- ${client.role} - ${client.playerLabel ?? client.clientId} - ${client.status} - last seen ${formatIsoForMarkdown(client.lastSeenAt)}`
-      );
-    }
-  } else {
-    lines.push("- No connected clients.");
-  }
-  lines.push("");
-  lines.push("---");
-  lines.push(
-    `Export file hint: ${sanitizeFilePart(snapshot.campaignTitle)}-session-summary-${fileStamp}.md`
-  );
-
-  return lines.join("\n");
-}
+const stateEvents = createStateEvents({ resolveCharacter, recordTableEvent, publishSessionState });
+const { summarize: summarizeStateEvent } = stateEvents;
 
 function buildMemoryEntry() {
   const snapshot = getSessionSnapshot();
@@ -1749,7 +1026,7 @@ function buildMemoryEntry() {
   const entry: MemoryEntry = {
     id: randomUUID(),
     campaignId: snapshot.campaignId,
-    sceneId: sanitizeFilePart(snapshot.currentScene),
+    sceneId: snapshot.campaignProgress?.sceneId ?? sanitizeFilePart(snapshot.currentScene),
     sessionId: `${snapshot.campaignId}-${createdAt.slice(0, 10)}`,
     kind: "scene_summary",
     visibility: "gm_only",
@@ -1767,9 +1044,12 @@ function buildMemoryEntry() {
   const filename = `${sanitizeFilePart(snapshot.campaignTitle)}-${sanitizeFilePart(snapshot.currentScene)}-${createdAt
     .slice(0, 19)
     .replace(/[:T]/g, "-")}.json`;
-  mkdirSync(memoryEntryExportDir, { recursive: true });
   const exportPath = join(memoryEntryExportDir, filename);
-  writeFileSync(exportPath, JSON.stringify(entry, null, 2), "utf8");
+  const content = JSON.stringify(entry, null, 2);
+  commands.defer(() => {
+    mkdirSync(memoryEntryExportDir, { recursive: true });
+    writeFileSync(exportPath, content, "utf8");
+  });
   return { entry, exportPath };
 }
 
@@ -1787,7 +1067,7 @@ function buildScenePacket(): ScenePacket {
     .map((e) => e.summary);
 
   return {
-    id: `scene-${Date.now().toString(36)}`,
+    id: `scene-${work.now().toString(36)}`,
     campaignId: snapshot.campaignId,
     sceneTitle: activeSceneContext.location?.name ?? "Lantern Gate Approach",
     visibility: "gm_only",
@@ -1829,7 +1109,7 @@ function buildScenePacket(): ScenePacket {
     ],
     proposedStateEvents: [
       {
-        id: `proposal-${Date.now().toString(36)}`,
+        id: `proposal-${work.now().toString(36)}`,
         campaignId: snapshot.campaignId,
         type: "condition_added",
         actor: {
@@ -1847,7 +1127,7 @@ function buildScenePacket(): ScenePacket {
     ],
     mediaRequests: [
       {
-        id: `media-${Date.now().toString(36)}`,
+        id: `media-${work.now().toString(36)}`,
         campaignId: "sample-campaign",
         kind: "image",
         visibility: "player_visible",
@@ -1862,7 +1142,7 @@ function buildScenePacket(): ScenePacket {
     ],
     audioCues: [
       {
-        id: `audio-${Date.now().toString(36)}`,
+        id: `audio-${work.now().toString(36)}`,
         kind: "ambience",
         status: "suggested",
         visibility: "player_visible",
@@ -1934,36 +1214,33 @@ function buildMediaJobFromScenePacketRequest(
   };
 }
 
-function buildCharacterVisualCanonJob(character: Character): MediaJob {
-  const distinctiveFeatures = [
-    character.classLabel,
-    character.inventory[0]?.name ? `carries ${character.inventory[0].name}` : null,
-    character.conditions[0] ? `currently marked by ${character.conditions[0]}` : null,
-    character.notes[0] ?? null
-  ]
-    .filter((value): value is string => Boolean(value))
-    .join(", ");
+function buildCharacterVisualCanonJob(character: Character, scenePrompt?: string): MediaJob {
+  const referenceId = character.portrait?.approvedId;
+  const reference = referenceId ? portraits.read(character.id, referenceId) : undefined;
+  if (!reference) throw new SessionError(409, 'Approve a character portrait before generating a consistent image.');
+  const distinctiveFeatures = reference.description;
 
   return {
     id: randomUUID(),
     campaignId: sampleCampaignContext.campaignBible.id,
     sceneId: undefined,
-    type: "visual_canon",
+    type: scenePrompt ? "image" : "visual_canon",
     status: "queued",
     priority: "low",
     visibility: "gm_only",
-    prompt: `Character visual canon pack for ${character.name}, ${character.classLabel}, ${distinctiveFeatures}, grounded dark fantasy, consistent costume language, repeatable silhouette, no text, no watermark.`,
+    prompt: `${scenePrompt ? `Campaign illustration: ${scenePrompt}. Featuring` : 'Single character portrait of'} ${character.name}, ${character.classLabel}, ${distinctiveFeatures}. Preserve the reference face, hair, outfit and distinctive features. Grounded fantasy illustration, no text, no watermark.`,
     negativePrompt:
       "text, watermark, celebrity likeness, copyrighted character design, inconsistent anatomy, duplicate limbs, modern clothing, mismatched faces.",
-    workflowId: "character-visual-canon",
+    workflowId: scenePrompt ? "character-scene" : "character-visual-canon",
     runWhen: "manual",
     createdAt: new Date().toISOString(),
     settings: {
       subjectCharacterId: character.id,
       subjectName: character.name,
       classLabel: character.classLabel,
-      variantSet: ["portrait", "front", "three_quarter", "profile", "back", "expression_sheet"],
-      outputIntent: "accepted_reference_pack",
+      referenceId, seed:reference.seed,
+      variantSet: ["portrait"],
+      outputIntent: scenePrompt ? "scene_for_review" : "portrait_for_review",
       canonStatus: "unreviewed"
     }
   };
@@ -1999,7 +1276,7 @@ function createAssetRecordFromMediaJob(job: MediaJob): AssetRecord {
     status: "generated",
     prompt: job.prompt,
     workflowId: job.workflowId,
-    localPath: buildAssetLocalPath(job),
+    localPath: job.outputPath ?? buildAssetLocalPath(job),
     metadata: {
       mediaJobId: job.id,
       generatedAt: now,
@@ -2018,7 +1295,7 @@ function finalizeMediaJobAsGenerated(job: MediaJob, actorLabel = "GM Dashboard")
   }
   job.status = "generated";
   job.completedAt = new Date().toISOString();
-  job.outputPath = buildAssetLocalPath(job);
+  job.outputPath ??= buildAssetLocalPath(job);
   job.error = undefined;
 
   const existing = assetRecords.find((entry) => entry.metadata.mediaJobId === job.id);
@@ -2248,7 +1525,7 @@ function validateScenePacket(packet: ScenePacket): ScenePacketValidation {
     errors.push("Scene packet must include at least one beat.");
   } else {
     packet.beats.forEach((beat, index) => {
-      if (!["description", "choice", "threat", "clue", "consequence"].includes(beat.kind)) {
+      if (!(sceneBeatKinds as readonly string[]).includes(beat.kind)) {
         errors.push(`Beat ${index + 1} has an invalid kind.`);
       }
 
@@ -2355,43 +1632,27 @@ function convertScenePacketEventToStateEvent(
   return null;
 }
 
-function buildMutationCacheKey(kind: string, requestId: string) {
-  return `${kind}:${requestId}`;
-}
-
-function getCachedMutationResponse(kind: string, requestId: string) {
-  const cacheKey = buildMutationCacheKey(kind, requestId);
-  const cached = recentMutationResponses.get(cacheKey);
-
-  if (!cached) {
-    return null;
-  }
-
-  if (cached.expiresAt < Date.now()) {
-    recentMutationResponses.delete(cacheKey);
-    return null;
-  }
-
-  return cached;
-}
-
-function cacheMutationResponse(kind: string, requestId: string, statusCode: number, body: unknown) {
-  recentMutationResponses.set(buildMutationCacheKey(kind, requestId), {
-    statusCode,
-    body,
-    expiresAt: Date.now() + 5 * 60 * 1000
-  });
-}
-
 function broadcast(type: string, payload: unknown) {
-  const message = JSON.stringify({ type, payload });
+  commands.defer(() => deliverBroadcast(type, payload));
+}
 
+function deliverBroadcast(type: string, payload: unknown) {
+  narration.cancelStale();
+  speech.cancelStale();
+  sceneImages.cancelStale();
+  mediaRouterClient.cancelStale();
   for (const client of wss.clients) {
     if (client.readyState === 1) {
       try {
-        client.send(message);
+        const identity = authority.authenticate(socketTokens.get(client));
+        const projected = type === "session_snapshot" ? projectSnapshot(payload, identity)
+          : type === "party_snapshot" ? projectParty(payload as PartyState, identity)
+          : type === "runtime_status" ? projectRuntime(payload, identity) : payload;
+        // Unknown message kinds remain host-only until they get an explicit projection.
+        if (identity.role !== "gm" && !["session_snapshot", "party_snapshot", "runtime_status", "roll_recorded"].includes(type)) continue;
+        client.send(JSON.stringify({ type, payload: projected }));
       } catch {
-        // Socket closed between check and send; ignore
+        client.close(4001, "Session expired or revoked");
       }
     }
   }
@@ -2401,70 +1662,81 @@ app.get("/health", (_request, response) => {
   response.json({
     ok: true,
     service: "game-server",
-    port: gameServerPort
+    port: server.address() && typeof server.address() === "object" ? (server.address() as { port: number }).port : gameServerPort,
+    profile,
+    optionalServices: profile === "party" ? "disabled" : "configuration-dependent"
   });
+});
+
+app.post("/api/capabilities/refresh", requireRole("gm", "admin"), async (_request, response) => {
+  await capabilityHealth.refresh();
+  if (!work.active) throw new SessionError(503, "Server is stopping.");
+  response.json({ ok: true, services: capabilityHealth.status() });
 });
 
 app.get("/api/pending-narration", (_request, response) => {
   response.json(pendingNarration);
 });
 
-app.get("/api/party", (_request, response) => {
-  response.json(party.map(c => ({
-    name: c.name,
-    classLabel: c.classLabel,
-    hp: c.hp,
-    claimedByLabel: c.claimedByLabel || "unclaimed"
-  })));
+installTableReadRoutes(app, {
+  snapshot: getSessionSnapshot,
+  runtime: getRuntimeStatus,
+  summaryDirectory: sessionSummaryExportDir,
+  now: work.now
 });
 
-app.get("/api/rolls", (_request, response) => {
-  response.json(rollLog.slice(0, 20).map(r => ({
-    name: r.actorName,
-    dice: r.dice,
-    modifier: r.modifier,
-    total: r.total,
-    note: r.note,
-    time: r.timestamp
-  })));
-});
-
-app.get("/api/images", (_request, response) => {
-  if (!comfyOutputBDEDir) {
-    response.json({ images: [] });
-    return;
-  }
+const readAsset = createAssetDelivery([mediaOutputRoot, comfyOutputBDEDir]);
+app.get('/api/assets/:assetId/preview', requireRole('gm','admin'), async(request,response,next)=>{
   try {
-    const entries = readdirSync(comfyOutputBDEDir, { withFileTypes: true })
-      .filter((entry) => entry.isFile() && /\.(png|jpg|jpeg|webp)$/i.test(entry.name))
-      .map((entry) => {
-        const fullPath = join(comfyOutputBDEDir, entry.name);
-        return { filename: entry.name, url: `/images/${entry.name}`, mtime: statSync(fullPath).mtimeMs };
-      });
-    entries.sort((a, b) => b.mtime - a.mtime);
-    response.json({ images: entries.slice(0, 20) });
-  } catch {
-    response.json({ images: [] });
-  }
+    const asset=assetRecords.find(asset=>asset.id===request.params.assetId);
+    if(!asset||!['generated','approved'].includes(asset.status)||asset.kind!=='image') throw new SessionError(404,'Preview unavailable.');
+    const room=authority.room().id,file=await readAsset(asset);
+    const viewer=authority.authenticate(requestCredential(request.headers));
+    if(viewer.role!=='gm'||room!==authority.room().id||!assetRecords.includes(asset)||!['generated','approved'].includes(asset.status)) throw new SessionError(404,'Preview unavailable.');
+    response.set('Content-Type',file.type).set('X-Content-Type-Options','nosniff').set('Cache-Control','no-store').send(file.bytes);
+  }catch(error){next(error);}
+});
+app.get("/api/images", (request, response) => {
+  const viewer = identityFor(request);
+  response.json({ images: assetRecords.filter(asset => assetVisible(asset, viewer) && ["image", "map", "handout"].includes(asset.kind)).slice(0, 20)
+    .map(asset => ({ filename: asset.id, url: `/api/assets/${encodeURIComponent(asset.id)}/content` })) });
+});
+app.get("/api/assets/:assetId/content", async (request, response, next) => {
+  try {
+    const asset = assetRecords.find(asset => asset.id === request.params.assetId);
+    if (!asset || !assetVisible(asset, identityFor(request))) throw new SessionError(404, "Asset not found.");
+    const file = await readAsset(asset);
+    if (!assetRecords.includes(asset) || !assetVisible(asset, authority.authenticate(requestCredential(request.headers)))) throw new SessionError(404, "Asset not found.");
+    response.set("Content-Type", file.type).set("X-Content-Type-Options", "nosniff").set("Content-Security-Policy", "default-src 'none'; sandbox")
+      .set("Cache-Control", "no-store").send(file.bytes);
+  } catch (error) { next(error); }
+});
+app.post("/api/assets/:assetId/approve", requireRole("gm", "admin"), async (request, response, next) => {
+  try {
+    const asset = assetRecords.find(asset => asset.id === request.params.assetId);
+    if (!asset || !["generated", "approved"].includes(asset.status)) throw new SessionError(409, "Generated asset required.");
+    const room = authority.room().id;
+    await readAsset(asset);
+    const reviewer = authority.authenticate(requestCredential(request.headers));
+    if (reviewer.role !== "gm" || room !== authority.room().id) throw new SessionError(409, "Session changed during review.");
+    if (!assetRecords.includes(asset) || !["generated", "approved"].includes(asset.status)) throw new SessionError(409, "Asset changed during review.");
+    const previous = asset.status, visibility=asset.visibility; asset.status = "approved";
+    if(request.body?.share===true) asset.visibility='player_visible';
+    try { db.transaction(persistStateOrThrow)(); } catch { asset.status = previous; asset.visibility=visibility; throw new SessionError(503, "Approval could not be saved."); }
+    response.json({ ok: true, asset, sessionSnapshot: publishSessionState() });
+  } catch (error) { next(error); }
 });
 
-app.post("/api/speak", async (request, response) => {
-  const text = typeof request.body.text === "string" ? request.body.text.trim() : "";
-  if (!text) { response.status(400).json({ error: "text required" }); return; }
+app.post("/api/speak", requireRole("gm", "admin"), async (request, response) => {
+  const cancelled = new AbortController();
+  const onClose = () => { if (!response.writableEnded) cancelled.abort(); };
+  response.once("close", onClose);
   try {
-    const ttsRes = await fetch(`${ttsServiceEndpoint}/speak`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, voice: "bm_george", speed: 0.85 }),
-      signal: AbortSignal.timeout(30000)
-    });
-    if (!ttsRes.ok) { response.status(502).json({ error: "TTS service error" }); return; }
-    const audioBuffer = await ttsRes.arrayBuffer();
-    response.set("Content-Type", "audio/wav");
-    response.send(Buffer.from(audioBuffer));
-  } catch {
-    response.status(502).json({ error: "TTS service unavailable" });
-  }
+    const bytes = await speech.synthesize(request.body?.text, cancelled.signal);
+    response.set("Content-Type", "audio/wav").set("Cache-Control", "no-store").send(Buffer.from(bytes));
+  } catch (error) {
+    if (!response.destroyed) response.status(error instanceof SpeechError ? error.status : 502).json({ error: error instanceof SpeechError ? error.message : "Speech service unavailable." });
+  } finally { response.removeListener("close", onClose); }
 });
 
 app.get("/player", (_request, response) => {
@@ -2480,34 +1752,6 @@ app.get("/player/*rest", (request, response, next) => {
   }
 
   response.sendFile(join(playerCompanionDistDir, "index.html"));
-});
-
-app.get("/api/runtime-status", (_request, response) => {
-  response.json(getRuntimeStatus());
-});
-
-app.get("/api/session-snapshot", (_request, response) => {
-  response.json(getSessionSnapshot());
-});
-
-app.get("/api/rolls", (_request, response) => {
-  response.json(rollLog);
-});
-
-app.get("/api/session-summary.md", (_request, response) => {
-  const snapshot = getSessionSnapshot();
-  const filename = `${sanitizeFilePart(snapshot.campaignTitle)}-session-summary-${new Date()
-    .toISOString()
-    .slice(0, 10)}.md`;
-  const markdown = buildSessionSummaryMarkdown();
-  mkdirSync(sessionSummaryExportDir, { recursive: true });
-  const exportPath = join(sessionSummaryExportDir, filename);
-  writeFileSync(exportPath, markdown, "utf8");
-
-  response.setHeader("Content-Type", "text/markdown; charset=utf-8");
-  response.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-  response.setHeader("X-Export-Path", exportPath);
-  response.send(markdown);
 });
 
 app.get("/api/scene-packet", requireRole("gm", "admin"), (_request, response) => {
@@ -2569,23 +1813,7 @@ app.post("/api/local-model/draft", requireRole("gm", "admin"), async (request, r
   // Attempt real AI narration
   try {
     const snapshot = getSessionSnapshot();
-    const sceneContext: SceneContext = {
-      campaignTitle: snapshot.campaignTitle,
-      currentScene: snapshot.currentScene,
-      sceneDescription: snapshot.activeSceneContext.location?.summary,
-      location: snapshot.activeSceneContext.location
-        ? { name: snapshot.activeSceneContext.location.name, summary: snapshot.activeSceneContext.location.summary }
-        : undefined,
-      tone: snapshot.activeSceneContext.tone,
-      facts: snapshot.activeSceneContext.facts.map((f: { text: string }) => f.text),
-      activeCharacters: party.map((c) => ({
-        name: c.name,
-        raceClass: c.classLabel,
-        hp: c.hp.current,
-        maxHp: c.hp.max
-      })),
-      recentEvents: eventLog.slice(0, 5).map((e) => e.summary)
-    };
+    const sceneContext = buildAiSceneContext(snapshot, "public_demo");
 
     const rollContext: RollResultContext = {
       actorName: party[0]?.name || "The party",
@@ -2598,35 +1826,44 @@ app.post("/api/local-model/draft", requireRole("gm", "admin"), async (request, r
       critical: null
     };
 
-    const aiResult = await generateNarration(sceneContext, rollContext, { temperature: 0.85, maxTokens: 350 });
-
-    if (aiResult.text && !aiResult.error) {
-      draft.response.narration = aiResult.text;
+    const cancelled = new AbortController();
+    const onClose = () => { if (!response.writableEnded) cancelled.abort(); };
+    response.once("close", onClose);
+    let outcome;
+    try {
+      outcome = await narration.run("draft", { scene: sceneContext, roll: rollContext }, draft.response.narration, cancelled.signal);
+    } finally { response.removeListener("close", onClose); }
+    if (outcome.status === "stale") throw new SessionError(409, "Session changed or narration was cancelled. Request a new draft.");
+    const aiResult = outcome.value;
+    if (outcome.status === "generated") {
+      draft.response.narration = outcome.text;
       draft.adapter.mode = "live";
     }
 
+    if (!work.active) throw new SessionError(503, "Server is stopping.");
     recordAiLog({
       kind: "output_packet",
       adapter: "local_model",
       correlationId: packet.id,
-      summary: `Local-model draft created${aiResult.error ? " (placeholder fallback)" : ""} for ${packet.sceneTitle}`,
+      summary: `Local-model draft created${outcome.status === "fallback" ? " (placeholder fallback)" : ""} for ${packet.sceneTitle}`,
       details: {
         suggestedNextBeat: draft.response.suggestedNextBeat,
         gmNotesCount: draft.response.gmNotes.length,
         warningPresent: Boolean(draft.response.riskyStateChangeWarning),
-        provider: aiResult.provider,
-        model: aiResult.model,
-        error: aiResult.error
+        provider: aiResult?.provider,
+        model: aiResult?.model,
+        fallback: outcome.status === "fallback"
       }
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    if (err instanceof SessionError) throw err;
+    if (!work.active) throw new SessionError(503, "Server is stopping.");
     recordAiLog({
       kind: "output_packet",
       adapter: "local_model",
       correlationId: packet.id,
       summary: `Local-model draft failed, using placeholder for ${packet.sceneTitle}`,
-      details: { error: message }
+      details: { fallback: true }
     });
   }
 
@@ -2675,28 +1912,13 @@ app.post("/api/director-mode/draft", requireRole("gm", "admin"), async (request,
   // Attempt real AI director guidance
   try {
     const snapshot = getSessionSnapshot();
-    const sceneContext: SceneContext = {
-      campaignTitle: snapshot.campaignTitle,
-      currentScene: snapshot.currentScene,
-      sceneDescription: snapshot.activeSceneContext.location?.summary,
-      location: snapshot.activeSceneContext.location
-        ? { name: snapshot.activeSceneContext.location.name, summary: snapshot.activeSceneContext.location.summary }
-        : undefined,
-      tone: snapshot.activeSceneContext.tone,
-      facts: snapshot.activeSceneContext.facts.map((f: { text: string }) => f.text),
-      activeCharacters: party.map((c) => ({
-        name: c.name,
-        raceClass: c.classLabel,
-        hp: c.hp.current,
-        maxHp: c.hp.max
-      })),
-      recentEvents: eventLog.slice(0, 5).map((e) => e.summary)
-    };
+    const sceneContext = buildAiSceneContext(snapshot, "gm_only");
 
     const aiResult = await generateDirectorGuidance(sceneContext, approvalQueue.length, memoryEntries.length, {
       temperature: 0.7,
-      maxTokens: 450
+      maxTokens: 450, request: serviceRequest
     });
+    if (!work.active) throw new SessionError(503, "Server is stopping.");
 
     if (aiResult.text && !aiResult.error) {
       draft.response.directorGuidance = aiResult.text;
@@ -2739,45 +1961,22 @@ app.post("/api/ai/propose-action", requireRole("gm", "admin"), async (request, r
   const body = request.body as { previousAction?: string } | undefined;
   const snapshot = getSessionSnapshot();
 
-  const sceneContext: SceneContext = {
-    campaignTitle: snapshot.campaignTitle,
-    currentScene: snapshot.currentScene,
-    sceneDescription: snapshot.activeSceneContext.location?.summary,
-    location: snapshot.activeSceneContext.location
-      ? { name: snapshot.activeSceneContext.location.name, summary: snapshot.activeSceneContext.location.summary }
-      : undefined,
-    tone: snapshot.activeSceneContext.tone,
-    facts: snapshot.activeSceneContext.facts.map((f: { text: string }) => f.text),
-    activeCharacters: party.map((c) => ({
-      name: c.name,
-      raceClass: c.classLabel,
-      hp: c.hp.current,
-      maxHp: c.hp.max
-    })),
-    recentEvents: eventLog.slice(0, 5).map((e) => e.summary)
-  };
+  const sceneContext = buildAiSceneContext(snapshot, "gm_only");
 
-  const recentRolls: RollResultContext[] = rollLog.slice(0, 3).map((r) => ({
-    actorName: r.actorName,
-    actionDescription: r.note,
-    diceLabel: r.dice,
-    total: r.total,
-    modifier: r.modifier,
-    rawRoll: typeof r.rolled === "number" ? r.rolled : Array.isArray(r.rolled) ? r.rolled[0] : 0,
-    success: r.total >= 10,
-    critical: (typeof r.rolled === "number" && r.rolled === 20)
-      ? "success"
-      : (typeof r.rolled === "number" && r.rolled === 1)
-        ? "failure"
-        : null
+  const recentRolls: RollResultContext[] = rollLog.filter(r => r.action).slice(0, 12).map(r => ({
+    actorName: r.actorName, actionDescription: r.action!.description, diceLabel: r.dice,
+    total: r.total, modifier: r.modifier,
+    rawRoll: typeof r.rolled === "number" ? r.rolled : r.rolled[0],
+    success: r.action!.success, dc: r.action!.dc, critical: null
   }));
 
   try {
     const aiResult = await proposeSceneAction(sceneContext, body?.previousAction, recentRolls, {
       temperature: 0.8,
-      maxTokens: 400
+      maxTokens: 400, request: serviceRequest
     });
 
+    if (!work.active) throw new SessionError(503, "Server is stopping.");
     recordAiLog({
       kind: "output_packet",
       adapter: "local_model",
@@ -2791,14 +1990,13 @@ app.post("/api/ai/propose-action", requireRole("gm", "admin"), async (request, r
       return;
     }
 
-    let parsed: Record<string, unknown> = {};
-    try {
-      const jsonMatch = aiResult.text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
-      }
-    } catch {
-      // Non-JSON response — return raw text
+    let parsed;
+    try { parsed = parseActionProposal(aiResult.text); }
+    catch {
+      recordAiLog({ kind: "validation_failure", adapter: "local_model", correlationId: randomUUID(),
+        summary: "AI action proposal rejected by contract", details: { reason: "Invalid structured proposal" } });
+      response.status(502).json({ error: "AI returned an invalid action proposal. Try again." });
+      return;
     }
 
     response.json({
@@ -2815,7 +2013,7 @@ app.post("/api/ai/propose-action", requireRole("gm", "admin"), async (request, r
 function createMemoryEntry(trigger: string) {
   const { entry, exportPath } = buildMemoryEntry();
   memoryEntries.unshift(entry);
-  memoryEntries.splice(8);
+  // Retain saved memory independently of the bounded AI context window.
   recordTableEvent({
     category: "memory",
     type: "memory_entry_created",
@@ -3017,7 +2215,7 @@ app.post("/api/scene-packet/queue-audio", requireRole("gm", "admin"), (request, 
       return status === "suggested" || status === "approved";
     })
     .map((cue) => ({
-      id: typeof cue.id === "string" ? cue.id : `audio-cue-${Date.now().toString(36)}`,
+      id: typeof cue.id === "string" ? cue.id : `audio-cue-${work.now().toString(36)}`,
       kind: String(cue.kind ?? "ambience"),
       status: "queued" as const,
       visibility: String(cue.visibility ?? "gm_only") as "gm_only" | "player_visible" | "public_demo",
@@ -3062,6 +2260,8 @@ app.get("/api/audio-cues", requireRole("gm", "admin", "player"), (_request, resp
   });
 });
 
+const audioCuePlayback = createAudioCuePlayback(serviceRequest);
+
 app.post("/api/audio-cues/:cueId/play", requireRole("gm", "admin"), async (request, response) => {
   const cueId = String(request.params.cueId);
   const cue = audioCueQueue.find((c) => c.id === cueId);
@@ -3076,46 +2276,12 @@ app.post("/api/audio-cues/:cueId/play", requireRole("gm", "admin"), async (reque
     return;
   }
 
-  // Find a matching track by tags (simple first-match strategy)
   try {
-    const libraryRes = await fetch(`${audioServiceEndpoint}/api/library`, {
-      signal: AbortSignal.timeout(5000)
-    });
-
-    if (!libraryRes.ok) {
-      throw new Error("Failed to fetch audio library");
-    }
-
-    const library = (await libraryRes.json()) as { tracks: Array<{ id: string; tags: string[]; kind: string }> };
-    const matchingTrack = library.tracks.find((track) => {
-      const trackTags = new Set(track.tags.map((t) => t.toLowerCase()));
-      return cue.tags.some((tag) => trackTags.has(tag.toLowerCase()));
-    });
-
-    if (!matchingTrack) {
-      response.status(404).json({
-        error: "No matching audio track found for cue tags",
-        cue,
-        availableTracks: library.tracks.length
-      });
+    const matchingTrack = await audioCuePlayback.play(cue, audioServiceEndpoint);
+    if (!audioCueQueue.includes(cue)) {
+      response.status(409).json({ error: "Audio cue is no longer queued" });
       return;
     }
-
-    const playRes = await fetch(`${audioServiceEndpoint}/api/play`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        trackId: matchingTrack.id,
-        loop: cue.loop,
-        volume: cue.volume
-      }),
-      signal: AbortSignal.timeout(5000)
-    });
-
-    if (!playRes.ok) {
-      throw new Error(`Audio service play failed: ${playRes.status}`);
-    }
-
     cue.status = "playing";
 
     response.json({
@@ -3124,6 +2290,10 @@ app.post("/api/audio-cues/:cueId/play", requireRole("gm", "admin"), async (reque
       matchedTrack: matchingTrack
     });
   } catch (err) {
+    if (err instanceof AudioTrackNotFound) {
+      response.status(404).json({ error: err.message, cue, availableTracks: err.availableTracks });
+      return;
+    }
     const message = err instanceof Error ? err.message : String(err);
     recordErrorEvent({
       severity: "error",
@@ -3168,54 +2338,17 @@ app.get("/api/media-cleanup-report", requireRole("gm", "admin"), (_request, resp
   });
 });
 
-app.post("/api/characters", requireRole("gm", "admin"), (request, response) => {
-  const name = typeof request.body.name === "string" ? request.body.name.trim() : "";
-  const classLabel = typeof request.body.classLabel === "string" ? request.body.classLabel.trim() : "";
-  const maxHp = typeof request.body.maxHp === "number" ? request.body.maxHp : 10;
-  const armorClass = typeof request.body.armorClass === "number" ? request.body.armorClass : 10;
-  const level = typeof request.body.level === "number" ? request.body.level : 1;
-  const clientNotes = Array.isArray(request.body.notes) ? request.body.notes.filter((n: unknown) => typeof n === "string") as string[] : [];
-  const image = typeof request.body.image === "string" && request.body.image.length > 0 ? request.body.image : null;
+const characterRouteHooks = { party, recordTableEvent, publishSessionState, persistState, requireRole };
+installCharacterCreationRoute(app, characterRouteHooks);
+installForgeRoutes(app,{db,party,commands,portraits,publish:publishSessionState,request:serviceRequest,endpoint:comfyApiBase,enabled:()=>profile!=="party",active:()=>work.active});
+installCharacterPortraitRoutes(app, {party, portraits, commands, publish:publishSessionState});
 
-  if (!name || !classLabel) {
-    response.status(400).json({ error: "name and classLabel are required" });
-    return;
-  }
-
-  const notes = clientNotes.length > 0 ? clientNotes : [`Created at level ${level}`];
-
-  const character: Character = {
-    id: randomUUID(),
-    name,
-    classLabel,
-    hp: { current: maxHp, max: maxHp },
-    armorClass,
-    initiative: null,
-    conditions: [],
-    resources: [],
-    inventory: [],
-    notes,
-    image,
-    claimedByClientId: null,
-    claimedByLabel: null
-  };
-
-  party.push(character);
-
-  recordTableEvent({
-    category: "state",
-    type: "character_created",
-    actor: { id: "gm", kind: "gm", label: "GM" },
-    visibility: "gm_only",
-    summary: `Character ${name} created`,
-    payload: { characterId: character.id, name, classLabel }
-  });
-
-  broadcast("session_snapshot", getSessionSnapshot());
-  broadcast("runtime_status", getRuntimeStatus());
-
-  persistState();
-  response.status(201).json(character);
+app.post('/api/characters/:characterId/scene-job', requireRole('gm', 'admin'), (request, response) => {
+  const character = resolveCharacter(String(request.params.characterId));
+  if (!character) throw new SessionError(404, 'Character not found.');
+  const job = buildCharacterVisualCanonJob(character, request.body.scenePrompt.trim());
+  mediaJobs.unshift(job); mediaJobs.splice(12);
+  response.json({ok:true, job, sessionSnapshot:publishSessionState()});
 });
 
 app.post("/api/characters/:characterId/visual-canon-job", requireRole("gm", "admin"), (request, response) => {
@@ -3251,6 +2384,39 @@ app.post("/api/characters/:characterId/visual-canon-job", requireRole("gm", "adm
   });
 });
 
+
+const backups = createBackups(db, { directory: backupsDir, source: databasePath, now: work.now });
+let sessionStarted = false;
+let startBackup: Promise<unknown> | undefined;
+let backupWarning = false;
+function reportBackupFailure() {
+  backupWarning = true;
+  console.error("[game-server] Automatic backup failed. Core play remains available; check storage and create a manual backup.");
+}
+
+app.post("/api/backup", requireRole("gm", "admin"), async (request, response) => {
+  try {
+    db.transaction(persistStateOrThrow)();
+    const backup = await backups.create(request.body?.note);
+    backupWarning = false;
+    response.json({ ok: true, backup });
+  } catch (error) { response.status(error instanceof BackupError ? error.status : 503).json({ error: error instanceof BackupError ? error.message : "Backup could not be completed. Check storage and retry." }); }
+});
+app.get("/api/backups", requireRole("gm", "admin"), async (_request, response) => {
+  try { response.json(await backups.list()); }
+  catch { response.status(503).json({ error: "Backup list is unavailable." }); }
+});
+app.post("/api/backups/:backupId/validate", requireRole("gm", "admin"), async (request, response) => {
+  try { response.json(await backups.validate(typeof request.params.backupId === "string" ? request.params.backupId : "")); }
+  catch (error) { response.status(error instanceof BackupError ? error.status : 503).json({ error: error instanceof BackupError ? error.message : "Backup validation failed." }); }
+});
+
+const mediaStarting = new Set<MediaJob>();
+function mediaJobIsCurrent(job: MediaJob) {
+  return work.active && mediaJobs.includes(job) &&
+    (job.settings.routerSubmissionSessionId === undefined || job.settings.routerSubmissionSessionId === authority.room().id);
+}
+
 app.post("/api/media-jobs/:jobId/start", requireRole("gm", "admin"), async (request, response) => {
   const { jobId } = request.params;
   const job = mediaJobs.find((entry) => entry.id === jobId);
@@ -3259,6 +2425,11 @@ app.post("/api/media-jobs/:jobId/start", requireRole("gm", "admin"), async (requ
     response.status(404).json({
       error: "Media job not found"
     });
+    return;
+  }
+
+  if (mediaStarting.has(job) || job.status === "running") {
+    response.status(409).json({ error: "Media job is already starting or running" });
     return;
   }
 
@@ -3273,56 +2444,44 @@ app.post("/api/media-jobs/:jobId/start", requireRole("gm", "admin"), async (requ
     return;
   }
 
-  // If comfy-router is configured, attempt real submission
+  // Persist admission before transport. Ambiguous acceptance must not become a second GPU job after restart.
   if (comfyRouterEndpoint) {
+    if (job.settings.routerSubmissionAttemptedAt || job.comfyPromptId || job.status === "generated" || job.status === "rejected" || job.status === "archived") {
+      response.status(409).json({ error: "This media job was already attempted. Reconcile it manually or queue a new job before generating again." });
+      return;
+    }
+    if (!mediaRouterClient.canStart) { response.status(503).json({ error: "Media request queue is busy. Try again shortly." }); return; }
+    const settings = job.settings;
+    job.settings = { ...settings, routerSubmissionAttemptedAt: new Date(work.now()).toISOString(), routerSubmissionSessionId: authority.room().id };
+    try { db.transaction(persistStateOrThrow)(); }
+    catch {
+      job.settings = settings;
+      response.status(503).json({ error: "Could not save media admission. No submission was sent; retry after checking storage." }); return;
+    }
+    const startingStatus = job.status, startingRoom = authority.room().id;
     try {
-      const prepareRes = await fetch(`${comfyRouterEndpoint}/api/jobs/prepare`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          id: job.id,
-          workflowId: job.workflowId,
-          prompt: job.prompt,
-          negativePrompt: job.negativePrompt,
-          type: job.type
-        }),
-        signal: AbortSignal.timeout(10000)
-      });
-
-      if (!prepareRes.ok) {
-        const text = await prepareRes.text();
-        throw new Error(`Prepare failed: ${prepareRes.status} ${text}`);
+      mediaStarting.add(job);
+      const submitted = await mediaRouterClient.start(comfyRouterEndpoint, job);
+      if (!work.active || authority.room().id !== startingRoom || !mediaJobs.includes(job) || job.status !== startingStatus) {
+        response.status(409).json({ error: "Media job changed while starting" });
+        return;
       }
-
-      const prepareJson = await prepareRes.json() as { job?: { id: string } };
-      const preparedJobId = prepareJson.job?.id;
-
-      if (!preparedJobId) {
-        throw new Error("Prepare response missing job id");
-      }
-
-      const submitRes = await fetch(`${comfyRouterEndpoint}/api/jobs/${preparedJobId}/submit`, {
-        method: "POST",
-        signal: AbortSignal.timeout(15000)
-      });
-
-      if (!submitRes.ok) {
-        const text = await submitRes.text();
-        throw new Error(`Submit failed: ${submitRes.status} ${text}`);
-      }
-
-      const submitJson = await submitRes.json() as { job?: { comfyPromptId?: string } };
-
-      job.comfyRouterJobId = preparedJobId;
-      job.comfyPromptId = submitJson.job?.comfyPromptId;
+      job.comfyRouterJobId = submitted.routerJobId;
+      job.comfyPromptId = submitted.promptId;
       job.status = "running";
       job.startedAt = new Date().toISOString();
       job.completedAt = undefined;
       job.error = undefined;
+      db.transaction(persistStateOrThrow)();
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      if (!work.active || authority.room().id !== startingRoom || !mediaJobs.includes(job) || job.status !== startingStatus) {
+        response.status(409).json({ error: "Media job changed while starting" });
+        return;
+      }
+      if (err instanceof MediaRouterError && err.code === "stale") {
+        response.status(409).json({ error: "Media request is no longer current." }); return;
+      }
+      const message = err instanceof MediaRouterError ? err.message : "Media router unavailable.";
       job.status = "failed";
       job.completedAt = new Date().toISOString();
       job.error = `ComfyUI routing failed: ${message}`;
@@ -3343,6 +2502,7 @@ app.post("/api/media-jobs/:jobId/start", requireRole("gm", "admin"), async (requ
       });
       return;
     }
+    finally { mediaStarting.delete(job); }
   } else {
     job.status = "running";
     job.startedAt = new Date().toISOString();
@@ -3433,671 +2593,39 @@ app.post("/api/media-jobs/:jobId/mark-generated", requireRole("gm", "admin"), (r
   });
 });
 
-app.get("/api/state-event-queue", requireRole("gm", "admin"), (_request, response) => {
-  response.json(approvalQueue);
+installStateEventRoutes(app, {
+  approvalQueue, events: stateEvents, recordTableEvent, publishSessionState, createMemoryEntry, requireRole, now: work.now
 });
 
-app.post("/api/state-events/propose", requireRole("gm", "player", "admin"), (request, response) => {
-  const body = request.body as Partial<StateEventRequest> & {
-    submittedBy?: { id?: string; kind?: string; label?: string };
-  };
-  const requestId = typeof body.requestId === "string" ? body.requestId.trim() : "";
+installCharacterClaimRoutes(app, characterRouteHooks);
 
-  if (requestId) {
-    const cached = getCachedMutationResponse("state-event-proposal", requestId);
-
-    if (cached) {
-      response.status(cached.statusCode).json(cached.body);
-      return;
-    }
-  }
-
-  if (typeof body.type !== "string" || typeof body.characterId !== "string") {
-    response.status(400).json({
-      error: "type and characterId are required"
-    });
-    return;
-  }
-
-  const event = body as StateEventRequest;
-  const submittedBy = {
-    id: typeof body.submittedBy?.id === "string" ? body.submittedBy.id : "gm-dashboard",
-    kind: body.submittedBy?.kind === "player" ? "player" : "gm",
-    label:
-      typeof body.submittedBy?.label === "string" && body.submittedBy.label.trim()
-        ? body.submittedBy.label.trim()
-        : "GM Dashboard"
-  } as StateEventProposal["submittedBy"];
-
-  const proposal: StateEventProposal = {
-    id: randomUUID(),
-    createdAt: new Date().toISOString(),
-    summary: summarizeStateEvent(event),
-    submittedBy,
-    event
-  };
-
-  approvalQueue.unshift(proposal);
-  approvalQueue.splice(12);
-  const result = {
-    ok: true,
-    proposal,
-    sessionSnapshot: publishSessionState()
-  };
-
-  if (requestId) {
-    cacheMutationResponse("state-event-proposal", requestId, 201, result);
-  }
-
-  response.status(201).json(result);
+installProgressRoutes(app, { state: () => campaignProgress, requireHost: requireRole("gm", "admin"), publish: publishSessionState,
+  closeScene() { currentAction = null; commands.defer(() => narration.cancelStale()); }
 });
 
-app.post("/api/state-events/:proposalId/approve", requireRole("gm", "admin"), (request, response) => {
-  const proposalIndex = approvalQueue.findIndex((entry) => entry.id === String(request.params.proposalId));
-
-  if (proposalIndex === -1) {
-    response.status(404).json({
-      error: "Proposal not found"
-    });
-    return;
-  }
-
-  const [proposal] = approvalQueue.splice(proposalIndex, 1);
-  const applied = applyStateEvent(proposal.event, `GM Approved: ${proposal.submittedBy.label}`);
-
-  if (!applied.ok) {
-    approvalQueue.unshift(proposal);
-    response.status(applied.statusCode).json(applied.body);
-    return;
-  }
-
-  recordTableEvent({
-    category: "state",
-    type: "proposal_approved",
-    actor: {
-      id: "gm-dashboard",
-      kind: "gm",
-      label: "GM Dashboard"
-    },
-    visibility: "gm_only",
-    summary: `Approved queued change: ${proposal.summary}`,
-    payload: {
-      proposalId: proposal.id,
-      proposalType: proposal.event.type
-    }
-  });
-
-  createMemoryEntry(`Approved: ${proposal.summary}`);
-
-  response.json({
-    ok: true,
-    sessionSnapshot: publishSessionState()
-  });
-});
-
-app.post("/api/state-events/:proposalId/reject", requireRole("gm", "admin"), (request, response) => {
-  const proposalIndex = approvalQueue.findIndex((entry) => entry.id === String(request.params.proposalId));
-
-  if (proposalIndex === -1) {
-    response.status(404).json({
-      error: "Proposal not found"
-    });
-    return;
-  }
-
-  const [proposal] = approvalQueue.splice(proposalIndex, 1);
-  recordTableEvent({
-    category: "state",
-    type: "proposal_rejected",
-    actor: {
-      id: "gm-dashboard",
-      kind: "gm",
-      label: "GM Dashboard"
-    },
-    visibility: "gm_only",
-    summary: `Rejected queued change: ${proposal.summary}`,
-    payload: {
-      proposalId: proposal.id,
-      proposalType: proposal.event.type
-    }
-  });
-
-  response.json({
-    ok: true,
-    sessionSnapshot: publishSessionState()
-  });
-});
-
-app.post("/api/state-events", requireRole("gm", "admin"), (request, response) => {
-  const body = request.body as Partial<StateEventRequest>;
-  const requestId = typeof body.requestId === "string" ? body.requestId.trim() : "";
-
-  if (requestId) {
-    const cached = getCachedMutationResponse("state-event", requestId);
-
-    if (cached) {
-      response.status(cached.statusCode).json(cached.body);
-      return;
-    }
-  }
-
-  if (typeof body.type !== "string" || typeof body.characterId !== "string") {
-    response.status(400).json({
-      error: "type and characterId are required"
-    });
-    return;
-  }
-
-  const applied = applyStateEvent(body as StateEventRequest);
-
-  if (requestId && applied.ok) {
-    cacheMutationResponse("state-event", requestId, applied.statusCode, applied.body);
-  }
-
-  response.status(applied.statusCode).json(applied.body);
-});
-
-app.post("/api/claim-character", requireRole("player", "gm", "admin"), (request, response) => {
-  const clientId = typeof request.body.clientId === "string" ? request.body.clientId.trim() : "";
-  const characterId = typeof request.body.characterId === "string" ? request.body.characterId.trim() : "";
-  const requestId = typeof request.body.requestId === "string" ? request.body.requestId.trim() : "";
-  const playerLabelRaw =
-    typeof request.body.playerLabel === "string" ? request.body.playerLabel.trim() : "";
-  const playerLabel = playerLabelRaw || "Player";
-
-  if (requestId) {
-    const cached = getCachedMutationResponse("claim-character", requestId);
-
-    if (cached) {
-      response.status(cached.statusCode).json(cached.body);
-      return;
-    }
-  }
-
-  if (!clientId || !characterId) {
-    response.status(400).json({
-      error: "clientId and characterId are required"
-    });
-    return;
-  }
-
-  const character = party.find((entry) => entry.id === characterId);
-
-  if (!character) {
-    response.status(404).json({
-      error: "Character not found"
-    });
-    return;
-  }
-
-  if (character.claimedByClientId && character.claimedByClientId !== clientId) {
-    response.status(409).json({
-      error: "Character already claimed"
-    });
-    return;
-  }
-
-  for (const entry of party) {
-    if (entry.claimedByClientId === clientId && entry.id !== characterId) {
-      entry.claimedByClientId = null;
-      entry.claimedByLabel = null;
-    }
-  }
-
-  character.claimedByClientId = clientId;
-  character.claimedByLabel = playerLabel;
-  recordTableEvent({
-    category: "claim",
-    type: "character_claimed",
-    actor: {
-      id: clientId,
-      kind: "player",
-      label: playerLabel
-    },
-    visibility: "player_visible",
-    summary: `${playerLabel} claimed ${character.name}`,
-    payload: {
-      clientId,
-      characterId: character.id,
-      characterName: character.name,
-      playerLabel
-    }
-  });
-
-  const sessionSnapshot = publishSessionState();
-  persistState();
-  const result = {
-    ok: true,
-    sessionSnapshot
-  };
-  if (requestId) {
-    cacheMutationResponse("claim-character", requestId, 200, result);
-  }
-  response.json(result);
-});
-
-app.post("/api/release-character", requireRole("player", "gm", "admin"), (request, response) => {
-  const clientId = typeof request.body.clientId === "string" ? request.body.clientId.trim() : "";
-  const requestId = typeof request.body.requestId === "string" ? request.body.requestId.trim() : "";
-
-  if (requestId) {
-    const cached = getCachedMutationResponse("release-character", requestId);
-
-    if (cached) {
-      response.status(cached.statusCode).json(cached.body);
-      return;
-    }
-  }
-
-  if (!clientId) {
-    response.status(400).json({
-      error: "clientId is required"
-    });
-    return;
-  }
-
-  for (const character of party) {
-    if (character.claimedByClientId === clientId) {
-      const previousLabel = character.claimedByLabel ?? "Player";
-      character.claimedByClientId = null;
-      character.claimedByLabel = null;
-      recordTableEvent({
-        category: "claim",
-        type: "character_released",
-        actor: {
-          id: clientId,
-          kind: "player",
-          label: previousLabel
-        },
-        visibility: "player_visible",
-        summary: `${previousLabel} released ${character.name}`,
-        payload: {
-          clientId,
-          characterId: character.id,
-          characterName: character.name,
-          playerLabel: previousLabel
-        }
-      });
-    }
-  }
-
-  const sessionSnapshot = publishSessionState();
-  persistState();
-  const result = {
-    ok: true,
-    sessionSnapshot
-  };
-  if (requestId) {
-    cacheMutationResponse("release-character", requestId, 200, result);
-  }
-  response.json(result);
-});
-
-app.post("/api/set-action", requireRole("gm", "admin"), (request, response) => {
-  const type = typeof request.body.type === "string" ? request.body.type.trim() : "";
-  const description = typeof request.body.description === "string" ? request.body.description.trim() : "";
-  const ability = typeof request.body.ability === "string" ? request.body.ability.trim() : "wis";
-  const dc = typeof request.body.dc === "number" ? request.body.dc : null;
-  if (!type) { response.status(400).json({ error: "type required" }); return; }
-  currentAction = { type, description: description || type, ability, dc };
-  currentActionSetAt = Date.now();
-  broadcast("session_snapshot", getSessionSnapshot());
-  response.json({ ok: true, action: currentAction });
-});
-
-app.get("/api/ai/narration-toggle", requireRole("gm", "admin"), (_request, response) => {
-  response.json({ enabled: aiNarrationEnabled });
-});
-
-app.post("/api/ai/narration-toggle", requireRole("gm", "admin"), (request, response) => {
-  const enabled = typeof request.body.enabled === "boolean" ? request.body.enabled : true;
-  aiNarrationEnabled = enabled;
-  response.json({ ok: true, enabled: aiNarrationEnabled });
-});
-
-app.post("/api/set-scene", requireRole("gm", "admin"), (request, response) => {
-  const title = typeof request.body.title === "string" ? request.body.title.trim() : "";
-  if (!title) {
-    response.status(400).json({ ok: false, error: "title required" });
-    return;
-  }
-  currentSceneTitle = title;
-  createMemoryEntry(`Scene change to "${title}"`);
-  const sessionSnapshot = publishSessionState();
-  persistState();
-  response.json({ ok: true, sessionSnapshot });
-
-  // Auto-trigger scene image generation directly via ComfyUI
-  if (currentSceneTitle) {
-    (async () => {
-      try {
-        const workflow = {
-          "1":{"inputs":{"ckpt_name":"sdxl_lightning_4step.safetensors"},"class_type":"CheckpointLoaderSimple"},
-          "2":{"inputs":{"text":`${currentSceneTitle}, medieval high fantasy, painterly oil painting style, dramatic lighting, epic fantasy illustration, high quality, detailed environment`,"clip":["1",1]},"class_type":"CLIPTextEncode"},
-          "3":{"inputs":{"text":"blurry low quality watermark text distorted","clip":["1",1]},"class_type":"CLIPTextEncode"},
-          "4":{"inputs":{"width":1024,"height":704,"batch_size":1},"class_type":"EmptyLatentImage"},
-          "5":{"inputs":{"seed":Math.floor(Math.random()*99999999),"steps":4,"cfg":1.0,"sampler_name":"euler","scheduler":"normal","denoise":1,"model":["1",0],"positive":["2",0],"negative":["3",0],"latent_image":["4",0]},"class_type":"KSampler"},
-          "6":{"inputs":{"samples":["5",0],"vae":["1",2]},"class_type":"VAEDecode"},
-          "7":{"inputs":{"filename_prefix":"bde/scene","images":["6",0]},"class_type":"SaveImage"}
-        };
-        await fetch("http://127.0.0.1:8188/prompt", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt: workflow })
-        });
-      } catch { /* ComfyUI unavailable */ }
-    })();
-  }
-});
-
-app.post("/api/save-now", requireRole("gm", "admin"), (_request, response) => {
-  persistState();
-  response.json({ ok: true, message: "Session state saved to database", sessionSnapshot: publishSessionState() });
-});
-
-function parseDiceNotation(raw: string): { count: number; sides: number; modifier: number; advantage: boolean | null; error?: string } {
-  const trimmed = raw.trim().toLowerCase();
-  
-  let advantage: boolean | null = null;
-  let notation = trimmed;
-
-  if (/\s+adv$/i.test(trimmed)) {
-    advantage = true;
-    notation = trimmed.slice(0, trimmed.lastIndexOf(" ")).trim();
-  } else if (/\s+dis$/i.test(trimmed)) {
-    advantage = false;
-    notation = trimmed.slice(0, trimmed.lastIndexOf(" ")).trim();
-  }
-
-  const match = notation.match(/^(\d+)?d(\d+)([+-]\d+)?$/);
-  if (!match) {
-    return { count: 0, sides: 0, modifier: 0, advantage: null, error: `Invalid dice notation: ${raw}` };
-  }
-
-  const count = match[1] ? Number(match[1]) : 1;
-  const sides = Number(match[2]);
-  const modifier = match[3] ? Number(match[3]) : 0;
-
-  if (count < 1 || count > 100) {
-    return { count: 0, sides: 0, modifier: 0, advantage: null, error: "Dice count must be between 1 and 100" };
-  }
-
-  if (sides < 2 || sides > 1000) {
-    return { count: 0, sides: 0, modifier: 0, advantage: null, error: "Dice sides must be between 2 and 1000" };
-  }
-
-  return { count, sides, modifier, advantage };
-}
-
-function rollDice(parsed: { count: number; sides: number; modifier: number; advantage: boolean | null }) {
-  const rolls: number[] = [];
-
-  if (parsed.advantage !== null) {
-    // Roll twice, take higher (adv) or lower (dis)
-    for (let i = 0; i < parsed.count; i++) {
-      const a = Math.floor(Math.random() * parsed.sides) + 1;
-      const b = Math.floor(Math.random() * parsed.sides) + 1;
-      rolls.push(parsed.advantage ? Math.max(a, b) : Math.min(a, b));
-    }
-  } else {
-    for (let i = 0; i < parsed.count; i++) {
-      rolls.push(Math.floor(Math.random() * parsed.sides) + 1);
-    }
-  }
-
-  const total = rolls.reduce((sum, r) => sum + r, 0) + parsed.modifier;
-  return { rolls, total };
-}
-
-app.post("/api/rolls", requireRole("player", "gm", "admin"), (request, response) => {
-  const actorId = typeof request.body.actorId === "string" ? request.body.actorId : "";
-  const actorName = typeof request.body.actorName === "string" ? request.body.actorName : "";
-  const requestId = typeof request.body.requestId === "string" ? request.body.requestId.trim() : "";
-  const note = typeof request.body.note === "string" && request.body.note.trim() ? request.body.note : "Check";
-  const diceRaw = typeof request.body.dice === "string" && request.body.dice.trim() ? request.body.dice.trim() : "d20";
-  const modifierOverride =
-    typeof request.body.modifier === "number" ? request.body.modifier : Number(request.body.modifier ?? 0);
-
-  if (requestId) {
-    const cached = getCachedMutationResponse("roll", requestId);
-    if (cached) {
-      response.status(cached.statusCode).json(cached.body);
-      return;
-    }
-  }
-
-  if (!actorId || !actorName) {
-    response.status(400).json({
-      error: "actorId and actorName are required"
-    });
-    return;
-  }
-
-  const parsed = parseDiceNotation(diceRaw);
-
-  if (parsed.error) {
-    response.status(400).json({ error: parsed.error });
-    return;
-  }
-
-  // If dice notation provided, use it; otherwise default to d20 with body modifier
-  const modifier = parsed.modifier + (request.body.modifier !== undefined ? modifierOverride : 0);
-  const effectiveParse = { ...parsed, modifier };
-
-  const { rolls, total } = rollDice(effectiveParse);
-  const rolled = rolls.length === 1 ? rolls[0] : rolls;
-  const diceLabel = parsed.advantage !== null
-    ? `${parsed.count}d${parsed.sides}${modifier !== 0 ? (modifier > 0 ? "+" : "") + modifier : ""} ${parsed.advantage ? "adv" : "dis"}`
-    : `${parsed.count}d${parsed.sides}${modifier !== 0 ? (modifier > 0 ? "+" : "") + modifier : ""}`;
-
-  const record: RollRecord = {
-    id: randomUUID(),
-    actorId,
-    actorName,
-    dice: diceLabel,
-    modifier,
-    rolled,
-    total,
-    advantage: parsed.advantage,
-    note,
-    timestamp: new Date().toISOString()
-  };
-
-  rollLog.unshift(record);
-  rollLog.splice(12);
-  recordTableEvent({
-    category: "roll",
-    type: "roll_recorded",
-    actor: {
-      id: actorId,
-      kind: "player",
-      label: actorName
-    },
-    visibility: "player_visible",
-    summary: `${actorName} rolled ${record.total} on ${note}`,
-    payload: {
-      rollId: record.id,
-      actorId,
-      actorName,
-      dice: record.dice,
-      modifier: record.modifier,
-      rolled: record.rolled,
-      total: record.total,
-      note
-    }
-  });
-
-  broadcast("roll_recorded", record);
-  broadcast("session_snapshot", getSessionSnapshot());
-  broadcast("runtime_status", getRuntimeStatus());
-
-  if (requestId) {
-    cacheMutationResponse("roll", requestId, 201, record);
-  }
-
-  response.status(201).json(record);
-
-  // Auto-narrate when all claimed characters have rolled for the current action
-  if (currentAction) {
-    const action = currentAction;
-    const actionSetAt = currentActionSetAt;
-    const claimedCharacters = party.filter(c => c.claimedByClientId);
-    const rollsForAction = rollLog.filter(r => {
-      const rollTs = new Date(r.timestamp).getTime();
-      if (rollTs < actionSetAt) return false;
-      return r.note === "ability" || r.note === action.type;
-    });
-    const allRolled = claimedCharacters.length > 0 && claimedCharacters.every(c =>
-      rollsForAction.some(r => r.actorId === c.id)
-    );
-    if (allRolled) {
-      const abilityName: Record<string, string> = { str: "Strength", dex: "Dexterity", con: "Constitution", int: "Intelligence", wis: "Wisdom", cha: "Charisma" };
-      const dc = currentAction.dc ?? 10;
-      const abilityLabel = abilityName[currentAction.ability] || currentAction.ability;
-
-      // Build fallback template narration
-      const templateLines = claimedCharacters.map(c => {
-        const roll = rollsForAction.find(r => r.actorId === c.id);
-        if (!roll) return `${c.name} hesitates.`;
-        const pass = roll.total >= dc;
-        if (roll.rolled === 1 && typeof roll.rolled === "number") return `${c.name} stumbles critically. A disastrous failure.`;
-        if (roll.rolled === 20 && typeof roll.rolled === "number") return `${c.name} excels! A natural twenty — extraordinary success!`;
-        return pass
-          ? `${c.name} rolls ${roll.total} on ${abilityLabel} — success!`
-          : `${c.name} rolls ${roll.total} on ${abilityLabel} — not enough. DC was ${dc}.`;
-      });
-      const fallbackNarration = `${currentAction.description} ${templateLines.join(" ")}`;
-      pendingNarration = { text: fallbackNarration, timestamp: Date.now() };
-
-      // Trigger fallback TTS immediately
-      (async () => {
-        try {
-          await fetch(`http://127.0.0.1:${gameServerPort}/api/speak`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "x-bde-role": "gm" },
-            body: JSON.stringify({ text: fallbackNarration })
-          });
-        } catch { /* TTS unavailable */ }
-      })();
-
-      // Try AI-generated narration (may replace fallback)
-      if (aiNarrationEnabled) {
-      (async () => {
-        try {
-          const snapshot = getSessionSnapshot();
-          const sceneContext: SceneContext = {
-            campaignTitle: snapshot.campaignTitle,
-            currentScene: snapshot.currentScene,
-            sceneDescription: snapshot.activeSceneContext.location?.summary,
-            location: snapshot.activeSceneContext.location
-              ? { name: snapshot.activeSceneContext.location.name, summary: snapshot.activeSceneContext.location.summary }
-              : undefined,
-            tone: snapshot.activeSceneContext.tone,
-            facts: snapshot.activeSceneContext.facts.map((f: { text: string }) => f.text),
-            activeCharacters: party.map((c) => ({
-              name: c.name,
-              raceClass: c.classLabel,
-              hp: c.hp.current,
-              maxHp: c.hp.max
-            })),
-            recentEvents: eventLog.slice(0, 5).map((e) => e.summary)
-          };
-
-          const firstRoll = rollsForAction[0];
-          const firstChar = party.find((c) => c.id === firstRoll?.actorId);
-          const rollContext: RollResultContext = {
-            actorName: firstChar?.name || firstRoll?.actorName || "Someone",
-            actionDescription: currentAction.description,
-            diceLabel: firstRoll?.dice || "d20",
-            total: firstRoll?.total || 0,
-            modifier: firstRoll?.modifier || 0,
-            rawRoll: typeof firstRoll?.rolled === "number" ? firstRoll.rolled : Array.isArray(firstRoll?.rolled) ? firstRoll.rolled[0] : 0,
-            success: (firstRoll?.total || 0) >= dc,
-            critical: (typeof firstRoll?.rolled === "number" && firstRoll.rolled === 20)
-              ? "success"
-              : (typeof firstRoll?.rolled === "number" && firstRoll.rolled === 1)
-                ? "failure"
-                : null
-          };
-
-          const aiResult = await generateNarration(sceneContext, rollContext, { temperature: 0.85, maxTokens: 350 });
-          const narration = aiResult.text && !aiResult.error ? aiResult.text : fallbackNarration;
-          pendingNarration = { text: narration, timestamp: Date.now() };
-
-          // Trigger TTS narration
-          try {
-            await fetch(`http://127.0.0.1:${gameServerPort}/api/speak`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json", "x-bde-role": "gm" },
-              body: JSON.stringify({ text: narration })
-            });
-          } catch { /* TTS unavailable */ }
-
-          recordAiLog({
-            kind: "output_packet",
-            adapter: "local_model",
-            correlationId: randomUUID(),
-            summary: `AI narration generated${aiResult.error ? " (fallback used)" : ""}`,
-            details: { narration: narration.slice(0, 200), provider: aiResult.provider, model: aiResult.model, error: aiResult.error }
-          });
-        } catch {
-          pendingNarration = { text: fallbackNarration, timestamp: Date.now() };
-          try {
-            await fetch(`http://127.0.0.1:${gameServerPort}/api/speak`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json", "x-bde-role": "gm" },
-              body: JSON.stringify({ text: fallbackNarration })
-            });
-          } catch { /* TTS unavailable */ }
-        }
-      })();
-      }
-
-      // Auto-trigger scene image based on results
-      (async () => {
-        try {
-          const successes = claimedCharacters.filter(c => {
-            const roll = rollsForAction.find(r => r.actorId === c.id);
-            return roll && roll.total >= dc;
-          });
-          const mood = successes.length >= claimedCharacters.length
-            ? "triumphant, hopeful, golden light, clear skies"
-            : successes.length === 0
-              ? "ominous, dark, fog, danger, shadows"
-              : "tense, uncertain, mixed fortunes, fog parting slightly";
-          const prompt = `${currentSceneTitle}, ${mood}, medieval high fantasy, painterly oil painting style, dramatic lighting, epic fantasy illustration, high quality, detailed environment`;
-          const workflow = {
-            "1":{"inputs":{"ckpt_name":"sdxl_lightning_4step.safetensors"},"class_type":"CheckpointLoaderSimple"},
-            "2":{"inputs":{"text":prompt,"clip":["1",1]},"class_type":"CLIPTextEncode"},
-            "3":{"inputs":{"text":"blurry low quality watermark text distorted","clip":["1",1]},"class_type":"CLIPTextEncode"},
-            "4":{"inputs":{"width":1024,"height":704,"batch_size":1},"class_type":"EmptyLatentImage"},
-            "5":{"inputs":{"seed":Math.floor(Math.random()*99999999),"steps":4,"cfg":1.0,"sampler_name":"euler","scheduler":"normal","denoise":1,"model":["1",0],"positive":["2",0],"negative":["3",0],"latent_image":["4",0]},"class_type":"KSampler"},
-            "6":{"inputs":{"samples":["5",0],"vae":["1",2]},"class_type":"VAEDecode"},
-            "7":{"inputs":{"filename_prefix":"bde/scene","images":["6",0]},"class_type":"SaveImage"}
-          };
-          await fetch("http://127.0.0.1:8188/prompt", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ prompt: workflow })
-          });
-        } catch { /* ComfyUI unavailable */ }
-      })();
-
-      currentAction = null;
-      broadcast("session_snapshot", getSessionSnapshot());
-    }
-  }
+installTtrpgActionRoutes(app, {
+  progress: () => campaignProgress,
+  controls: {
+    get currentSceneTitle() { return currentSceneTitle; }, set currentSceneTitle(value) { currentSceneTitle = value; },
+    get currentAction() { return currentAction; }, set currentAction(value) { currentAction = value; },
+    get currentActionSetAt() { return currentActionSetAt; }, set currentActionSetAt(value) { currentActionSetAt = value; },
+    get pendingNarration() { return pendingNarration; }, set pendingNarration(value) { pendingNarration = value; },
+    get aiNarrationEnabled() { return aiNarrationEnabled; }, set aiNarrationEnabled(value) { aiNarrationEnabled = value; },
+  },
+  party, rollLog, eventLog, work, sceneImages, commands, narration,
+  config: { localModelEndpoint },
+  requireRole, recordTableEvent, recordAiLog, broadcast, getSessionSnapshot, getRuntimeStatus,
+  publishSessionState, createMemoryEntry, persistState
 });
 
 wss.on("connection", (socket, request) => {
-  const url = new URL(request.url ?? "/ws", `http://${request.headers.host ?? "localhost"}`);
-  const roleValue = url.searchParams.get("role");
-  const clientIdValue = url.searchParams.get("clientId");
-  const role: ClientSession["role"] =
-    roleValue === "gm" || roleValue === "player" || roleValue === "spectator" || roleValue === "ai" || roleValue === "admin"
-      ? roleValue
-      : "spectator";
-  const clientId = clientIdValue && clientIdValue.trim() ? clientIdValue : randomUUID();
+  const token = requestCredential(request.headers);
+  let identity;
+  try { identity = authority.authenticate(token); }
+  catch { socket.close(4001, "Session expired or revoked"); return; }
+  socketTokens.set(socket, token);
+  const role = identity.role;
+  const clientId = identity.actorId;
 
   const session: ClientSession = {
     id: randomUUID(),
@@ -4113,8 +2641,9 @@ wss.on("connection", (socket, request) => {
     JSON.stringify({
       type: "connected",
       payload: {
-        runtimeStatus: getRuntimeStatus(),
-        sessionSnapshot: getSessionSnapshot()
+        runtimeStatus: projectRuntime(getRuntimeStatus(), identity),
+        sessionSnapshot: projectSnapshot(getSessionSnapshot(), identity),
+        party: projectParty(partyGame.state(identity.sessionId), identity)
       }
     })
   );
@@ -4122,6 +2651,8 @@ wss.on("connection", (socket, request) => {
   broadcast("runtime_status", getRuntimeStatus());
 
   socket.on("message", (raw) => {
+    try { authority.authenticate(token); }
+    catch { socket.close(4001, "Session expired or revoked"); return; }
     const current = clientSessions.get(session.id);
 
     if (current) {
@@ -4145,52 +2676,39 @@ wss.on("connection", (socket, request) => {
   });
 });
 
-setInterval(() => {
-  broadcast("runtime_status", getRuntimeStatus());
+work.every(async () => {
+  await capabilityHealth.refresh();
+  if (work.active) broadcast("runtime_status", getRuntimeStatus());
 }, 10000);
 
-setInterval(() => {
-  const now = Date.now();
 
-  for (const [cacheKey, cached] of recentMutationResponses.entries()) {
-    if (cached.expiresAt < now) {
-      recentMutationResponses.delete(cacheKey);
+const pollMediaJob = createMediaJobPoller(mediaRouterClient, {
+  current: mediaJobIsCurrent,
+  completed: (job,outputs) => {
+    if(job.settings.referenceId) {
+      try {job.outputPath=characterOutputPath(outputs,comfyOutputBDEDir);}
+      catch {finalizeMediaJobAsFailed(job,'Character output was not confirmed. Configure BDE_COMFY_OUTPUT_DIR and check the ComfyUI result.','ComfyUI Router');return;}
     }
-  }
-}, 60000);
+    finalizeMediaJobAsGenerated(job, "ComfyUI Router");
+  },
+  failed: (job, error) => { finalizeMediaJobAsFailed(job, error, "ComfyUI Router"); }
+});
 
 // Poll comfy-router for running media jobs and auto-finalize them
-setInterval(async () => {
+if (profile !== "party") work.every(async () => {
   if (!comfyRouterEndpoint) {
     return;
   }
 
   for (const job of mediaJobs) {
-    if (job.status !== "running" || !job.comfyRouterJobId) {
+    if (job.status !== "running" || !job.comfyRouterJobId || !mediaJobIsCurrent(job)) {
       continue;
     }
 
     try {
-      const res = await fetch(`${comfyRouterEndpoint}/api/jobs/${job.comfyRouterJobId}/status`, {
-        signal: AbortSignal.timeout(8000)
-      });
-
-      if (!res.ok) {
-        continue;
-      }
-
-      const json = await res.json() as {
-        status: string;
-        outputs?: Record<string, unknown>;
-        error?: string;
-      };
-
-      if (json.status === "completed") {
-        finalizeMediaJobAsGenerated(job, "ComfyUI Router");
-      } else if (json.status === "failed") {
-        finalizeMediaJobAsFailed(job, json.error || "ComfyUI job failed", "ComfyUI Router");
-      }
+      await pollMediaJob(comfyRouterEndpoint, job);
     } catch (err) {
+      if (!work.active) return;
       const message = err instanceof Error ? err.message : String(err);
       recordErrorEvent({
         severity: "warning",
@@ -4206,7 +2724,15 @@ setInterval(async () => {
 }, 5000);
 
 function persistState() {
+  if (commands.pending()) return;
   try {
+    db.transaction(persistStateOrThrow)();
+  } catch {
+    console.error("[game-server] Failed to persist state. Check storage and retry saving.");
+  }
+}
+
+function persistStateOrThrow() {
     saveTable("party", party);
     saveRollLog(rollLog);
     saveEventLog(eventLog);
@@ -4215,31 +2741,54 @@ function persistState() {
     saveTable("asset_records", assetRecords);
     saveMemoryEntries(memoryEntries);
     saveAudioCues(audioCueQueue);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error("[game-server] Failed to persist state:", message);
-  }
+    setMeta(`campaign-progress:${campaignProgress.campaignId}`, JSON.stringify(campaignProgress));
 }
 
-setInterval(persistState, 30000);
+work.every(persistState, 30000);
 
-process.on("SIGINT", () => {
-  console.log("[game-server] SIGINT received, persisting state...");
-  persistState();
-  process.exit(0);
+const shutdown = createServerShutdown({
+  work, server, sockets: wss,
+  stopAudio: () => { resourceMonitor.dispose(); capabilityHealth.dispose(); narration.dispose(); speech.dispose(); sceneImages.dispose(); mediaRouterClient.dispose(); audioCuePlayback.dispose(); },
+  flush: async () => {
+    await startBackup; await backups.drain();
+    if (!commands.pending()) db.transaction(persistStateOrThrow)();
+    if (automaticBackups && sessionStarted) {
+      try { await backups.create("Automatic session-end backup"); } catch (error) { reportBackupFailure(); throw error; }
+    }
+  },
+  closeStore: () => gameStore.close()
 });
+const stopServer = () => {
+  void shutdown().then(() => process.exit(0), () => {
+    console.error("[game-server] Shutdown could not save or close all owned resources.");
+    process.exit(1);
+  });
+};
+process.once("SIGINT", stopServer);
+process.once("SIGTERM", stopServer);
 
-process.on("SIGTERM", () => {
-  console.log("[game-server] SIGTERM received, persisting state...");
-  persistState();
-  process.exit(0);
+app.use(commands.errorMiddleware);
+app.use(sessionErrorHandler);
+
+server.once("error", error => {
+  console.error(`[game-server] Listener failed (${(error as NodeJS.ErrnoException).code ?? "UNKNOWN"}).`);
+  void shutdown().finally(() => process.exit(1));
 });
 
 server.listen(gameServerPort, host, () => {
-  const gmUrl = "http://127.0.0.1:5173";
-  const playerUrl = `http://${getLanJoinHost()}:${gameServerPort}/player/`;
+  const address = server.address();
+  const listeningPort = address && typeof address === "object" ? address.port : gameServerPort;
+  const gmUrl = `http://127.0.0.1:${listeningPort}/host/`;
+  const playerUrl = `http://${host === "0.0.0.0" ? getLanJoinHost() : host}:${listeningPort}/player/`;
 
-  console.log(`Black Dice Engine game server listening on http://${host}:${gameServerPort}`);
+  sessionStarted = true;
+  if (automaticBackups) {
+    try {
+      db.transaction(persistStateOrThrow)();
+      startBackup = backups.create("Automatic session-start backup").catch(reportBackupFailure);
+    } catch { reportBackupFailure(); }
+  }
+  console.log(`Black Dice Engine game server listening on http://${host}:${listeningPort}`);
   console.log(`GM dashboard expected at ${gmUrl}`);
   console.log(`Player companion expected at ${playerUrl}`);
 });

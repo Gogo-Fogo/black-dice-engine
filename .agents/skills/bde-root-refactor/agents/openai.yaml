@@ -1,0 +1,3 @@
+interface:
+  display_name: "BDE Root Refactoring"
+  short_description: "Refactor root layout, workspaces, and shared code"

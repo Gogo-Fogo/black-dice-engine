@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-dice-engine.local/schemas/campaign-progress-command.schema.json",
+  "title": "GM approved campaign progress command",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestId",
+        "operation",
+        "kind",
+        "title",
+        "detail",
+        "status",
+        "visibility",
+        "resolution"
+      ],
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,128}$"
+        },
+        "_command": {
+          "$ref": "table-protocol-v1.schema.json#/$defs/metadata"
+        },
+        "visibility": {
+          "enum": [
+            "gm_only",
+            "player_visible",
+            "public_demo"
+          ]
+        },
+        "operation": {
+          "const": "record"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "kind": {
+          "enum": [
+            "objective",
+            "clue",
+            "obstacle",
+            "milestone",
+            "fact",
+            "scene"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2000
+        },
+        "status": {
+          "enum": [
+            "active",
+            "completed",
+            "failed",
+            "abandoned"
+          ]
+        },
+        "resolution": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 2000
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "completed",
+                  "failed",
+                  "abandoned"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "resolution": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "scene"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "detail": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestId",
+        "operation",
+        "actionId",
+        "consequence",
+        "visibility"
+      ],
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,128}$"
+        },
+        "_command": {
+          "$ref": "table-protocol-v1.schema.json#/$defs/metadata"
+        },
+        "visibility": {
+          "enum": [
+            "gm_only",
+            "player_visible",
+            "public_demo"
+          ]
+        },
+        "operation": {
+          "const": "consequence"
+        },
+        "actionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "consequence": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      }
+    }
+  ]
+}

@@ -594,3 +594,24 @@ button:disabled {
   background: linear-gradient(135deg, #3a2e1a 0%, #2a2210 100%);
   color: #f0dcaf;
 }
+
+.character-choice { margin-top: 10px; text-align: left; }
+.sheet-portrait { width: 100%; max-height: 200px; object-fit: cover; border-radius: 8px; }
+.character-vitals dd { margin: 6px 0; font-size: 1.3rem; }
+.player-shell button:focus-visible, .player-shell input:focus-visible { outline: 3px solid #f8ecd5; outline-offset: 3px; }
+.player-shell button { min-height: 44px; }
+.player-shell form button { margin-top: 12px; }
+.saved-roll-controls { position: relative; z-index: 2; max-width: min(90vw, 420px); padding: 16px; background: rgba(11,10,9,.9); }
+.saved-roll-controls button { margin-top: 8px; }
+.saved-roll-controls .dice-result-number { font-size: 3rem; }
+@media (max-width: 400px) { .player-header { flex-direction: column; } .roll-row { flex-wrap: wrap; } }
+
+/* Four phone views adapted from player-companion-ux-overhaul a94ed19. */
+.player-shell { padding-bottom: calc(100px + env(safe-area-inset-bottom)); }
+.companion-tabs { position: fixed; bottom: 0; left: 0; right: 0; z-index: 20; display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 6px; padding: 10px max(10px, env(safe-area-inset-left)) calc(10px + env(safe-area-inset-bottom)); background: #151b25; border-top: 1px solid #657086; }
+.companion-tabs button { min-height: 48px; padding: 8px; }
+.companion-tabs button[aria-current="page"] { background: #c9a45f; color: #101318; font-weight: 700; }
+.companion-stack > div:not([hidden]) { display: grid; gap: 16px; }
+.companion-stack > [hidden] { display: none; }
+.character-gallery article { min-width: 0; }
+@media(max-width: 480px) { .character-gallery { grid-template-columns: 1fr; } }

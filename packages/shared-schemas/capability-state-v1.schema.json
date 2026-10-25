@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-dice-engine.local/schemas/capability-state-v1.schema.json",
+  "title": "Optional capability observation v1",
+  "type": "object",
+  "required": [
+    "enabled",
+    "configured",
+    "state",
+    "checkedAt"
+  ],
+  "properties": {
+    "enabled": {
+      "type": "boolean"
+    },
+    "configured": {
+      "type": "boolean"
+    },
+    "state": {
+      "enum": [
+        "disabled",
+        "unconfigured",
+        "configured",
+        "reachable",
+        "ready",
+        "busy",
+        "failed"
+      ]
+    },
+    "checkedAt": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": true
+}

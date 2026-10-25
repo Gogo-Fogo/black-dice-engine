@@ -11,7 +11,9 @@
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "@black-dice-engine/runtime-config": "0.1.0",
+    "@black-dice-engine/contracts": "0.1.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

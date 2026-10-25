@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-dice-engine.local/schemas/character-portrait-v1.schema.json",
+  "title": "Runtime character portrait metadata",
+  "type": "object",
+  "required": ["description", "version", "seed"],
+  "properties": {
+    "pendingId": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "approvedId": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "description": {"type": "string", "maxLength": 600},
+    "version": {"type": "integer", "minimum": 1},
+    "seed": {"type": "integer", "minimum": 0, "maximum": 4294967295}
+  },
+  "additionalProperties": true,
+  "$comment": "Additive metadata on runtime Character. Image bytes are stored separately. Other players receive only the approved ID; spectators receive no portrait metadata."
+}

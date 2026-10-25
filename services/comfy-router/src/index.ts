@@ -1,10 +1,9 @@
-import { config } from "dotenv";
+import type { RouterJob as TrackedJob } from "../../../packages/contracts/dist/index.js";
+import { fillWorkflow, uploadReference } from './reference-workflow.js';
+import { readServiceConfig } from "../../../packages/runtime-config/dist/index.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-const currentDir = dirname(fileURLToPath(import.meta.url));
-config({ path: join(currentDir, "../../../../.env") });
 
 type WorkflowDefinition = {
   id: string;
@@ -31,31 +30,7 @@ type PromptTemplateDefinition = {
   safetyNotes: string[];
 };
 
-type TrackedJob = {
-  id: string;
-  workflowId: string;
-  promptTemplateId: string;
-  type: WorkflowDefinition["type"];
-  status: "prepared" | "submitted" | "running" | "completed" | "failed";
-  prompt: string;
-  referenceImage?: string;
-  outputRoot: string | null;
-  readyForComfySubmission: boolean;
-  warnings: string[];
-  createdAt: string;
-  comfyPromptId?: string;
-  outputs?: Record<string, unknown>;
-  error?: string;
-  submittedAt?: string;
-  completedAt?: string;
-};
-
-const host = process.env.BDE_HOST ?? "0.0.0.0";
-const port = Number(process.env.BDE_COMFY_ROUTER_PORT ?? 4320);
-const comfyApiBase = process.env.BDE_COMFY_API_BASE?.trim() || "";
-const comfyOutputRoot = process.env.BDE_COMFY_OUTPUT_ROOT?.trim() || "";
-const workflowRegistryPath = join(currentDir, "../../../comfy-workflows/registry.json");
-const promptTemplatePath = join(currentDir, "../../../prompts/image-prompt-templates.json");
+const { host, port, comfyApiBase, comfyOutputRoot, workflowRegistryPath, promptTemplatePath } = readServiceConfig("comfy");
 
 type WorkflowRegistryFile = {
   version: number;
@@ -95,18 +70,22 @@ const promptTemplateFile = loadPromptTemplates();
 const promptTemplates = promptTemplateFile.templates;
 
 const trackedJobs: TrackedJob[] = [];
+const submissions=new WeakMap<TrackedJob,ReturnType<typeof submitJobToComfy>>();
 
 function sendJson(response: ServerResponse, statusCode: number, body: unknown) {
   response.statusCode = statusCode;
   response.setHeader("Content-Type", "application/json; charset=utf-8");
-  response.end(JSON.stringify(body));
+  response.end(JSON.stringify(body, (key,value) => key === 'referenceImage' ? undefined : value));
 }
 
 async function readJsonBody(request: IncomingMessage) {
   const chunks: Buffer[] = [];
+  let size = 0;
 
   for await (const chunk of request) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    size += chunks[chunks.length-1].length;
+    if (size > 800000) throw new Error('Request too large');
   }
 
   if (!chunks.length) {
@@ -117,12 +96,17 @@ async function readJsonBody(request: IncomingMessage) {
 }
 
 function prepareJob(payload: Record<string, unknown>) {
+  if(payload.id!==undefined&&(typeof payload.id!=='string'||!/^[a-zA-Z0-9_-]{1,128}$/.test(payload.id)))return {ok:false as const,statusCode:400,body:{error:'Invalid job ID.'}};
+  if(trackedJobs.some(job=>job.id===payload.id))return {ok:false as const,statusCode:409,body:{error:'Job ID already prepared.'}};
   const workflowId = typeof payload.workflowId === "string" ? payload.workflowId : "";
   const prompt = typeof payload.prompt === "string" ? payload.prompt.trim() : "";
   const negativePrompt =
     typeof payload.negativePrompt === "string" ? payload.negativePrompt.trim() : undefined;
   const referenceImage =
-    typeof payload.referenceImage === "string" && payload.referenceImage.length > 100 ? payload.referenceImage : undefined;
+    typeof payload.referenceImage === "string" ? payload.referenceImage : undefined;
+  if (payload.referenceImage !== undefined && (typeof payload.referenceImage !== 'string' || payload.referenceImage.length > 750000 || !payload.referenceImage.startsWith('data:image/png;base64,'))) return {ok:false as const,statusCode:400,body:{error:'Invalid character reference.'}};
+  if (payload.seed !== undefined && (!Number.isSafeInteger(payload.seed) || Number(payload.seed)<0 || Number(payload.seed)>4294967295)) return {ok:false as const,statusCode:400,body:{error:'Invalid seed.'}};
+  if (payload.referenceId !== undefined && (typeof payload.referenceId !== 'string' || !/^[a-f0-9]{64}$/.test(payload.referenceId))) return {ok:false as const,statusCode:400,body:{error:'Invalid reference version.'}};
   const workflow = workflowRegistry.find((entry) => entry.id === workflowId);
   const promptTemplate = workflow
     ? promptTemplates.find((entry) => entry.id === workflow.promptTemplateId)
@@ -187,6 +171,8 @@ function prepareJob(payload: Record<string, unknown>) {
     prompt,
     negativePrompt: negativePrompt || promptTemplate.negativeTemplate,
     referenceImage,
+    seed: typeof payload.seed === 'number' ? payload.seed : undefined,
+    referenceId: typeof payload.referenceId === 'string' ? payload.referenceId : undefined,
     outputRoot: comfyOutputRoot || null,
     readyForComfySubmission: Boolean(comfyApiBase && comfyOutputRoot && workflow.workflowPath !== "PLACEHOLDER.txt"),
     warnings,
@@ -230,25 +216,16 @@ async function submitJobToComfy(job: TrackedJob): Promise<{ ok: boolean; error?:
   }
 
   // Replace prompt placeholders inside the serialized workflow JSON
-  const seed = Math.floor(Math.random() * 99999999);
+  const seed = job.seed ?? Math.floor(Math.random() * 99999999);
   let referenceImageName = "";
-  if (job.referenceImage) {
+  const needsReference = JSON.stringify(workflowJson).includes('{{referenceImageName}}');
+  if (needsReference || job.referenceImage) {
+    if (!needsReference) return {ok:false,error:'Selected workflow cannot consume the character reference.'};
     try {
-      const base64 = job.referenceImage.replace(/^data:image\/\w+;base64,/, "");
-      const buf = Buffer.from(base64, "base64");
-      const uploadName = `ref_${job.id.slice(0,8)}.png`;
-      const form = new FormData();
-      form.append("image", new Blob([buf], { type: "image/png" }), uploadName);
-      const uploadRes = await fetch(`${comfyApiBase}/upload/image`, { method: "POST", body: form as unknown as BodyInit, signal: AbortSignal.timeout(10000) });
-      if (uploadRes.ok) referenceImageName = uploadName;
-    } catch { /* reference image upload failed, continue without it */ }
+      referenceImageName = await uploadReference(fetch,comfyApiBase,job);
+    } catch { return {ok:false,error:'Character reference upload failed. No generation was submitted.'}; }
   }
-  const serialized = JSON.stringify(workflowJson)
-    .replaceAll("{{positivePrompt}}", job.prompt)
-    .replaceAll("{{negativePrompt}}", job.negativePrompt || "")
-    .replaceAll("{{seed}}", String(seed))
-    .replaceAll("{{referenceImageName}}", referenceImageName);
-  workflowJson = JSON.parse(serialized) as Record<string, unknown>;
+  workflowJson = fillWorkflow(workflowJson,{prompt:job.prompt,negativePrompt:job.negativePrompt || '',seed,referenceName:referenceImageName}) as Record<string,unknown>;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
@@ -433,7 +410,9 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    const submitResult = await submitJobToComfy(job);
+    let submission=submissions.get(job);
+    if(!submission){submission=submitJobToComfy(job);submissions.set(job,submission);}
+    const submitResult = await submission;
 
     if (!submitResult.ok) {
       job.status = "failed";
@@ -456,5 +435,6 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(port, host, () => {
-  console.log(`[comfy-router] listening on http://${host}:${port}`);
+  const address = server.address();
+  console.log(`[comfy-router] listening on http://${host}:${typeof address === "object" && address ? address.port : port}`);
 });

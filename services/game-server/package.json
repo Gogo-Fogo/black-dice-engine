@@ -4,16 +4,19 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "start": "node dist/index.js",
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/index.ts",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@black-dice-engine/contracts": "0.1.0",
     "better-sqlite3": "^12.9.0",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
     "express": "^5.1.0",
-    "ws": "^8.18.2"
+    "ws": "^8.18.2",
+    "@black-dice-engine/runtime-config": "0.1.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

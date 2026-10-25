@@ -1,5 +1,13 @@
 # Black Dice Engine
 
+For the immediate party checklist, use [PARTY-PLAN.md](PARTY-PLAN.md). The larger [PLAN.md](PLAN.md) remains the deferred overhaul backlog.
+
+For portable full-profile startup, see [full session launch](docs/full-session-launch.md). It preserves the configured/default database; use an explicit disposable data directory for demos. Python TTS is separately configured and launched; see [TTS setup](services/tts-service/README.md).
+
+For phone character uploads, GM portrait approval and reference-conditioned campaign scenes, see [character artwork](docs/character-artwork.md).
+
+Party Mode now has a [lightweight Windows launcher and host checklist](docs/party-launch.md): `start-party.bat` builds/serves host, TV and phone surfaces with optional AI/media/audio disabled. Physical phone/TV/Wi-Fi rehearsal is still pending. Track verified overhaul work in [PLAN.md](PLAN.md).
+
 Local-first AI Game Master engine for dark, collaborative TTRPG campaigns.
 
 <p align="center">
@@ -111,7 +119,7 @@ This repository now includes a first local prototype:
 - a small GM dashboard shell
 - a small player companion shell
 
-It is still far from a full runtime. AI integrations, persistence, media pipelines, auth, imports, and hardened permissions are still ahead.
+The local session boundary authenticates host/player/display capabilities and filters network payloads; see [local session access](docs/local-session-access.md). Covered synchronous commands use [durable acknowledgements](docs/command-protocol.md). The [Party server loop](docs/party-mode-api.md) completes the original five-round game with seven synthetic phone clients and restart-safe recorded outcomes. [Party host, TV and phone screens](docs/party-ui.md) are implemented; rendered/physical rehearsal, imports and optional-adapter hardening remain ahead. Verified progress is tracked in [PLAN.md](PLAN.md).
 
 GitHub repository: `https://github.com/Gogo-Fogo/black-dice-engine`
 
@@ -133,9 +141,17 @@ The working product decisions live in `docs/decisions/`. Start with:
 
 Branding guidance lives in `docs/branding.md`.
 
+Repository agent skills and example requests are listed in [docs/agent-skills.md](docs/agent-skills.md), including root/workspace refactoring, React UI, realtime services, contracts, local AI/media, verification, and security review.
+
 ## Roadmap Summary
 
 The detailed working build plan lives in `TODO.md`; the phase-level roadmap lives in `docs/roadmap.md`.
+
+The active Party Mode, project-wide improvement, and refactoring checklist lives in [PLAN.md](PLAN.md), starting with a complete local TV-and-phone game before the broader engine extraction. Verified baseline results and remaining defects are recorded in [docs/overhaul-progress.md](docs/overhaul-progress.md).
+
+Companion module ownership, pending-action recovery and verification limits are documented in [docs/companion-refactor.md](docs/companion-refactor.md).
+
+Node service environment loading, stable paths and source/built verification are documented in [docs/runtime-configuration.md](docs/runtime-configuration.md). Services consume process environment; explicit env-file examples are in `.env.example`.
 
 Near-term:
 
@@ -154,3 +170,9 @@ Later:
 - Add permissions for player-visible and GM-only information.
 - Add portfolio demo mode using only sample content.
 - Harden security, backups, exports, and import workflows.
+
+Campaign continuity: see [campaign progress](docs/campaign-progress.md) for GM-approved goals, clues, scene closure and the phone journal.
+
+### Incoming Mac feature integration
+
+See [incoming PR integration](docs/incoming-pr-integration.md) for Character Forge, Dice Styles, the tabbed GM dashboard and spectator TV Stage, including launch URLs, portrait approval and verification limits.

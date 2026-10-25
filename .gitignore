@@ -38,6 +38,8 @@ __pycache__/
 venv/
 
 # Local databases and campaign state
+_backups/
+_data/party/
 *.sqlite
 *.sqlite3
 *.db

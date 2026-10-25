@@ -3,10 +3,13 @@
   "private": true,
   "version": "0.1.0",
   "workspaces": [
+    "packages/*",
     "apps/*",
     "services/*"
   ],
   "scripts": {
+    "party": "node scripts/party-launch.mjs",
+    "build:party": "node scripts/party-launch.mjs --build-only",
     "build": "npm run build --workspaces --if-present",
     "dev:audio": "npm --workspace services/audio-service run dev",
     "dev:comfy": "npm --workspace services/comfy-router run dev",
@@ -14,7 +17,18 @@
     "dev:player": "npm --workspace apps/player-companion run dev",
     "dev:runtime": "npm --workspace services/runtime-service run dev",
     "dev:server": "npm --workspace services/game-server run dev",
-    "lint": "npm run lint --workspaces --if-present"
+    "lint": "npm run lint --workspaces --if-present",
+    "prelint": "npm run build --workspace packages/contracts --workspace packages/runtime-config",
+    "pretest": "npm run build --workspace packages/contracts --workspace packages/runtime-config",
+    "predev:gm": "npm run build --workspace packages/contracts",
+    "predev:player": "npm run build --workspace packages/contracts",
+    "predev:server": "npm run build --workspace packages/contracts --workspace packages/runtime-config",
+    "test": "node --import tsx --test tests/*.test.mjs",
+    "inventory": "node scripts/inventory.mjs",
+    "predev:audio": "npm run build --workspace packages/runtime-config",
+    "predev:comfy": "npm run build --workspace packages/runtime-config",
+    "predev:runtime": "npm run build --workspace packages/runtime-config",
+    "session": "node scripts/session-launch.mjs"
   },
   "engines": {
     "node": ">=20.0.0"

@@ -1,18 +1,9 @@
-import "dotenv/config";
+import { readServiceConfig } from "../../../packages/runtime-config/dist/index.js";
 import cors from "cors";
 import express from "express";
 import { createServer } from "node:http";
-import { copyFileSync, existsSync, mkdirSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 
-const host = process.env.BDE_HOST ?? "0.0.0.0";
-const port = Number(process.env.BDE_RUNTIME_SERVICE_PORT ?? 4322);
-const gameServerEndpoint = process.env.BDE_GAME_SERVER_ENDPOINT?.trim() || "http://127.0.0.1:4310";
-const comfyRouterEndpoint = process.env.BDE_COMFY_ROUTER_ENDPOINT?.trim() || "";
-const audioServiceEndpoint = process.env.BDE_AUDIO_SERVICE_ENDPOINT?.trim() || "";
-const dbPath = process.env.BDE_DB_PATH || join(dirname(fileURLToPath(import.meta.url)), "../../../_data/black-dice-engine.db");
-const backupsDir = process.env.BDE_BACKUPS_DIR?.trim() || join(dirname(fileURLToPath(import.meta.url)), "../../../_backups");
+const { host, port, gameServerEndpoint, comfyRouterEndpoint, audioServiceEndpoint } = readServiceConfig("runtime");
 
 type ServiceHealth = {
   name: string;
@@ -35,17 +26,6 @@ type RuntimeStatus = {
   };
   warnings: string[];
 };
-
-type BackupRecord = {
-  id: string;
-  createdAt: string;
-  sourceDbPath: string;
-  backupPath: string;
-  sizeBytes: number;
-  note?: string;
-};
-
-const backupHistory: BackupRecord[] = [];
 
 async function checkServiceHealth(
   name: string,
@@ -184,38 +164,6 @@ async function buildRuntimeStatus(): Promise<RuntimeStatus> {
   };
 }
 
-function createBackup(note?: string): BackupRecord {
-  if (!existsSync(backupsDir)) {
-    mkdirSync(backupsDir, { recursive: true });
-  }
-
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const filename = `bde-backup-${timestamp}.db`;
-  const backupPath = join(backupsDir, filename);
-
-  if (!existsSync(dbPath)) {
-    throw new Error(`Database not found at ${dbPath}`);
-  }
-
-  copyFileSync(dbPath, backupPath);
-
-  const stats = statSync(backupPath);
-
-  const record: BackupRecord = {
-    id: `backup-${timestamp}`,
-    createdAt: new Date().toISOString(),
-    sourceDbPath: dbPath,
-    backupPath,
-    sizeBytes: stats.size,
-    note
-  };
-
-  backupHistory.unshift(record);
-  backupHistory.splice(10);
-
-  return record;
-}
-
 const app = express();
 const server = createServer(app);
 
@@ -230,8 +178,7 @@ app.get("/health", (_request, response) => {
     gameServerEndpoint,
     comfyRouterEndpoint: comfyRouterEndpoint || null,
     audioServiceEndpoint: audioServiceEndpoint || null,
-    dbPath,
-    backupsDir
+    backups: "delegated-to-authenticated-game-server"
   });
 });
 
@@ -240,45 +187,27 @@ app.get("/api/runtime-status", async (_request, response) => {
   response.json(status);
 });
 
-app.post("/api/backup", (request, response) => {
-  const note = typeof request.body?.note === "string" ? request.body.note : undefined;
-
-  try {
-    const record = createBackup(note);
-    response.json({
-      ok: true,
-      backup: record
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    response.status(500).json({
-      error: "Backup failed",
-      message
-    });
+// The database owner snapshots its live SQLite connection. Never copy a WAL database main file.
+app.all(["/api/backup", "/api/backups", "/api/backups/:backupId/validate"], async (request, response) => {
+  const authorization = request.headers.authorization;
+  if (!authorization?.startsWith("Bearer ")) { response.status(401).json({ error: "Host credential required." }); return; }
+  if (!gameServerEndpoint) { response.status(503).json({ error: "Game server is not configured." }); return; }
+  if (!(request.method === "GET" && request.path === "/api/backups") && request.method !== "POST") {
+    response.status(405).json({ error: "Unsupported backup operation." }); return;
   }
-});
-
-app.get("/api/backups", (_request, response) => {
-  response.json({
-    backups: backupHistory,
-    dbPath,
-    backupsDir
-  });
-});
-
-// Auto-backup on startup (session-start behavior)
-setTimeout(() => {
   try {
-    const record = createBackup("Automatic session-start backup");
-    console.log(`[runtime-service] Auto-backup created: ${record.backupPath} (${record.sizeBytes} bytes)`);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error("[runtime-service] Auto-backup failed:", message);
-  }
-}, 5000);
+    const upstream = await fetch(`${gameServerEndpoint}${request.path}`, {
+      method: request.method, redirect: "error", headers: { authorization, "content-type": "application/json" },
+      ...(request.method === "POST" ? { body: JSON.stringify(request.body ?? {}) } : {}), signal: AbortSignal.timeout(30000)
+    });
+    const body: unknown = await upstream.json();
+    response.status(upstream.status).json(body);
+  } catch { response.status(503).json({ error: "Backup service is unavailable. Check the game server before retrying." }); }
+});
 
 server.listen(port, host, () => {
-  console.log(`[runtime-service] listening on http://${host}:${port}`);
+  const address = server.address();
+  console.log(`[runtime-service] listening on http://${host}:${typeof address === "object" && address ? address.port : port}`);
   console.log(`[runtime-service] polling game-server at ${gameServerEndpoint}`);
-  console.log(`[runtime-service] backups directory: ${backupsDir}`);
+
 });

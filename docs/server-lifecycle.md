@@ -1,0 +1,19 @@
+# Server work, dice and shutdown ownership
+
+## Runtime seam
+
+`src/server-lifecycle.ts` owns a server-lifetime abort signal, the four game-server intervals and an injectable request/time seam. Startup passes the owned request function to audio cues, media routing and every AI completion, including director guidance and post-commit narration. Direct legacy Comfy/TTS calls also use that request owner; their consolidation into capability adapters remains CAP-05 work. Caller deadlines/signals remain effective. Stop clears interval handles, prevents later timer callbacks, aborts in-flight requests and refuses future requests. An adapter that ignores abort cannot leave its fetch caller pending. Native fetch response bodies retain the combined abort signal; this does not validate provider payloads or magically cancel an already accepted remote job.
+
+The injectable `now` function supplies authority expiry, durable command timestamps, Party deadlines and server millisecond timestamps. Pure Party rules already accept time/dice explicitly. `src/dice.ts` now owns TTRPG notation parsing and roll aggregation. Its default die source uses Node crypto randomInt; injected integer outcomes make advantage/disadvantage and modifiers reproducible in tests. Sample bounds are checked before returning an outcome. Authoritative rolled results still commit once through the existing command boundary and replay from durable receipts; cosmetic dice remain separate.
+
+## Shutdown sequence
+
+SIGINT/SIGTERM share one shutdown operation. Listener startup failure uses the same cleanup and exits nonzero. Shutdown stops work/admission, disposes audio ownership, terminates owned WebSockets and closes the HTTP listener. Existing HTTP requests may finish during a five-second grace; afterward remaining HTTP connections are destroyed. Transport close completes before the final legacy transaction and explicit store close. A final save failure still closes the store and produces a nonzero shutdown outcome. Repeated calls reuse the same promise instead of saving/closing twice.
+
+Background narration checks stopped state before applying late text or logging completion. Polling checks active state before terminal application and suppresses shutdown-only retry warnings. Full session/round/revision cancellation during ordinary gameplay remains CAP-02/05; shutting down is a separate lifetime boundary. Shutdown cannot retract a GPU/audio job already accepted by another process. Abrupt OS process termination does not run JavaScript signal cleanup; acknowledged Party/TTRPG commands retain their existing durable commit boundary.
+
+## Verification and rollback
+
+`tests/server-lifecycle.test.mjs` runs with injected time/timers/fetch, deterministic dice and real owned loopback HTTP/WebSocket transports. It checks caller abort, ignored abort, late completion, timer suppression, same-promise shutdown, bounded stalled connections and store closure after a failed save. Its actual game-server fixture holds an authenticated WebSocket and a never-resolving synthetic audio request, then delivers SIGTERM through test-only IPC and verifies clean exit and persisted cue metadata. IPC exists only in the owned preload fixture; no production shutdown endpoint was added. Source and emitted modes select both lifecycle/dice modules and server children.
+
+No provider, GPU, live audio, private database or external output is accessed. Existing API tests cover TTRPG/Party privacy, receipt replay, persistence failure, restart and the seven-client full game after extraction. No UI change or dependency installation is part of this work. To roll back, restore the lifecycle caller, AI request option and extracted dice caller together, while retaining explicit store initialization and prior asset persistence fixes. Do not move or rewrite user databases.

@@ -3,7 +3,16 @@
   "$id": "https://black-dice-engine.local/schemas/runtime-status.schema.json",
   "title": "Runtime Status",
   "type": "object",
-  "required": ["id", "status", "mode", "updatedAt", "services"],
+  "required": [
+    "id",
+    "status",
+    "mode",
+    "updatedAt",
+    "services",
+    "clients",
+    "mediaPressure",
+    "warnings"
+  ],
   "additionalProperties": false,
   "properties": {
     "id": {
@@ -11,11 +20,22 @@
     },
     "status": {
       "type": "string",
-      "enum": ["ok", "degraded", "offline", "maintenance"]
+      "enum": [
+        "ok",
+        "degraded",
+        "offline",
+        "maintenance"
+      ]
     },
     "mode": {
       "type": "string",
-      "enum": ["fast", "scene", "cinematic", "prep", "offline"]
+      "enum": [
+        "fast",
+        "scene",
+        "cinematic",
+        "prep",
+        "offline"
+      ]
     },
     "updatedAt": {
       "type": "string",
@@ -25,7 +45,10 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["name", "status"],
+        "required": [
+          "name",
+          "status"
+        ],
         "additionalProperties": false,
         "properties": {
           "name": {
@@ -33,49 +56,60 @@
           },
           "status": {
             "type": "string",
-            "enum": ["ok", "degraded", "offline", "unknown"]
+            "enum": [
+              "ok",
+              "degraded",
+              "offline",
+              "unknown"
+            ]
           },
           "latencyMs": {
-            "type": "integer",
+            "type": "number",
             "minimum": 0
           },
           "message": {
             "type": "string"
+          },
+          "capability": {
+            "$ref": "capability-state-v1.schema.json"
           }
         }
+      }
+    },
+    "clients": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "role", "clientId", "status", "connectedAt", "lastSeenAt", "playerLabel", "claimedCharacterName"],
+        "properties": {
+          "id": { "type": "string" }, "role": { "enum": ["gm", "player", "spectator", "ai", "admin"] },
+          "clientId": { "type": "string" }, "status": { "enum": ["active", "stale"] },
+          "connectedAt": { "type": "string" }, "lastSeenAt": { "type": "string" },
+          "playerLabel": { "type": ["string", "null"] }, "claimedCharacterName": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "mediaPressure": {
+      "type": "object", "additionalProperties": false,
+      "required": ["level", "summary", "reasons", "blockedJobTypes"],
+      "properties": {
+        "level": { "enum": ["low", "elevated", "high"] }, "summary": { "type": "string" },
+        "reasons": { "type": "array", "items": { "type": "string" } },
+        "blockedJobTypes": { "type": "array", "items": { "enum": ["image", "video", "audio", "upscale", "interpolation", "visual_canon"] } }
       }
     },
     "resources": {
       "type": "object",
       "additionalProperties": false,
+      "required": ["sampledAt", "rssBytes", "heapUsedBytes", "hostFreeMemoryBytes", "hostTotalMemoryBytes", "eventLoopDelayP95Ms", "gpu"],
       "properties": {
-        "activeModel": {
-          "type": "string"
-        },
-        "contextTokens": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "mediaJobsQueued": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "mediaJobsRunning": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "diskFreeGb": {
-          "type": "number",
-          "minimum": 0
-        },
-        "vramFreeMb": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "vramTotalMb": {
-          "type": "integer",
-          "minimum": 0
-        }
+        "sampledAt": { "type": "string" },
+        "rssBytes": { "type": "integer", "minimum": 0 },
+        "heapUsedBytes": { "type": "integer", "minimum": 0 },
+        "hostFreeMemoryBytes": { "type": "integer", "minimum": 0 },
+        "hostTotalMemoryBytes": { "type": "integer", "minimum": 0 },
+        "eventLoopDelayP95Ms": { "type": ["number", "null"], "minimum": 0 },
+        "gpu": { "const": "unmeasured" }
       }
     },
     "warnings": {

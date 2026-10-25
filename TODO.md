@@ -6,6 +6,8 @@ This file is the working build plan for Black Dice Engine. It should stay practi
 
 Keep the private GitHub repository clean and turn the planning work into a small first playable loop.
 
+The active Party Mode and project-wide overhaul sequence is in [PLAN.md](PLAN.md). Use its staged checkboxes for this work; retain the milestones below as the existing feature/history backlog and reconcile them as behavior is verified. Evidence is recorded in [docs/overhaul-progress.md](docs/overhaul-progress.md).
+
 ## Immediate TODO
 
 - [x] Publish the repository to GitHub as private.
@@ -88,10 +90,10 @@ Goal: let the GM and three players use the system together on the same network.
 - [x] Add HP, AC, inventory, conditions, notes, and resource tracking.
 - [x] Add WebSocket updates between dashboard and player phones.
 - [x] Add QR-code join panel to the GM dashboard.
-- [x] Add local table PIN/session token strategy for player join.
+- [x] Replace the prototype fixed PIN with server-issued local membership credentials (PLAN CORE-02–05; API/frame evidence in docs/overhaul-progress.md).
 - [x] Add visible connected/reconnecting/disconnected status.
 - [x] Add stale-client presence view for GM.
-- [x] Prevent duplicate rolls/actions after reconnect.
+- [x] Make covered synchronous command handling durable and actor/payload scoped, with atomic state/outcome/revision receipts and restart replay (PLAN CORE-07–08; tests and limits in docs/command-protocol.md).
 - [x] Test over LAN using at least one phone.
 - [x] Export a session summary to Markdown.
 
@@ -151,13 +153,13 @@ Goal: make failures visible and recoverable before adding heavier integrations.
 - [x] Add GM dashboard status strip.
 - [x] Add player client heartbeat.
 - [x] Add reconnect/resume flow.
-- [x] Add local table PIN/session token strategy for QR join.
-- [x] Add idempotency keys for rolls and submitted actions.
+- [x] Authenticate room-code admission and resumed membership instead of relying on the prototype fixed PIN (PLAN CORE-02–05; rendered QR flow still needs rehearsal).
+- [x] Add prototype in-memory idempotency keys for rolls and submitted actions; durable conflict-safe behavior remains open in PLAN CORE-07–08.
 - [x] Add error event log with visibility labels.
 - [x] Add degraded-mode behavior for unavailable LLM, ComfyUI, audio, and import services.
 - [x] Add manual backup placeholder.
 - [x] Add session-start and session-end backup plan.
-- [x] Add role/permission checks for GM, player, spectator, AI, and admin.
+- [x] Bind game-server role/permission checks to authenticated identities; forged roles are denied in API/WebSocket tests (PLAN CORE-02–05, CORE-09).
 
 ### Milestone 1.0: First Portfolio Demo
 

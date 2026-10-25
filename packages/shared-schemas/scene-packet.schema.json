@@ -33,7 +33,7 @@
         "properties": {
           "kind": {
             "type": "string",
-            "enum": ["description", "choice", "threat", "clue", "consequence"]
+            "enum": ["description", "choice", "threat", "clue", "consequence", "memory"]
           },
           "text": {
             "type": "string"

@@ -12,6 +12,13 @@ Instructions for Codex and other coding agents working in this repository.
   - `G:\AI-DM\04_assets\`
 - Do not delete user data.
 
+## Project Skills
+
+- Repository-scoped skills live in `.agents/skills/`; see `docs/agent-skills.md` for the collection and example requests.
+- Use `bde-root-refactor` for structural work across root configuration, workspaces, shared code, or startup paths. Use the focused UI, server, contracts, local AI/media, and verification skills when their scope matches the task.
+- Reused skills cover module design (`codebase-design`), hard bugs (`diagnosing-bugs`), diff review (`review-and-simplify-changes`), navigation (`information-architecture-navigation`), and UI code audits (`web-interface-guidelines`). Choose the smallest relevant set; preserved licenses and source revisions are in `.agents/skills/THIRD_PARTY_NOTICES.md`.
+- Skills support the requested work; they do not grant permission to install dependencies, access private data, enable cloud services, or publish changes.
+
 ## Repository Hygiene
 
 - Never commit `.env` files, API keys, tokens, local credentials, private database files, generated media, or downloaded AI models.

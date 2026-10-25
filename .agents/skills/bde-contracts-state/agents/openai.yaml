@@ -1,0 +1,3 @@
+interface:
+  display_name: "BDE Contracts and State"
+  short_description: "Maintain schemas, events, and audience boundaries"

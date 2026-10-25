@@ -1,0 +1,8 @@
+.campaign-journal, .progress-form { display: grid; gap: 12px; min-width: 0; }
+.campaign-journal article { border-top: 1px solid #a78b5c55; padding-top: 12px; overflow-wrap: anywhere; }
+.progress-form label { display: grid; gap: 6px; }
+.progress-form input, .progress-form textarea, .progress-form select { width: 100%; min-width: 0; padding: 10px; font: inherit; }
+.progress-form textarea { min-height: 90px; resize: vertical; }
+.progress-form button, .campaign-journal button { min-height: 44px; }
+.progress-form fieldset { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 12px; }
+.campaign-journal p { white-space: pre-wrap; }
