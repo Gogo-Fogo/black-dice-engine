@@ -10,8 +10,6 @@ import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { networkInterfaces } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import {
   initDb,
@@ -38,6 +36,20 @@ import {
   type SceneContext,
   type RollResultContext
 } from "./ai-adapter.js";
+import {
+  buildProposals,
+  comfyBaseUrl,
+  comfyImageUrl,
+  forgeAncestries,
+  forgeLookIdeas,
+  forgeRoles,
+  forgeVibes,
+  isSafeComfyImageRef,
+  queuePortraits,
+  refreshPortraits,
+  sanitizeAnswers,
+  type ForgeSession
+} from "./character-forge.js";
 
 type ServiceState = {
   name: string;
@@ -100,6 +112,8 @@ type Character = {
   };
   claimedByClientId: string | null;
   claimedByLabel: string | null;
+  /** Portrait prompt kept for visual continuity when the character came from the forge. */
+  portraitPrompt?: string;
 };
 
 type CurrentAction = {
@@ -3674,6 +3688,235 @@ app.post("/api/claim-character", requireRole("player", "gm", "admin"), (request,
     cacheMutationResponse("claim-character", requestId, 200, result);
   }
   response.json(result);
+});
+
+// ─── Character forge: quick on-demand character creation ──────────────────────────
+
+const forgeSessions = new Map<string, ForgeSession>();
+const FORGE_SESSION_TTL_MS = 2 * 60 * 60 * 1000;
+
+function pruneForgeSessions() {
+  const cutoff = Date.now() - FORGE_SESSION_TTL_MS;
+  for (const [id, session] of forgeSessions) {
+    if (session.createdAt < cutoff) forgeSessions.delete(id);
+  }
+}
+
+function partyLevel() {
+  const levels = party
+    .map((c) => Number(c.classLabel.match(/(\d+)\s*$/)?.[1]))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  return levels.length ? Math.round(levels.reduce((a, b) => a + b, 0) / levels.length) : 1;
+}
+
+function forgeSessionView(session: ForgeSession) {
+  return {
+    id: session.id,
+    round: session.round,
+    flavorSource: session.flavorSource,
+    chosenCharacterId: session.chosenCharacterId,
+    proposals: session.proposals.map(({ portraits, portraitPrompt: _prompt, ...rest }) => ({
+      ...rest,
+      portraits: portraits.map((p) => ({ status: p.status, url: p.image ? comfyImageUrl(p.image) : null }))
+    }))
+  };
+}
+
+async function forgeNewProposals(session: ForgeSession) {
+  const bible = sampleCampaignContext.campaignBible;
+  const { proposals, flavorSource } = await buildProposals(session.answers, {
+    level: partyLevel(),
+    round: session.round,
+    usedNames: [...session.usedNames, ...party.map((c) => c.name)],
+    campaignTitle: bible.title,
+    tone: bible.tone,
+    avoid: bible.safety.lines
+  });
+  session.proposals = proposals;
+  session.flavorSource = flavorSource;
+  session.createdAt = Date.now();
+  session.usedNames.push(...proposals.map((p) => p.name));
+  void queuePortraits(session);
+}
+
+function getOwnedForgeSession(sessionId: string, clientId: string) {
+  const session = forgeSessions.get(sessionId);
+  return session && session.clientId === clientId ? session : null;
+}
+
+app.get("/api/character-forge/options", requireRole("player", "gm", "admin"), (_request, response) => {
+  response.json({
+    roles: forgeRoles,
+    ancestries: forgeAncestries.map(({ id, label }) => ({ id, label })),
+    vibes: forgeVibes.map(({ id, label }) => ({ id, label })),
+    lookIdeas: forgeLookIdeas,
+    level: partyLevel()
+  });
+});
+
+app.post("/api/character-forge/sessions", requireRole("player", "gm", "admin"), async (request, response) => {
+  const clientId = typeof request.body.clientId === "string" ? request.body.clientId.trim() : "";
+  const answers = sanitizeAnswers(request.body.answers);
+  if (!clientId || !answers) {
+    response.status(400).json({ error: "clientId and valid answers are required" });
+    return;
+  }
+  pruneForgeSessions();
+  // One live forge per device keeps a stuck phone from flooding ComfyUI.
+  for (const [id, existing] of forgeSessions) {
+    if (existing.clientId === clientId && !existing.chosenCharacterId) forgeSessions.delete(id);
+  }
+  const session: ForgeSession = {
+    id: randomUUID(),
+    clientId,
+    answers,
+    proposals: [],
+    usedNames: [],
+    flavorSource: "template",
+    round: 0,
+    createdAt: Date.now(),
+    chosenCharacterId: null
+  };
+  forgeSessions.set(session.id, session);
+  await forgeNewProposals(session);
+  recordAiLog({
+    kind: "tool_call",
+    adapter: "local_model",
+    correlationId: session.id,
+    summary: `Character forge proposed ${session.proposals.map((p) => `${p.name} (${p.classLabel})`).join(", ")}`,
+    details: { flavorSource: session.flavorSource, role: answers.role, ancestry: answers.ancestry }
+  });
+  response.status(201).json({ session: forgeSessionView(session) });
+});
+
+app.get("/api/character-forge/sessions/:sessionId", requireRole("player", "gm", "admin"), async (request, response) => {
+  const clientId = typeof request.query.clientId === "string" ? request.query.clientId : "";
+  const session = getOwnedForgeSession(String(request.params.sessionId), clientId);
+  if (!session) {
+    response.status(404).json({ error: "Forge session not found" });
+    return;
+  }
+  await refreshPortraits(session);
+  response.json({ session: forgeSessionView(session) });
+});
+
+app.post("/api/character-forge/sessions/:sessionId/reroll", requireRole("player", "gm", "admin"), async (request, response) => {
+  const clientId = typeof request.body.clientId === "string" ? request.body.clientId.trim() : "";
+  const session = getOwnedForgeSession(String(request.params.sessionId), clientId);
+  if (!session || session.chosenCharacterId) {
+    response.status(404).json({ error: "Forge session not found" });
+    return;
+  }
+  if (session.round >= 10) {
+    response.status(429).json({ error: "That's a lot of options. Pick one or change your answers." });
+    return;
+  }
+  const answers = request.body.answers === undefined ? session.answers : sanitizeAnswers(request.body.answers);
+  if (!answers) {
+    response.status(400).json({ error: "Invalid answers" });
+    return;
+  }
+  session.answers = answers;
+  session.round += 1;
+  await forgeNewProposals(session);
+  response.json({ session: forgeSessionView(session) });
+});
+
+app.post("/api/character-forge/sessions/:sessionId/choose", requireRole("player", "gm", "admin"), (request, response) => {
+  const clientId = typeof request.body.clientId === "string" ? request.body.clientId.trim() : "";
+  const proposalId = typeof request.body.proposalId === "string" ? request.body.proposalId : "";
+  const portraitIndex = typeof request.body.portraitIndex === "number" ? request.body.portraitIndex : 0;
+  const playerLabel = (typeof request.body.playerLabel === "string" ? request.body.playerLabel.trim() : "").slice(0, 32) || "Player";
+  const requestId = typeof request.body.requestId === "string" ? request.body.requestId.trim() : "";
+
+  if (requestId) {
+    const cached = getCachedMutationResponse("forge-choose", requestId);
+    if (cached) {
+      response.status(cached.statusCode).json(cached.body);
+      return;
+    }
+  }
+
+  const session = getOwnedForgeSession(String(request.params.sessionId), clientId);
+  const proposal = session?.proposals.find((p) => p.id === proposalId);
+  if (!session || !proposal) {
+    response.status(404).json({ error: "Proposal not found" });
+    return;
+  }
+  if (session.chosenCharacterId) {
+    response.status(409).json({ error: "A character was already created from this forge" });
+    return;
+  }
+
+  const portrait = proposal.portraits[portraitIndex] ?? proposal.portraits.find((p) => p.status === "ready");
+  const image = portrait?.image ? comfyImageUrl(portrait.image) : null;
+
+  for (const entry of party) {
+    if (entry.claimedByClientId === clientId) {
+      entry.claimedByClientId = null;
+      entry.claimedByLabel = null;
+    }
+  }
+
+  const character: Character = {
+    id: randomUUID(),
+    name: proposal.name,
+    classLabel: proposal.classLabel,
+    hp: { current: proposal.hp, max: proposal.hp },
+    armorClass: proposal.armorClass,
+    initiative: null,
+    conditions: [],
+    resources: proposal.resources,
+    inventory: proposal.inventory,
+    notes: [`${proposal.ancestryLabel}. ${proposal.appearance}`, proposal.personality, proposal.hook],
+    image,
+    stats: proposal.stats,
+    claimedByClientId: clientId,
+    claimedByLabel: playerLabel,
+    portraitPrompt: proposal.portraitPrompt
+  };
+  party.push(character);
+  session.chosenCharacterId = character.id;
+
+  recordTableEvent({
+    category: "state",
+    type: "character_created",
+    actor: { id: clientId, kind: "player", label: playerLabel },
+    visibility: "player_visible",
+    summary: `${playerLabel} forged ${character.name}, ${proposal.ancestryLabel} ${character.classLabel}`,
+    payload: { characterId: character.id, name: character.name, classLabel: character.classLabel, forgeSessionId: session.id }
+  });
+
+  const sessionSnapshot = publishSessionState();
+  persistState();
+  const result = { ok: true, characterId: character.id, sessionSnapshot };
+  if (requestId) cacheMutationResponse("forge-choose", requestId, 201, result);
+  response.status(201).json(result);
+});
+
+// Serves forge portraits and scene art straight from ComfyUI, limited to its bde/ output folder.
+app.get("/api/comfy-image", async (request, response) => {
+  if (!isSafeComfyImageRef(request.query)) {
+    response.status(400).json({ error: "Invalid image reference" });
+    return;
+  }
+  const params = new URLSearchParams({
+    filename: String(request.query.filename),
+    subfolder: String(request.query.subfolder),
+    type: "output"
+  });
+  try {
+    const upstream = await fetch(`${comfyBaseUrl}/view?${params.toString()}`, { signal: AbortSignal.timeout(8000) });
+    if (!upstream.ok) {
+      response.status(upstream.status === 404 ? 404 : 502).end();
+      return;
+    }
+    response.set("Content-Type", upstream.headers.get("content-type") ?? "image/png");
+    response.set("Cache-Control", "private, max-age=86400");
+    response.send(Buffer.from(await upstream.arrayBuffer()));
+  } catch {
+    response.status(502).json({ error: "ComfyUI unavailable" });
+  }
 });
 
 app.post("/api/release-character", requireRole("player", "gm", "admin"), (request, response) => {

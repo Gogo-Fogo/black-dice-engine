@@ -1,6 +1,7 @@
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { preloadDice } from "./dice3d";
 import { DiceOverlay } from "./DiceOverlay";
+import { Forge } from "./Forge";
 import {
   abilities,
   abilityName,
@@ -106,6 +107,7 @@ export default function App() {
   const [rollMode, setRollMode] = useState<RollMode>("normal");
   const [rolling, setRolling] = useState(false);
   const [claimingId, setClaimingId] = useState<string | null>(null);
+  const [forging, setForging] = useState(false);
   const [overlay, setOverlay] = useState<{ roll: RollRecord; dc: number | null } | null>(null);
   const [toast, setToast] = useState<{ text: string; tone: "error" | "info" } | null>(null);
   const [answeredActionKey, setAnsweredActionKey] = useState(() => {
@@ -324,6 +326,20 @@ export default function App() {
   let body: ReactNode;
   if (!snapshot) {
     body = <Splash error={loadError} onRetry={loadSnapshot} />;
+  } else if (!claimed && forging) {
+    body = (
+      <Forge
+        clientId={clientId}
+        playerLabel={playerLabel.trim()}
+        onCancel={() => setForging(false)}
+        onError={showToast}
+        onCreated={(next) => {
+          setSnapshot(next);
+          setForging(false);
+          setTab("sheet");
+        }}
+      />
+    );
   } else if (!claimed) {
     body = (
       <JoinScreen
@@ -336,6 +352,14 @@ export default function App() {
         }}
         claimingId={claimingId}
         onClaim={claim}
+        onCreate={() => {
+          if (!playerLabel.trim()) {
+            showToast("Add your name first so the GM knows who's playing.");
+            document.getElementById("player-name")?.focus();
+            return;
+          }
+          setForging(true);
+        }}
       />
     );
   } else {
@@ -537,7 +561,8 @@ function JoinScreen({
   playerLabel,
   onLabelChange,
   claimingId,
-  onClaim
+  onClaim,
+  onCreate
 }: {
   snapshot: SessionSnapshot;
   clientId: string;
@@ -545,6 +570,7 @@ function JoinScreen({
   onLabelChange: (value: string) => void;
   claimingId: string | null;
   onClaim: (character: Character) => void;
+  onCreate: () => void;
 }) {
   const nameMissing = !playerLabel.trim();
   return (
@@ -576,6 +602,13 @@ function JoinScreen({
         <p className="step-label">
           <span className="step-num">2</span> Pick your character
         </p>
+        <button type="button" className="create-card" onClick={onCreate} aria-disabled={nameMissing || undefined}>
+          <span className="create-plus" aria-hidden="true">+</span>
+          <span className="claim-body">
+            <strong>Create a new character</strong>
+            <span className="muted">Answer 4 quick questions, pick from 3 ready-to-play heroes</span>
+          </span>
+        </button>
         <ul className="claim-list">
           {snapshot.party.map((character) => {
             const takenBy = character.claimedByClientId && character.claimedByClientId !== clientId;

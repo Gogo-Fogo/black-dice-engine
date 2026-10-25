@@ -2,6 +2,18 @@
 
 Character creation should produce more than a sheet. It should create the source of truth for a player character's mechanics, personality, memory hooks, and visual identity.
 
+## Quick Forge (new players, under a minute)
+
+For a new game or a drop-in player, the phone join screen offers **Create a new character**. It is the fast path; the full intake below stays the path for prep-time characters.
+
+1. Four tap-first questions: how they want to play (role), ancestry (or "Surprise me"), up to two personality traits, then optional presentation, look and name.
+2. The game server builds three distinct proposals for that role at the party's current level. Mechanics are deterministic (standard array by class priority, +2/+1 ancestry bonus, HP from hit die, AC from armor type, class skills, gear and resources), so every sheet is valid without the AI.
+3. The local LLM writes flavor only (name, appearance, personality, hook, visual tags) with a 10-second budget and strict JSON. Template flavor covers it when no model is running. Names must be original and avoid earlier proposals and existing party members.
+4. Each proposal queues two portrait designs on the local ComfyUI (`COMFYUI_BASE_URL`, checkpoint `BDE_FORGE_CHECKPOINT`, 832x1216, 4 steps) into `output/bde/forge/`. Portraits appear on the cards as they finish; the player can pick before they do.
+5. The player picks a proposal and portrait design, asks for three others (classes rotate each round), or changes their answers. The pick becomes a party member claimed by that device, with the portrait prompt stored for later visual-canon work.
+
+Portraits are served through `/api/comfy-image`, which proxies ComfyUI's `/view` and only allows files under its `bde/` output folder.
+
 ## Two-Part Flow
 
 1. Player fills out identity, story, mechanics, and visual details.

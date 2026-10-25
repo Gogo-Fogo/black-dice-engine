@@ -21,6 +21,8 @@ Current first-slice responsibilities:
 
 The dice overlay shows the natural roll, modifier, nat 20/nat 1 callouts and pass/fail against the DC when the roll answers the GM's request. Haptics fire on roll requests and results; reduced-motion users skip the 3D throw. Skill modifiers assume proficiency, using a bonus derived from the trailing level in `classLabel`.
 
+New players can tap **Create a new character** on the join screen: four quick questions, then three ready-to-play proposals with two portrait designs each from the local image generator. They pick one, ask for three others, or change their answers (`src/Forge.tsx`).
+
 MVP identity should be local:
 
 - optional table PIN
