@@ -1,0 +1,17 @@
+id: "demo-fixture-campaign"
+title: "Demo Fixture Campaign"
+subtitle: "Original test-only content."
+visibility: "public_demo"
+openingScene: "Demo Mill Courtyard"
+tone:
+  - "light demo adventure"
+safety:
+  rating: "teen"
+  lines:
+    - "No graphic violence."
+  veils:
+    - "Injuries described briefly."
+facts:
+  - id: "fact-demo-mill"
+    text: "The demo mill grinds moonlight into flour."
+    source: "demo-fixture"

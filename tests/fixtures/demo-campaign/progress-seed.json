@@ -1,0 +1,4 @@
+[
+  { "operation": "record", "kind": "objective", "title": "Demo objective", "status": "active", "visibility": "player_visible", "resolution": "", "detail": "Find the demo flour." },
+  { "operation": "record", "kind": "fact", "title": "Demo GM secret", "status": "active", "visibility": "gm_only", "resolution": "", "detail": "DEMO_GM_SECRET_CANARY" }
+]

@@ -75,7 +75,8 @@ export function readRuntimeConfig(env: NodeJS.ProcessEnv = process.env, root = r
     directorModeModel: text("BDE_DIRECTOR_MODE_MODEL"),
     playerCompanionDistDir: join(root, "apps/player-companion/dist"),
     hostDashboardDistDir: join(root, "apps/gm-dashboard/dist"),
-    sampleCampaignDir: join(root, "campaigns/sample-campaign"),
+    // A private campaign (for example under ignored _local-context/) can replace the demo sample.
+    sampleCampaignDir: path("BDE_CAMPAIGN_DIR", "campaigns/sample-campaign"),
     gmSystemPromptPath: join(root, "prompts/gm-system-prompt.md"),
     directorPromptPath: join(root, "prompts/director-prompt.md"),
   };

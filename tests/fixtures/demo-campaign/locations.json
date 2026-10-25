@@ -1,0 +1,2 @@
+{ "campaignId": "demo-fixture-campaign", "locations": [
+  { "id": "loc-demo-mill", "name": "Demo Mill", "visibility": "public_demo", "summary": "A creaking test mill.", "features": ["millstone"] } ] }

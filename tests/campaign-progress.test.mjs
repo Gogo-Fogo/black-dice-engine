@@ -150,3 +150,23 @@ test('real commands persist goals, group outcomes and approved consequences with
 
   }, { aiReplies: ['The tinkers reach the far bank with mixed fortunes.', JSON.stringify(proposal)], aiDelayMs: 1, captureAiInput: true });
 });
+
+test('a selected campaign folder sets the opening scene, starts without demo heroes and seeds its ledger once', { timeout: 20000 }, async () => {
+  const { withIsolatedServer } = await import('./helpers/isolated-server.mjs');
+  const { fileURLToPath } = await import('node:url');
+  const campaignDir = fileURLToPath(new URL('./fixtures/demo-campaign/', import.meta.url));
+  await withIsolatedServer(async server => {
+    const host = await server.hostToken();
+    const get = async (path, token = host) => (await fetch(server.base + path, { headers: { authorization: `Bearer ${token}` } })).json();
+    const snapshot = await get('/api/session-snapshot');
+    assert.equal(snapshot.campaignTitle, 'Demo Fixture Campaign');
+    assert.equal(snapshot.currentScene, 'Demo Mill Courtyard');
+    assert.deepEqual(snapshot.party, []);
+    assert.deepEqual(snapshot.campaignProgress.entries.map(entry => entry.title), ['Demo objective', 'Demo GM secret']);
+    const player = await (await fetch(server.base + '/api/session/join', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code: snapshot.tablePin, label: 'Demo Seeder' }) })).json();
+    assert.ok(!JSON.stringify(await get('/api/session-snapshot', player.token)).includes('DEMO_GM_SECRET_CANARY'));
+    await server.restart();
+    assert.equal((await get('/api/session-snapshot')).campaignProgress.entries.length, 2, 'seed applies to a new ledger only');
+  }, { campaignDir });
+});

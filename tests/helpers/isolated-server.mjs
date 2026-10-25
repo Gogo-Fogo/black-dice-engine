@@ -6,7 +6,7 @@ import { resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** Uses only its own ignored demo directory, allowlisted child environment and loopback port. */
-export async function withIsolatedServer(run, { profile = 'full', configuredProviders = false, localModelService = true, aiReplies, aiDelayMs = 0, captureAiInput = false, mockFetches, gracefulStop = false, mediaFixture = false, automaticBackups = false, blockedBackups = false } = {}) {
+export async function withIsolatedServer(run, { profile = 'full', configuredProviders = false, localModelService = true, campaignDir, aiReplies, aiDelayMs = 0, captureAiInput = false, mockFetches, gracefulStop = false, mediaFixture = false, automaticBackups = false, blockedBackups = false } = {}) {
   assert.ok(Number.isInteger(aiDelayMs) && aiDelayMs >= 0 && aiDelayMs <= 2000);
   assert.ok(aiReplies === undefined || mockFetches === undefined, 'Select one synthetic adapter fixture');
   if (mockFetches !== undefined) assert.ok(Array.isArray(mockFetches) && mockFetches.length <= 30 && mockFetches.every(item => typeof item.url === 'string' && item.url.startsWith('http://127.0.0.1:1/')));
@@ -17,6 +17,7 @@ export async function withIsolatedServer(run, { profile = 'full', configuredProv
   const env = Object.fromEntries(['PATH', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP'].filter(key => process.env[key]).map(key => [key, process.env[key]]));
   Object.assign(env, { BDE_HOST: '127.0.0.1', BDE_GAME_SERVER_PORT: '0', BDE_DB_PATH: resolve(folder, 'demo.db'), BDE_EXPORT_ROOT: resolve(folder, 'exports'), BDE_BACKUPS_DIR: resolve(folder, 'backups') });
   env.BDE_RUNTIME_PROFILE = profile;
+  if (campaignDir) env.BDE_CAMPAIGN_DIR = campaignDir;
   env.BDE_AUTO_BACKUP = automaticBackups ? "1" : "0";
   if (blockedBackups) await writeFile(resolve(folder, 'backups'), 'Synthetic blocked backup destination');
   if (mediaFixture) { await mkdir(resolve(folder, 'media')); env.BDE_MEDIA_OUTPUT_ROOT = resolve(folder, 'media'); }

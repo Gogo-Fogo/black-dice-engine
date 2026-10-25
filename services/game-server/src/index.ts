@@ -1,5 +1,5 @@
 import { installForgeRoutes } from "./forge-routes.js";
-import { loadCampaignProgress, installProgressRoutes } from "./campaign-progress.js";
+import { loadCampaignProgress, installProgressRoutes, applyProgressCommand } from "./campaign-progress.js";
 import { buildAiSceneContext } from "./ai-context.js";
 import {characterOutputPath} from './character-output.js';
 import { createCharacterPortraits, installCharacterPortraitRoutes } from "./character-portraits.js";
@@ -21,7 +21,7 @@ import { installTtrpgActionRoutes } from "./ttrpg-action-routes.js";
 import { createMediaRouterClient, createMediaJobPoller, MediaRouterError } from "./media-router-client.js";
 import { createAudioCuePlayback, AudioTrackNotFound } from "./audio-cue-playback.js";
 import { parseActionProposal } from "./ai-proposals.js";
-import { isRollRecord, sceneBeatKinds } from "../../../packages/contracts/dist/index.js";
+import { isRollRecord, isProgressCommand, sceneBeatKinds } from "../../../packages/contracts/dist/index.js";
 import type {
   Character, RollRecord, CurrentAction, ServiceState, RuntimeStatus,
   TableEventRecord, MemoryEntry, CampaignFact, CampaignBible, CampaignLocation,
@@ -44,7 +44,7 @@ import cors from "cors";
 import express from "express";
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { WebSocketServer, type WebSocket } from "ws";
 import { openGameStore } from "./db.js";
@@ -232,8 +232,11 @@ const defaultParty: Character[] = [
   }
 ];
 
+const sampleCampaignContext = loadSampleCampaignContext();
 const loadedParty = loadTable<Character>("party");
-const party: Character[] = loadedParty.length ? loadedParty : defaultParty;
+// The demo heroes belong to the sample campaign; another campaign starts with an empty table.
+const party: Character[] = loadedParty.length ? loadedParty
+  : sampleCampaignContext.campaignBible.id === "sample-campaign" ? defaultParty : [];
 if (initialHost && process.env.BDE_RECOVER_HOST !== "1") {
   // A fresh/expired room has no valid old memberships. Preserve sheets, release seats.
   for (const character of party) {
@@ -397,9 +400,10 @@ function parseCampaignBibleYaml(raw: string): CampaignBible {
 }
 
 function loadSampleCampaignContext() {
-  const campaignBible = parseCampaignBibleYaml(
-    readFileSync(join(sampleCampaignDir, "campaign-bible.yml"), "utf8")
-  );
+  const bibleText = readFileSync(join(sampleCampaignDir, "campaign-bible.yml"), "utf8");
+  const campaignBible = parseCampaignBibleYaml(bibleText);
+  // Optional root key; kept beside the bible so the bible contract stays unchanged.
+  const openingScene = bibleText.match(/^openingScene:\s*"([^"\r\n]{1,200})"\s*$/m)?.[1] ?? "";
   const locationFile = JSON.parse(
     readFileSync(join(sampleCampaignDir, "locations.json"), "utf8")
   ) as { locations: CampaignLocation[] };
@@ -409,13 +413,21 @@ function loadSampleCampaignContext() {
 
   return {
     campaignBible,
+    openingScene,
     locations: locationFile.locations,
     npcs: npcFile.npcs
   };
 }
 
-const sampleCampaignContext = loadSampleCampaignContext();
-let campaignProgress = loadCampaignProgress(getMeta(`campaign-progress:${sampleCampaignContext.campaignBible.id}`), sampleCampaignContext.campaignBible.id);
+const savedCampaignProgress = getMeta(`campaign-progress:${sampleCampaignContext.campaignBible.id}`);
+let campaignProgress = loadCampaignProgress(savedCampaignProgress, sampleCampaignContext.campaignBible.id);
+// A campaign may ship prep (objectives, GM-only secrets, the opening scene) applied once to a new ledger.
+if (savedCampaignProgress === null) {
+  const seedPath = join(sampleCampaignDir, "progress-seed.json");
+  const seed: unknown = existsSync(seedPath) ? JSON.parse(readFileSync(seedPath, "utf8")) : [];
+  if (!Array.isArray(seed) || !seed.every(command => isProgressCommand(command) && command.operation === "record")) throw new Error("progress-seed.json must be an array of progress record commands.");
+  for (const command of seed) applyProgressCommand(campaignProgress, command, new Date().toISOString());
+}
 
 function buildActiveSceneContext(currentScene: string): ActiveSceneContext {
   const sceneLower = currentScene.toLowerCase();
@@ -877,7 +889,7 @@ function getLanJoinHost() {
   return linkLocalFallback ?? "localhost";
 }
 
-let currentSceneTitle = "Lantern Gate, just before the watchtower ascent";
+let currentSceneTitle = sampleCampaignContext.openingScene ||"Lantern Gate, just before the watchtower ascent";
 let currentAction: CurrentAction | null = null;
 let currentActionSetAt: number = 0;
 let pendingNarration: { text: string; timestamp: number } | null = null;

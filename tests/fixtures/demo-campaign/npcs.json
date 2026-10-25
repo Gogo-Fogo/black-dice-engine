@@ -1,0 +1,2 @@
+{ "campaignId": "demo-fixture-campaign", "npcs": [
+  { "id": "npc-demo-miller", "name": "Demo Miller", "role": "Keeper of the Demo Mill", "visibility": "public_demo", "motive": "Test motive.", "detail": "Test detail." } ] }
