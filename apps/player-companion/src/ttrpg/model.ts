@@ -8,7 +8,11 @@ export function abilityModifier(character: Character | null, action: CurrentActi
   const skill = (action?.type ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
   if (!skill || !character?.stats?.skills?.includes(skill)) return base;
   const level = Number(character.classLabel.match(/(\d+)\s*$/)?.[1]) || 1;
-  return base + (character.build?.proficiencyBonus ?? 2 + Math.floor((Math.min(20, level) - 1) / 4));
+  const proficiency = character.build?.proficiencyBonus ?? 2 + Math.floor((Math.min(20, level) - 1) / 4);
+  // Build features list Expertise as "Expertise (stealth and thieves' tools)": double proficiency.
+  const expertise = character.build?.features.find(feature => feature.startsWith("Expertise ("))?.slice(11, -1)
+    .split(/,| and /).map(name => name.trim().toLowerCase().replace(/[\s-]+/g, "_")) ?? [];
+  return base + proficiency * (expertise.includes(skill) ? 2 : 1);
 }
 
 /** Latest server state selects ownership; live/receipt rolls share bounded presentation dedup. */

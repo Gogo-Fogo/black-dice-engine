@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { projectSnapshot, projectRuntime, publicSummary } from '../services/game-server/src/projections.ts';
+import { projectSnapshot, projectRuntime, publicSummary, projectRoll } from '../services/game-server/src/projections.ts';
 
 test('allowlist projections exclude other sheets, GM context, unknown fields and private events', () => {
   const source = { campaignId: 'demo', campaignTitle: 'Clocktower', currentScene: 'Entry', joinUrl: '/player/',
@@ -26,4 +26,13 @@ test('allowlist projections exclude other sheets, GM context, unknown fields and
   assert.ok(!display.includes('Table event'));
   assert.equal(projectSnapshot(source, { ...player, role: 'gm' }), source);
   assert.ok(!JSON.stringify(projectRuntime({ id: 'runtime', services: ['PRIVATE_ENDPOINT'], clients: ['PRIVATE_ID'], warnings: ['PRIVATE_PATH'] }, player)).includes('PRIVATE'));
+});
+
+test('player roll projection keeps the public DC outcome and drops unknown roll fields', () => {
+  const roll = { id: 'r1', actorId: 'a', actorName: 'Demo', dice: '1d20+7', modifier: 7, rolled: 10, total: 17, advantage: null, note: 'arcana',
+    timestamp: '2026-10-25T12:00:00.000Z', secret: 'ROLL_SECRET', action: { id: 'x', description: 'Read runes', dc: 13, success: true, hidden: 'ACTION_SECRET' } };
+  const projected = projectRoll(roll);
+  assert.deepEqual(projected.action, { id: 'x', description: 'Read runes', dc: 13, success: true });
+  assert.ok(!JSON.stringify(projected).includes('SECRET'));
+  assert.equal(projectRoll({ ...roll, action: undefined }).action, undefined);
 });

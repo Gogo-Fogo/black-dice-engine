@@ -34,7 +34,7 @@ import { dirname, join } from "node:path";
 import { readRuntimeConfig } from "./config.js";
 import { SessionAuthority, SessionError, requestCredential, type LocalCredential } from "./session-authority.js";
 import { identityFor, installSessionAccess, sessionErrorHandler } from "./session-http.js";
-import { projectSnapshot, projectRuntime } from "./projections.js";
+import { projectSnapshot, projectRuntime, projectRoll } from "./projections.js";
 import { CommandStore } from "./command-store.js";
 import { CommandBoundary } from "./command-boundary.js";
 import { PartyService, installPartyRoutes } from "./party-service.js";
@@ -1647,7 +1647,8 @@ function deliverBroadcast(type: string, payload: unknown) {
         const identity = authority.authenticate(socketTokens.get(client));
         const projected = type === "session_snapshot" ? projectSnapshot(payload, identity)
           : type === "party_snapshot" ? projectParty(payload as PartyState, identity)
-          : type === "runtime_status" ? projectRuntime(payload, identity) : payload;
+          : type === "runtime_status" ? projectRuntime(payload, identity)
+          : type === "roll_recorded" && identity.role !== "gm" ? projectRoll(payload) : payload;
         // Unknown message kinds remain host-only until they get an explicit projection.
         if (identity.role !== "gm" && !["session_snapshot", "party_snapshot", "runtime_status", "roll_recorded"].includes(type)) continue;
         client.send(JSON.stringify({ type, payload: projected }));
@@ -2613,7 +2614,10 @@ installTtrpgActionRoutes(app, {
     get aiNarrationEnabled() { return aiNarrationEnabled; }, set aiNarrationEnabled(value) { aiNarrationEnabled = value; },
   },
   party, rollLog, eventLog, work, sceneImages, commands, narration,
-  config: { localModelEndpoint },
+  // Roll narration uses the adapter once a provider is chosen explicitly (e.g. hosted DeepSeek)
+  // or the legacy local-model service is set; an unconfigured install never calls out.
+  aiNarrationAvailable: () => profile !== "party" && aiCapability.provider !== "disabled" && aiCapability.endpointConfigured &&
+    (Boolean(process.env.BDE_LLM_PROVIDER?.trim()) || Boolean(localModelEndpoint)),
   requireRole, recordTableEvent, recordAiLog, broadcast, getSessionSnapshot, getRuntimeStatus,
   publishSessionState, createMemoryEntry, persistState
 });

@@ -33,14 +33,36 @@ export function StageApp({request=apiFetch,fullscreen=true}:{request?:typeof fet
 
 export function StagePreview(){
   const [request,setRequest]=useState<typeof fetch|null>(null),[error,setError]=useState('');
+  const [tv,setTv]=useState<{key:string;url:string}|null>(null),[showTv,setShowTv]=useState(false);
+  const [pairCode,setPairCode]=useState<{code:string;expiresAt:number}|null>(null),[pairError,setPairError]=useState('');
+  const newCode=async()=>{setPairError('');
+    try{const response=await apiFetch('/api/session/display-code',{method:'POST',signal:AbortSignal.timeout(5000)}),body=await response.json();
+      if(!response.ok||typeof body.code!=='string'||!/^[A-Z0-9]{6}$/.test(body.code)||typeof body.expiresAt!=='number')throw Error();setPairCode(body);}
+    catch{setPairError('Could not create a TV code. Check the host connection.');}};
   useEffect(()=>{let active=true;void(async()=>{
     try{
       const response=await apiFetch('/api/session/display',{method:'POST',signal:AbortSignal.timeout(5000)}),credential=await response.json();
       if(!response.ok)throw Error();rememberSession(credential);
-      if(active)setRequest(()=>((input,init)=>fetch(input,{...init,headers:{...Object.fromEntries(new Headers(init?.headers)),Authorization:`Bearer ${credential.token}`}})) as typeof fetch);
+      const viewer=((input,init)=>fetch(input,{...init,headers:{...Object.fromEntries(new Headers(init?.headers)),Authorization:`Bearer ${credential.token}`}})) as typeof fetch;
+      if(active)setRequest(()=>viewer);
+      // A TV on another device opens this server's address, the same one players join.
+      const snapshot=await (await viewer('/api/session-snapshot',{signal:AbortSignal.timeout(5000)})).json();
+      const origin=isPlayerSessionSnapshot(snapshot)&&/^https?:\/\//.test(snapshot.joinUrl)?new URL(snapshot.joinUrl).origin:window.location.origin;
+      if(active)setTv({key:credential.token,url:`${origin}/host/?mode=ttrpg&view=stage`});
     }catch{if(active)setError('Could not prepare the public display. Reopen Stage to retry.');}
   })();return()=>{active=false;};},[]);
-  return <section className="stage-pane"><div className="stage-toolbar"><a className="gm-btn" href="?mode=ttrpg&view=stage" target="_blank" rel="opener">Open on TV</a><p>Shows public-approved artwork, portraits and campaign updates. Voice generation is off.</p></div>{error&&<p role="alert">{error}</p>}{request&&<StageApp request={request} fullscreen={false}/>}</section>;
+  return <section className="stage-pane"><div className="stage-toolbar"><a className="gm-btn" href="?mode=ttrpg&view=stage" target="_blank" rel="opener">Open on TV</a>
+    <button type="button" className="gm-btn" disabled={!tv} aria-expanded={showTv} onClick={()=>setShowTv(value=>!value)}>TV on another device</button>
+    <p>Shows public-approved artwork, portraits and campaign updates. Voice generation is off.</p></div>
+    {showTv&&tv&&<div className="stage-tv-setup">
+      <p>On the TV device's browser, open this address and enter the TV code. The display is view-only: it cannot roll, approve or see GM notes.</p>
+      <label>TV address<input readOnly value={tv.url} onFocus={event=>event.target.select()}/></label>
+      <div className="stage-tv-code"><button type="button" className="gm-btn" onClick={()=>void newCode()}>{pairCode?'New TV code':'Create TV code'}</button>
+        {pairCode&&<p><strong>{pairCode.code}</strong> single use, valid until {new Date(pairCode.expiresAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}</p>}</div>
+      {pairError&&<p role="alert">{pairError}</p>}
+      <details><summary>Use the full display key instead</summary><label>Display key<input readOnly value={tv.key} onFocus={event=>event.target.select()} autoComplete="off"/></label></details>
+    </div>}
+    {error&&<p role="alert">{error}</p>}{request&&<StageApp request={request} fullscreen={false}/>}</section>;
 }
 
 export default StageApp;

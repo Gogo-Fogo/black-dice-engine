@@ -902,5 +902,11 @@
 .dashboard-grid > [data-dashboard-tab][hidden] {display:none;}
 .gm-tabs button[aria-current="page"] {border-color:#d6ad5c;background:#302515;color:#ffedc5;}
 .stage-toolbar a {display:inline-block;color:#f5d894;padding:12px;}
+.stage-toolbar button.gm-btn {width:auto;}
+.stage-tv-setup {display:grid;gap:10px;margin:8px 0 16px;padding:14px;border:1px solid rgba(219,187,124,.25);border-radius:8px;font-family:var(--gm-ui);}
+.stage-tv-setup label {display:grid;gap:4px;color:#bca06d;font-size:.8rem;}
+.stage-tv-setup input {padding:8px 10px;border:1px solid rgba(219,187,124,.2);background:rgba(24,18,11,.5);color:#f7ebd2;font:inherit;font-size:.9rem;}
 .stage-frame {min-height:65vh;}
 .stage-portrait .character-portrait {width:100%;height:100%;object-fit:cover;}
+.stage-tv-code {display:flex;flex-wrap:wrap;align-items:center;gap:12px;}
+.stage-tv-code strong {font-size:2rem;letter-spacing:.25em;color:#f5d894;margin-right:8px;}

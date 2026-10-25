@@ -28,7 +28,10 @@ test('companion model uses current ownership, ignores stale snapshots and dedupl
   const skilled = { ...character, classLabel: 'Wizard 5', stats: { int: 19, skills: ['arcana', 'sleight_of_hand'] } };
   assert.equal(abilityModifier(skilled, { type: 'Arcana', description: '', ability: 'int', dc: 13 }), 7);
   assert.equal(abilityModifier(skilled, { type: 'History', description: '', ability: 'int', dc: 13 }), 4);
-  assert.equal(abilityModifier({ ...skilled, build: { proficiencyBonus: 4 } }, { type: 'Sleight of Hand', description: '', ability: 'int', dc: 13 }), 8);
+  assert.equal(abilityModifier({ ...skilled, build: { proficiencyBonus: 4, features: [] } }, { type: 'Sleight of Hand', description: '', ability: 'int', dc: 13 }), 8);
+  const rogue = { ...character, classLabel: 'Rogue 5', stats: { dex: 19, skills: ['stealth', 'acrobatics'] }, build: { proficiencyBonus: 3, features: ["Expertise (stealth and thieves' tools)", 'Sneak Attack'] } };
+  assert.equal(abilityModifier(rogue, { type: 'stealth', description: '', ability: 'dex', dc: 12 }), 10);
+  assert.equal(abilityModifier(rogue, { type: 'Acrobatics', description: '', ability: 'dex', dc: 12 }), 7);
   assert.ok(model.receive({ type: 'roll_recorded', payload: roll() }));
   model.acceptRoll(roll(), 4);
   assert.equal(presented.length, 1); assert.equal(model.current().rollLog.length, 1);

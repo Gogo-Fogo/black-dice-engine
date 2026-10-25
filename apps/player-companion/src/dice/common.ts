@@ -60,10 +60,10 @@ export function deviceProfile() {
   return { webgl2: supportsWebGL2(), memory, cores, saveData, lowEnd };
 }
 
-/** What "Auto" picks: the 3D dice only where they will run smoothly, otherwise Tumble. */
+/** What "Auto" picks. Classic 3D downloads 10-30 MB dice models per die over the table's
+ *  Wi-Fi, so Auto stays on the light Tumble style; players can still choose 3D. */
 export function autoStyle(): DiceStyleId {
-  const profile = deviceProfile();
-  return profile.webgl2 && !profile.lowEnd ? "classic3d" : "tumble";
+  return "tumble";
 }
 
 export function resolveStyle(pref: DiceStylePref): DiceStyleId {

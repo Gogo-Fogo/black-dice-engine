@@ -5,6 +5,19 @@ import { formatTime, formatInitiative } from "./format";
 
 type Table = ReturnType<typeof useTableControls>;
 
+type Build = NonNullable<SessionSnapshot["party"][number]["build"]>;
+/** Quick-start picks are defaults; the GM reviews them here. */
+function BuildSummary({ build }: { build: Build }) {
+  const magic = build.spellcasting;
+  return <details className="party-build">
+    <summary>{[build.subclass, build.background, ...build.attacks.slice(0, 2).map(a => `${a.name} ${a.bonus}`)].filter(Boolean).join(" · ")}</summary>
+    <ul>{build.attacks.map(a => <li key={a.name}>{a.name} {a.bonus} · {a.damage}{a.notes ? ` (${a.notes})` : ""}</li>)}</ul>
+    {magic && <p>{magic.ability.toUpperCase()} save DC {magic.saveDc}, attack {magic.attackBonus}. Cantrips: {magic.cantrips.join(", ") || "none"}. {magic.style === "prepared" ? "Prepared" : "Known"}: {magic.spells.join(", ") || "none"}.</p>}
+    <p>Features: {build.features.join(", ")}</p>
+    {build.abilityImprovements && <p>{build.abilityImprovements}</p>}
+  </details>;
+}
+
 export function TableStatePanel({ snapshot, advancedMode, pendingActionKey, table, queueCharacterVisualCanonJob }: { snapshot: SessionSnapshot | null; advancedMode: boolean; pendingActionKey: string; table: Table; queueCharacterVisualCanonJob(characterId: string): Promise<void> }) {
 const { conditionDrafts, setConditionDrafts, queueApprovalMode, setQueueApprovalMode, combatMode, setCombatMode, combatRound, setCombatRound, combatTurnIndex, setCombatTurnIndex, submitStateEvent, resolveProposal } = table;
 return (<article className="panel">
@@ -130,6 +143,7 @@ return (<article className="panel">
                       <span>AC {character.armorClass}</span>
                       <span>{formatInitiative(character.initiative)}</span>
                     </div>
+                    {character.build && <BuildSummary build={character.build} />}
                     <div className="initiative-row">
                       <input
                         className="initiative-input"
@@ -263,6 +277,7 @@ return (<article className="panel">
                       <span>AC<strong>{character.armorClass}</strong></span>
                       {character.initiative !== null ? <span>INIT<strong>{character.initiative}</strong></span> : null}
                     </div>
+                    {character.build && <BuildSummary build={character.build} />}
                     <div className="tag-row">
                       {character.conditions.length > 0 ? (
                         character.conditions.map((condition) => (

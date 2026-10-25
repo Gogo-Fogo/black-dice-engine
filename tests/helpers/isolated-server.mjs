@@ -6,7 +6,7 @@ import { resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** Uses only its own ignored demo directory, allowlisted child environment and loopback port. */
-export async function withIsolatedServer(run, { profile = 'full', configuredProviders = false, aiReplies, aiDelayMs = 0, captureAiInput = false, mockFetches, gracefulStop = false, mediaFixture = false, automaticBackups = false, blockedBackups = false } = {}) {
+export async function withIsolatedServer(run, { profile = 'full', configuredProviders = false, localModelService = true, aiReplies, aiDelayMs = 0, captureAiInput = false, mockFetches, gracefulStop = false, mediaFixture = false, automaticBackups = false, blockedBackups = false } = {}) {
   assert.ok(Number.isInteger(aiDelayMs) && aiDelayMs >= 0 && aiDelayMs <= 2000);
   assert.ok(aiReplies === undefined || mockFetches === undefined, 'Select one synthetic adapter fixture');
   if (mockFetches !== undefined) assert.ok(Array.isArray(mockFetches) && mockFetches.length <= 30 && mockFetches.every(item => typeof item.url === 'string' && item.url.startsWith('http://127.0.0.1:1/')));
@@ -25,6 +25,8 @@ export async function withIsolatedServer(run, { profile = 'full', configuredProv
     BDE_TTS_SERVICE_ENDPOINT: 'http://127.0.0.1:1', BDE_AUDIO_SERVICE_ENDPOINT: 'http://127.0.0.1:1',
     BDE_LLM_PROVIDER: 'openai', OPENAI_API_KEY: 'synthetic-never-send', OPENAI_BASE_URL: 'http://127.0.0.1:1'
   });
+  // A hosted provider alone, as on the event PC, has no optional local-model service.
+  if (configuredProviders && !localModelService) delete env.BDE_LOCAL_MODEL_ENDPOINT;
   let fetchPreload = './tests/helpers/no-outgoing-fetch.mjs';
   let preloadPath, preloadContent;
   if (aiReplies !== undefined) {

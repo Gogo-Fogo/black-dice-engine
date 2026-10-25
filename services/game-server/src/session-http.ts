@@ -28,6 +28,11 @@ export function installSessionAccess(app: express.Express, authority: SessionAut
     response.setHeader("Cache-Control", "no-store");
     response.status(201).json(credential);
   }));
+  app.post("/api/session/pair-display", route((request, response) => {
+    const credential = authority.pairDisplay(request.body?.code);
+    response.setHeader("Cache-Control", "no-store");
+    response.status(201).json(credential);
+  }));
   app.use("/api", route((request, response, next) => {
     const identity = authority.authenticate(requestCredential(request.headers));
     identities.set(request, identity);
@@ -78,6 +83,9 @@ export function installSessionAccess(app: express.Express, authority: SessionAut
   app.post("/api/session/resume", route((request, response) => { response.json(identityFor(request)); }));
   app.post("/api/session/display", route((request, response) => {
     response.status(201).json(authority.display(requestCredential(request.headers)));
+  }));
+  app.post("/api/session/display-code", route((request, response) => {
+    response.status(201).json(authority.displayCode(requestCredential(request.headers)));
   }));
   app.post("/api/session/revoke", route((request, response) => {
     const actorId = request.body?.actorId;

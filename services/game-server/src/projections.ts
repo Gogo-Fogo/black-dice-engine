@@ -14,7 +14,10 @@ function visible(value: unknown, viewer: LocalIdentity) {
 }
 
 export function projectRoll(value: unknown) {
-  return pick(value, ["id", "actorId", "actorName", "dice", "modifier", "rolled", "total", "advantage", "note", "timestamp"]);
+  const action = object(value).action;
+  // The DC is already public on the roll call; a hidden DC stays null and so does success.
+  return { ...pick(value, ["id", "actorId", "actorName", "dice", "modifier", "rolled", "total", "advantage", "note", "timestamp"]),
+    ...(action ? { action: pick(action, ["id", "description", "dc", "success"]) } : {}) };
 }
 
 function projectBuild(value: unknown) {

@@ -92,6 +92,20 @@ export function SessionGate({ role, children }: { role: Identity["role"]; childr
     setBusy(true);
     setError("");
     try {
+      // A TV can pair with the host's short single-use code instead of the full display key.
+      const pairing = role === "spectator" && /^[A-Za-z0-9]{6}$/.test(hostToken.trim());
+      if (pairing) {
+        const response = await window.fetch("/api/session/pair-display", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code: hostToken.trim() }), signal: AbortSignal.timeout(5000) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(typeof result.error === "string" ? result.error : "Unable to pair this display.");
+        if (!isIdentity(result) || result.role !== "spectator" || typeof (result as Credential).token !== "string" || !/^[A-Za-z0-9_-]{43}$/.test((result as Credential).token)) throw new Error("Invalid session response.");
+        current = result as Credential;
+        try { sessionStorage.setItem(key, JSON.stringify(current)); } catch { /* Tab stays paired until reload. */ }
+        setHostToken("");
+        setReady(true);
+        return;
+      }
       const response = await window.fetch(role !== "player" ? "/api/session/me" : "/api/session/join", {
         method: role !== "player" ? "GET" : "POST",
         headers: role !== "player" ? { Authorization: `Bearer ${hostToken.trim()}` } : { "Content-Type": "application/json" },
@@ -115,8 +129,8 @@ export function SessionGate({ role, children }: { role: Identity["role"]; childr
     <h1>{role === "gm" ? "Host access" : role === "spectator" ? "Public TV display" : "Join the room"}</h1>
     {checking ? <p role="status">Checking saved session…</p> : <form onSubmit={join} style={{ display: "grid", gap: 16 }}>
       {role !== "player" ? <>
-        <p>{role === "gm" ? "Enter the host key from the local session file. Keep it on the host device." : "Enter a read-only display key created in Party host controls. A host key cannot open this screen."}</p>
-        <label>{role === "gm" ? "Host key" : "Display key"}<input type="password" autoComplete="off" required value={hostToken} onChange={event => setHostToken(event.target.value)} style={{ display: "block", width: "100%", minHeight: 44 }} /></label>
+        <p>{role === "gm" ? "Enter the host key from the local session file. Keep it on the host device." : "Enter the six-character TV code from the host's Stage tab, or a read-only display key. A host key cannot open this screen."}</p>
+        <label>{role === "gm" ? "Host key" : "TV code or display key"}<input type={role === "gm" ? "password" : "text"} autoCapitalize={role === "gm" ? undefined : "characters"} autoComplete="off" spellCheck={false} required value={hostToken} onChange={event => setHostToken(event.target.value)} style={{ display: "block", width: "100%", minHeight: 44, fontSize: role === "gm" ? undefined : "1.5rem", letterSpacing: role === "gm" ? undefined : "0.2em" }} /></label>
       </> : <>
         <label>Room code<input required autoCapitalize="characters" autoComplete="off" value={code} onChange={event => setCode(event.target.value)} style={{ display: "block", width: "100%", minHeight: 44 }} /></label>
         <label>Your name<input required maxLength={24} autoComplete="nickname" value={label} onChange={event => setLabel(event.target.value)} style={{ display: "block", width: "100%", minHeight: 44 }} /></label>

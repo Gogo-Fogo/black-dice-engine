@@ -1176,3 +1176,8 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+.party-build { margin: 6px 0; font-size: 0.78rem; color: #d8c7a3; }
+.party-build summary { cursor: pointer; color: #bca06d; }
+.party-build ul { margin: 6px 0; padding-left: 18px; }
+.party-build p { margin: 4px 0; }

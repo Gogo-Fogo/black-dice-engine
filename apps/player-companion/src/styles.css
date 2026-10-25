@@ -629,6 +629,9 @@ button:disabled {
 .saved-roll-controls { position: relative; z-index: 2; max-width: min(90vw, 420px); padding: 16px; background: rgba(11,10,9,.9); }
 .saved-roll-controls button { margin-top: 8px; }
 .saved-roll-controls .dice-result-number { font-size: 3rem; }
+.dice-result-outcome { margin: 0 0 8px; font-weight: 700; letter-spacing: .04em; }
+.dice-result-outcome.success { color: var(--good); }
+.dice-result-outcome.failure { color: var(--bad); }
 @media (max-width: 400px) { .player-header { flex-direction: column; } .roll-row { flex-wrap: wrap; } }
 
 /* Four phone views adapted from player-companion-ux-overhaul a94ed19. */

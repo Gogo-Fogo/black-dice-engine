@@ -57,3 +57,30 @@ test('HTTP and WebSocket headers resolve the same credential; roles grant nothin
   assert.equal(requestCredential({ authorization: 'gm' }), '');
   assert.equal(requestCredential({ 'x-bde-role': 'gm' }), '');
 });
+
+test('TV pairing codes are host-only, single use, short-lived and burn after repeated misses', () => {
+  const database = new Database(':memory:');
+  let time = 1000;
+  try {
+    const authority = new SessionAuthority(database, () => time, 60 * 60 * 1000);
+    const host = authority.bootstrap();
+    const player = authority.join(authority.room().code, 'Demo Wren');
+    assert.throws(() => authority.displayCode(player.token), /Host access/);
+    assert.throws(() => authority.pairDisplay('ABCDEF'), /expired/);
+    const { code } = authority.displayCode(host.token);
+    assert.match(code, /^[A-HJ-NP-Z2-9]{6}$/);
+    const display = authority.pairDisplay(code.toLowerCase());
+    assert.equal(display.role, 'spectator');
+    assert.equal(authority.authenticate(display.token).role, 'spectator');
+    assert.throws(() => authority.pairDisplay(code), /expired/, 'single use');
+    const second = authority.displayCode(host.token).code;
+    time += 10 * 60 * 1000;
+    assert.throws(() => authority.pairDisplay(second), /expired/, 'ten-minute lifetime');
+    const third = authority.displayCode(host.token).code;
+    for (let i = 0; i < 5; i++) assert.throws(() => authority.pairDisplay('WRONG1'), /invalid/);
+    assert.throws(() => authority.pairDisplay(third), /expired/, 'burned after five misses');
+    const fourth = authority.displayCode(host.token).code;
+    authority.newRoom(host.token);
+    assert.throws(() => authority.pairDisplay(fourth), /expired/, 'a new room invalidates the code');
+  } finally { database.close(); }
+});

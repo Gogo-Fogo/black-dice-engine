@@ -60,6 +60,7 @@ export default function DicePresentation({ roll, onClose }: { roll: RollRecord; 
     <div className="dice-overlay-bg" /><div className="dice-roll-card">
       <div className="dice-3d-container" aria-hidden="true"><DiceAnimation styleId={style} faces={parseDice(roll.dice, roll.rolled)} thrown={show} onSettled={() => setMessage("Showing your saved roll.")} /></div>
       <div className="saved-roll-controls"><p>{roll.actorName}: {roll.note} — {roll.dice}</p><p className="dice-result-number">{roll.total}</p>
+        {roll.action && roll.action.dc !== null && <p className={`dice-result-outcome ${roll.action.success ? "success" : "failure"}`}>{roll.action.success ? "Success" : "Miss"} — DC {roll.action.dc}</p>}
         <button type="button" onClick={throwDice}>Show dice animation</button>
         <button type="button" onClick={() => void enableMotion()}>Enable shake</button>
         <p role="status">{message}</p><button type="button" onClick={onClose}>Close result</button>

@@ -73,3 +73,30 @@ test('group action completion rolls back atomically, replays once and survives r
     assert.equal(server.diagnostics().match(/SYNTHETIC_IMAGE_SUBMITTED/g)?.length, 1);
   }, { mockFetches: [{ url: 'http://127.0.0.1:1/prompt', method: 'POST', body: { prompt_id: 'demo-roll-image' } }] });
 });
+
+test('roll narration uses a hosted provider without the optional local-model service and names the called check', { timeout: 20000 }, async () => {
+  await withIsolatedServer(async server => {
+    const host = await server.hostToken();
+    const api = async (path, body, token = host) => {
+      const response = await fetch(server.base + path, { method: body === undefined ? 'GET' : 'POST',
+        headers: { 'Content-Type': 'application/json', authorization: `Bearer ${token}` }, body: body === undefined ? undefined : JSON.stringify(body) });
+      return { status: response.status, body: await response.json() };
+    };
+    const initial = (await api('/api/session-snapshot')).body;
+    const sheet = (await api('/api/characters', { requestId: 'hosted-create', name: 'Demo Wren', classLabel: 'Scout' })).body;
+    const player = (await api('/api/session/join', { code: initial.tablePin, label: 'Demo Wren player' }, '')).body;
+    assert.equal((await api('/api/claim-character', { requestId: 'hosted-claim', characterId: sheet.id }, player.token)).status, 200);
+    const roll = async id => {
+      assert.equal((await api('/api/set-action', { requestId: `${id}-action`, type: 'athletics', description: 'Climb the demo wall.', ability: 'str', dc: 30 })).status, 200);
+      assert.equal((await api('/api/rolls', { requestId: `${id}-roll`, actorId: sheet.id, actorName: sheet.name, dice: '1d2', note: 'athletics' }, player.token)).status, 201);
+    };
+    assert.equal((await api('/api/ai/narration-toggle', { requestId: 'hosted-off', enabled: false })).status, 200);
+    await roll('template');
+    assert.match((await api('/api/pending-narration')).body.text, /on Athletics — not enough/);
+    assert.equal((await api('/api/ai/narration-toggle', { requestId: 'hosted-on', enabled: true })).status, 200);
+    await roll('hosted');
+    let text = '';
+    for (let i = 0; i < 40 && text !== 'Demo Wren strains at the wall and slides back down.'; i++) { await new Promise(r => setTimeout(r, 50)); text = (await api('/api/pending-narration')).body.text; }
+    assert.equal(text, 'Demo Wren strains at the wall and slides back down.');
+  }, { configuredProviders: true, localModelService: false, aiReplies: ['Demo Wren strains at the wall and slides back down.'] });
+});

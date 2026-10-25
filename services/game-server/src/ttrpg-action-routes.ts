@@ -8,7 +8,6 @@ import { randomUUID } from "node:crypto";
 import type { Character, RollRecord, CurrentAction, TableEventRecord, SessionSnapshot, RuntimeStatus, AiLogEntry } from "../../../packages/contracts/dist/index.js";
 import { parseDiceNotation, rollDice } from "./dice.js";
 import type { AiCompletionResult, SceneContext, RollResultContext } from "./ai-adapter.js";
-import type { readRuntimeConfig } from "./config.js";
 import type { createServerWork } from "./server-lifecycle.js";
 
 export type TtrpgControls = {
@@ -29,7 +28,7 @@ type TtrpgRouteHooks = {
   sceneImages: Pick<ReturnType<typeof createSceneImages>, "request">;
   commands: { defer(effect: () => void): void };
   narration: Pick<ReturnType<typeof createNarration<{ scene: SceneContext; roll: RollResultContext }, AiCompletionResult>>, "run" | "cancelStale">;
-  config: Pick<ReturnType<typeof readRuntimeConfig>, "localModelEndpoint">;
+  aiNarrationAvailable(): boolean;
   requireRole(...roles: ("gm" | "admin" | "player")[]): express.RequestHandler;
   recordTableEvent(event: Omit<TableEventRecord, "id" | "timestamp">): TableEventRecord;
   recordAiLog(entry: Omit<AiLogEntry, "id" | "createdAt">): void;
@@ -47,7 +46,6 @@ export function installTtrpgActionRoutes(app: express.Express, hooks: TtrpgRoute
   const { controls, party, rollLog, eventLog, work, sceneImages, commands, narration, requireRole,
     recordTableEvent, recordAiLog, broadcast, getSessionSnapshot, getRuntimeStatus,
     publishSessionState, createMemoryEntry, persistState } = hooks;
-  const { localModelEndpoint } = hooks.config;
 
   app.post("/api/set-action", requireRole("gm", "admin"), (request, response) => {
     const type = typeof request.body.type === "string" ? request.body.type.trim() : "";
@@ -205,7 +203,9 @@ export function installTtrpgActionRoutes(app: express.Express, hooks: TtrpgRoute
         const abilityName: Record<string, string> = { str: "Strength", dex: "Dexterity", con: "Constitution", int: "Intelligence", wis: "Wisdom", cha: "Charisma" };
         const dc = action.dc;
         recordActionResolution(hooks.progress(), action, rollsForAction, new Date().toISOString());
-        const abilityLabel = abilityName[action.ability] || action.ability;
+        // Name the called check ("Athletics") rather than its ability when one was given.
+        const checkName = action.type.trim() && action.type !== "ability" ? action.type.trim() : "";
+        const abilityLabel = checkName ? checkName[0].toUpperCase() + checkName.slice(1) : abilityName[action.ability] || action.ability;
 
         // Build fallback template narration
         const templateLines = claimedCharacters.map(c => {
@@ -223,7 +223,7 @@ export function installTtrpgActionRoutes(app: express.Express, hooks: TtrpgRoute
         // The host browser requests speech for pending prose; no server self-request.
 
         // Try AI-generated narration (may replace fallback)
-        if (controls.aiNarrationEnabled && localModelEndpoint) {
+        if (controls.aiNarrationEnabled && hooks.aiNarrationAvailable()) {
         commands.defer(() => { void (async () => {
           try {
             const snapshot = getSessionSnapshot();

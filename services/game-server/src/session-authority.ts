@@ -87,6 +87,33 @@ export class SessionAuthority {
     return this.issue(host.sessionId, "spectator", "Public display");
   }
 
+  // A short single-use code lets a TV or handheld pair without typing a 43-character key.
+  // Memory only: it lasts ten minutes, is replaced by the next code, and burns after five misses.
+  private pairing: { code: string; roomId: string; expiresAt: number; misses: number } | null = null;
+
+  displayCode(hostToken: unknown) {
+    const host = this.authenticate(hostToken);
+    if (host.role !== "gm") throw new SessionError(403, "Host access required.");
+    const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+    const code = Array.from(randomBytes(6), byte => alphabet[byte % alphabet.length]).join("");
+    this.pairing = { code, roomId: host.sessionId, expiresAt: this.now() + 10 * 60 * 1000, misses: 0 };
+    return { code, expiresAt: this.pairing.expiresAt };
+  }
+
+  pairDisplay(code: unknown): LocalCredential {
+    const pairing = this.pairing;
+    if (!pairing || pairing.expiresAt <= this.now() || pairing.roomId !== this.room().id) {
+      this.pairing = null;
+      throw new SessionError(403, "TV code expired. Ask the host for a new one.");
+    }
+    if (typeof code !== "string" || code.trim().toUpperCase() !== pairing.code) {
+      if (++pairing.misses >= 5) this.pairing = null;
+      throw new SessionError(403, "TV code is invalid.");
+    }
+    this.pairing = null;
+    return this.issue(pairing.roomId, "spectator", "Public display");
+  }
+
   revoke(hostToken: unknown, actorId: unknown) {
     const host = this.authenticate(hostToken);
     if (host.role !== "gm") throw new SessionError(403, "Host access required.");

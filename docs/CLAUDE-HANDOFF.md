@@ -92,8 +92,22 @@ Verification: `npm run lint`, `npm run build`, and `npm test` (183/183) passed, 
 
 Still open or noticed:
 - A physical phone, TV and LAN rehearsal is still needed.
-- In TTRPG mode, a separate TV device needs a display key. Only Party host controls can mint one; the Stage tab's "Open on TV" works only in the same browser.
-- The local 3D dice GLBs are 10–32 MB each (ignored assets), so Dice Lab often reports "No model" and falls back to generated dice. Smaller models are needed for phones.
+- Resolved in the readiness pass below: TV display keys in TTRPG mode, heavy dice models on phones.
 - The seeded default party in `services/game-server/src/index.ts` uses names such as "J'Epstein" and "Shlomo Ahkim". Review them against the demo-safe content rule.
 - GPU scheduling (item 4 above) is unchanged. The director remains hosted, so there is no contention today.
 - `.claude/launch.json` defines the disposable `rehearsal` preview and is not committed.
+
+## Readiness pass — October 25, 2026 (Claude)
+
+A second rehearsal used live DeepSeek and local ComfyUI on a loopback-only throwaway server (`--data-dir tmp/rehearsal-ai --port 4411`). It covered: AI proposal approved into a roll call, DeepSeek Forge flavor with real portraits, a phone roll, AI roll narration, director guidance, separate-TV pairing and a restart. About four paid calls.
+
+- **AI roll narration never ran with a hosted provider.** It was gated on the optional `BDE_LOCAL_MODEL_ENDPOINT`, and the test helper always set that endpoint, which hid the bug. Narration now runs when a provider is chosen explicitly (`BDE_LLM_PROVIDER`) or the local-model service is set. An unconfigured install still makes no outgoing calls. Template narration names the called check ("Athletics") instead of its ability.
+- **Separate TV device.** Stage → **TV on another device** shows the TV address and a **six-character single-use pairing code**: 10-minute lifetime, burns after five misses, cleared by a new room (`/api/session/display-code` is host-only; `/api/session/pair-display` is unauthenticated). The full display key remains as a fallback. Built for a SteamOS handheld on HDMI, where typing a 43-character key is impractical.
+- **Phones show Success/Miss against the DC.** `projectRoll` now passes the public action outcome, and socket roll broadcasts to non-hosts go through the same projection.
+- **Expertise** doubles proficiency for the listed skills (rogue Stealth +7 → +10).
+- **GM party cards** show an expandable build summary for review.
+- **Dice:** Auto now picks the light Tumble style. Classic 3D downloads 10–32 MB per die over the table Wi-Fi.
+
+Verification: lint/build pass; `npm test` 186/186; affected suites also pass against emitted modules. See [party room setup](party-room-setup.md) for the operator checklist.
+
+Host PC note: Windows only allows Node inbound on Private networks. A Wi-Fi profile left as Public blocks phones and the TV.
