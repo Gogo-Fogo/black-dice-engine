@@ -11,6 +11,8 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { aiChatCompletion, type AiCompletionOptions } from "./ai-adapter.js";
+import { asiCount, backgroundSkills, buildDetails } from "./character-builds.js";
+import type { CharacterBuild } from "../../../packages/contracts/dist/index.js";
 
 // ─── Answers ────────────────────────────────────────────────────────────────────
 
@@ -90,12 +92,12 @@ type ClassDef = {
   armor: Armor;
   skills: string[];
   gear: Array<{ name: string; detail?: string }>;
-  resources: (level: number) => Array<{ label: string; max: number }>;
+  resources: (level: number, stats: Record<Ability, number>) => Array<{ label: string; max: number }>;
   outfit: string; // portrait wardrobe
 };
 
 // Numeric slot progression for the existing 2014-style quick-start rules.
-// Spell choices/subclasses remain GM-reviewed; the LLM never supplies mechanics.
+// Build picks (character-builds.ts) are GM-reviewed defaults; the LLM never supplies mechanics.
 const slotProgression = [[],[2],[3],[4,2],[4,3],[4,3,2],[4,3,3],[4,3,3,1],[4,3,3,2],[4,3,3,3,1],[4,3,3,3,2],[4,3,3,3,2,1],[4,3,3,3,2,1],[4,3,3,3,2,1,1],[4,3,3,3,2,1,1],[4,3,3,3,2,1,1,1],[4,3,3,3,2,1,1,1],[4,3,3,3,2,1,1,1,1],[4,3,3,3,3,1,1,1,1],[4,3,3,3,3,2,1,1,1],[4,3,3,3,3,2,2,1,1]];
 function spellSlots(level: number) {
   const labels = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX"];
@@ -113,7 +115,7 @@ const classes: Record<string, ClassDef> = {
   warlock: { id: "warlock", label: "Warlock", hitDie: 8, priority: ["cha", "con", "dex", "wis", "int", "str"], armor: "light", skills: ["arcana", "deception", "intimidation"], gear: [{ name: "Pact Focus", detail: "a relic that whispers" }, { name: "Light Crossbow" }, { name: "Leather Armor" }], resources: (l) => [{ label: `Pact Slots (level ${Math.min(5, Math.ceil(l / 2))})`, max: l >= 17 ? 4 : l >= 11 ? 3 : l >= 2 ? 2 : 1 }], outfit: "dark coat, eldritch sigils, eerie light" },
   cleric: { id: "cleric", label: "Cleric", hitDie: 8, priority: ["wis", "con", "str", "cha", "dex", "int"], armor: "medium-shield", skills: ["medicine", "insight", "religion"], gear: [{ name: "Mace" }, { name: "Shield", detail: "holy symbol" }, { name: "Scale Mail" }, { name: "Healer's Kit" }], resources: (l) => [...spellSlots(l), ...(l >= 2 ? [{ label: "Channel Divinity", max: 1 }] : [])], outfit: "vestments over armor, holy symbol, mace" },
   druid: { id: "druid", label: "Druid", hitDie: 8, priority: ["wis", "con", "dex", "int", "cha", "str"], armor: "hide", skills: ["nature", "animal_handling", "medicine"], gear: [{ name: "Wooden Staff", detail: "sprouting leaves" }, { name: "Herbalism Kit" }, { name: "Hide Armor" }], resources: (l) => [...spellSlots(l), ...(l >= 2 ? [{ label: "Wild Shape", max: 2 }] : [])], outfit: "hide and leaves, antler crown, gnarled staff" },
-  bard: { id: "bard", label: "Bard", hitDie: 8, priority: ["cha", "dex", "con", "wis", "int", "str"], armor: "light", skills: ["persuasion", "performance", "deception", "insight"], gear: [{ name: "Lute" }, { name: "Rapier" }, { name: "Leather Armor" }, { name: "Fine Clothes" }], resources: (l) => [{ label: "Bardic Inspiration", max: 3 }, ...spellSlots(l)], outfit: "colorful fine clothes, feathered hat, lute" }
+  bard: { id: "bard", label: "Bard", hitDie: 8, priority: ["cha", "dex", "con", "wis", "int", "str"], armor: "light", skills: ["persuasion", "performance", "deception", "insight"], gear: [{ name: "Lute" }, { name: "Rapier" }, { name: "Leather Armor" }, { name: "Fine Clothes" }], resources: (l, s) => [{ label: "Bardic Inspiration", max: Math.max(1, mod(s.cha)) }, ...spellSlots(l)], outfit: "colorful fine clothes, feathered hat, lute" }
 };
 
 const roleClasses: Record<ForgeRole, string[]> = {
@@ -131,7 +133,7 @@ function mod(score: number) {
   return Math.floor((score - 10) / 2);
 }
 
-function buildStats(def: ClassDef) {
+function buildStats(def: ClassDef, level: number) {
   const stats: Record<Ability, number> = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
   def.priority.forEach((ability, i) => {
     stats[ability] = standardArray[i];
@@ -139,6 +141,11 @@ function buildStats(def: ClassDef) {
   // Flexible ancestry bonus: +2 to the main ability, +1 to the second.
   stats[def.priority[0]] += 2;
   stats[def.priority[1]] += 1;
+  // Ability Score Improvements go to the primary ability, then the second, capped at 20.
+  for (let i = 0; i < asiCount(def.id, level); i++) {
+    const target = def.priority.find((ability) => stats[ability] < 20);
+    if (target) stats[target] = Math.min(20, stats[target] + 2);
+  }
   return stats;
 }
 
@@ -160,13 +167,14 @@ function armorClass(def: ClassDef, stats: Record<Ability, number>) {
     case "unarmored-con":
       return 10 + dex + mod(stats.con);
     default:
-      return 10 + dex;
+      // Draconic Resilience gives sorcerers a natural armor base.
+      return (def.id === "sorcerer" ? 13 : 10) + dex;
   }
 }
 
 function maxHp(def: ClassDef, stats: Record<Ability, number>, level: number) {
   const con = mod(stats.con);
-  return Math.max(1, def.hitDie + con + (level - 1) * (def.hitDie / 2 + 1 + con));
+  return Math.max(1, def.hitDie + con + (level - 1) * (def.hitDie / 2 + 1 + con)) + (def.id === "sorcerer" ? level : 0);
 }
 
 // ─── Proposals ──────────────────────────────────────────────────────────────────
@@ -196,6 +204,7 @@ export type ForgeProposal = {
   hook: string;
   portraitPrompt: string;
   portraits: ForgePortrait[];
+  build?: CharacterBuild;
 };
 
 export type ForgeSession = {
@@ -383,7 +392,11 @@ export async function buildProposals(
     };
     usedNames.push(flavor.name);
 
-    const stats = buildStats(core.def);
+    const stats = buildStats(core.def, level);
+    const resources = core.def.resources(level, stats);
+    const pact = resources.find((r) => r.label.startsWith("Pact Slots"))?.label.match(/level (\d)/)?.[1];
+    const maxSpellLevel = pact ? Number(pact) : resources.filter((r) => r.label.startsWith("Spell Slots")).length;
+    const skills = [...new Set([...core.def.skills, ...backgroundSkills(core.def.id)])];
     const lookTags = answers.look ? `${answers.look}, ` : "";
     return {
       id: randomUUID(),
@@ -395,14 +408,15 @@ export async function buildProposals(
       level,
       hp: maxHp(core.def, stats, level),
       armorClass: armorClass(core.def, stats),
-      stats: { ...stats, skills: core.def.skills },
-      resources: core.def.resources(level).map((r) => ({ id: `resource-${r.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`, label: r.label, current: r.max, max: r.max })),
+      stats: { ...stats, skills },
+      resources: resources.map((r) => ({ id: `resource-${r.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`, label: r.label, current: r.max, max: r.max })),
       inventory: core.def.gear.map((g) => ({ id: `item-${g.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`, name: g.name, quantity: 1, ...(g.detail ? { detail: g.detail } : {}) })),
       appearance: flavor.appearance,
       personality: flavor.personality,
       hook: flavor.hook,
       portraitPrompt: `${forgeArtStyle}, ${presentationPrompt[core.presentation]} ${core.ancestry.prompt}, ${core.def.label.toLowerCase()}, ${core.def.outfit}, ${lookTags}${flavor.visual}${options.tone.length ? `, ${options.tone.slice(0, 3).join(", ")} mood` : ""}`,
-      portraits: []
+      portraits: [],
+      build: buildDetails(core.def.id, level, stats, maxSpellLevel)
     } satisfies ForgeProposal;
   });
 

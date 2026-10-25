@@ -36,6 +36,14 @@ export type Character = {
   inventory: Array<{ id: string; name: string; quantity: number; detail?: string }>; notes: string[]; image?: string | null;
   stats?: Partial<Record<Ability, number>> & { skills?: string[] }; claimedByClientId: string | null; claimedByLabel: string | null;
   portrait?: { pendingId?: string; approvedId?: string; description: string; version: number; seed: number };
+  build?: CharacterBuild;
+};
+/** Quick-start build details. Deterministic defaults for GM review, never LLM-authored. */
+export type CharacterBuild = {
+  review: "quick_start"; proficiencyBonus: number; subclass: string | null; background: string; backgroundFeature: string;
+  attacks: Array<{ name: string; bonus: string; damage: string; notes?: string }>;
+  spellcasting?: { ability: Ability; saveDc: number; attackBonus: string; style: "known" | "prepared"; cantrips: string[]; spells: string[] };
+  features: string[]; abilityImprovements: string | null;
 };
 export type RollRecord = { id: string; actorId: string; actorName: string; dice: string; modifier: number; rolled: number | number[];
   total: number; advantage: boolean | null; note: string; timestamp: string; action?: { id: string; description: string; dc: number | null; success: boolean | null } };
@@ -117,7 +125,21 @@ export function isCharacter(value: unknown): value is Character {
     Array.isArray(value.resources) && value.resources.every(item => isObject(item) && texts(item, ["id", "label"]) && finite(item.current) && finite(item.max)) &&
     Array.isArray(value.inventory) && value.inventory.every(item => isObject(item) && texts(item, ["id", "name"]) && finite(item.quantity) && (item.detail === undefined || typeof item.detail === "string")) &&
     (value.stats === undefined || isObject(value.stats) && abilities.every(key => value.stats && isObject(value.stats) && (value.stats[key] === undefined || finite(value.stats[key]))) &&
-      (value.stats.skills === undefined || strings(value.stats.skills)));
+      (value.stats.skills === undefined || strings(value.stats.skills))) &&
+    (value.build === undefined || isCharacterBuild(value.build));
+}
+const shortTexts = (value: unknown, max: number) => strings(value) && value.length <= max && value.every(item => item.length <= 160);
+export function isCharacterBuild(value: unknown): value is CharacterBuild {
+  if (!isObject(value) || value.review !== "quick_start" || !integer(value.proficiencyBonus, 2, 6) ||
+      !(value.subclass === null || typeof value.subclass === "string" && value.subclass.length <= 80) ||
+      typeof value.background !== "string" || value.background.length > 80 || typeof value.backgroundFeature !== "string" || value.backgroundFeature.length > 240 ||
+      !shortTexts(value.features, 40) || !(value.abilityImprovements === null || typeof value.abilityImprovements === "string" && value.abilityImprovements.length <= 240) ||
+      !Array.isArray(value.attacks) || value.attacks.length > 12 || !value.attacks.every(attack => isObject(attack) && texts(attack, ["name", "bonus", "damage"]) &&
+        [attack.name, attack.bonus, attack.damage].every(text => (text as string).length <= 80) && (attack.notes === undefined || typeof attack.notes === "string" && attack.notes.length <= 160))) return false;
+  const magic = value.spellcasting;
+  return magic === undefined || isObject(magic) && (abilities as readonly unknown[]).includes(magic.ability) && integer(magic.saveDc, 1, 40) &&
+    typeof magic.attackBonus === "string" && magic.attackBonus.length <= 8 && (magic.style === "known" || magic.style === "prepared") &&
+    shortTexts(magic.cantrips, 12) && shortTexts(magic.spells, 40);
 }
 export function isPlayerSessionSnapshot(value: unknown): value is PlayerSessionSnapshot {
   return isObject(value) && (value.campaignProgress === undefined || isCampaignProgress(value.campaignProgress)) && value.schemaVersion === 1 && value.mode === "ttrpg" && value.stage === "table" && value.roundId === null &&

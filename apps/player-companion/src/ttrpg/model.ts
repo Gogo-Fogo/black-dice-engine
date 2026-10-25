@@ -1,9 +1,14 @@
 import { isObject, isPlayerSessionSnapshot, isRollRecord, abilities, type Character, type CurrentAction, type LocalIdentity,
   type PlayerSessionSnapshot, type RollRecord } from "../../../../packages/contracts/dist/index.js";
 
+/** Ability modifier plus proficiency when the called check names one of the character's skills. */
 export function abilityModifier(character: Character | null, action: CurrentAction | null) {
   const ability = abilities.find(key => key === action?.ability) ?? "wis";
-  return Math.floor(((character?.stats?.[ability] ?? 10) - 10) / 2);
+  const base = Math.floor(((character?.stats?.[ability] ?? 10) - 10) / 2);
+  const skill = (action?.type ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (!skill || !character?.stats?.skills?.includes(skill)) return base;
+  const level = Number(character.classLabel.match(/(\d+)\s*$/)?.[1]) || 1;
+  return base + (character.build?.proficiencyBonus ?? 2 + Math.floor((Math.min(20, level) - 1) / 4));
 }
 
 /** Latest server state selects ownership; live/receipt rolls share bounded presentation dedup. */

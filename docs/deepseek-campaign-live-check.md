@@ -40,3 +40,19 @@ node --import tsx scripts/deepseek-campaign-check.mjs --live --only=stalled-scen
 ```
 
 Only run with explicit paid authorization. The script permits the official Flash endpoint only, bounded input/output, no tools or streaming, serial requests and no automatic retry. It persists reservations **before** each request in ignored `tmp/deepseek-campaign-live.json`; do not reset this file to bypass a spending limit. Its shared ceiling is 16 calls and $0.45 conservative reservations, below the authorized $0.50. The campaign run used 15 calls; a subsequent Forge flavor check used the final allowed call. Shared total: 16 calls, estimated $0.0134742. The call guard is exhausted; do not reset it or run more paid checks without new authorization. It reads only selected configuration variables, never prints the key, and sends only original demo content. Latest failures set a failing exit status; prior failed attempts remain available for review. No dependency installation is needed.
+
+## Second authorization — October 25, 2026 (ledger `2026-10-25-b`)
+
+The user authorized a further $0.50. It uses its own ignored ledger, `tmp/deepseek-2026-10-25-b.json` (`--ledger=2026-10-25-b`): 60-call cap and the same $0.45 conservative reservation ceiling. The original ledger stays exhausted. Final usage: **33 calls, about $0.022 estimated from reported tokens** ($0.106 conservative reservations).
+
+- **Director prompt fix rechecked.** Live guidance previously used `prompts/director-prompt.md`, which asks for a full scene-packet. That conflicted with the guidance task's bullet format. Guidance now uses `prompts/director-guidance-prompt.md`; the scene-packet preview keeps the original. The standard eight scenarios passed (8 calls). Guidance came back as six to seven plain bullets, held back the GM-only canary, and added no gate after the earned ending.
+- **New twelve-beat session (`--long`).** *Synthetic: The Clockwork Orchard* has two competing objectives, a failed DC 15 bridge crossing with a GM-approved root-tunnel route, a delivered reward (the mill key), a mixed group roll, two scene closures, an earned ending and an unknown-DC roll. All twelve beats passed schema and canary checks. Manual review found no repeated or reintroduced completed work and no invented success.
+- **Leak found and fixed.** In the first long run, the ending proposal's `action` hinted at the GM-only secret ("what truly started the frost engine"). An approved proposal's `action` becomes the public roll description, so the proposal prompt now says so and asks for GM-only hints in `consequences`. The rerun (12 calls) kept the secret in GM notes, and the ending proposal delivered the celebration with no new check.
+- `--dry-run` replays the scenario script with canned replies and sends nothing. Use it before any paid run that changes scenario code. It caught a scenario bug that would otherwise have wasted paid calls.
+
+```powershell
+node --import tsx scripts/deepseek-campaign-check.mjs --dry-run --long
+node --import tsx scripts/deepseek-campaign-check.mjs --live --ledger=2026-10-25-b --long
+```
+
+Twelve beats are still a scripted synthetic session, not hours of free play. Do not run further paid checks without new authorization.

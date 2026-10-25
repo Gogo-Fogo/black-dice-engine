@@ -1,4 +1,5 @@
 import { CampaignProgressPanel } from "./ttrpg/CampaignProgressPanel";
+import { RollCallPanel } from "./ttrpg/RollCallPanel";
 import React, {useState} from "react";
 import {StagePreview} from "./StageApp";
 import "./stage.css";
@@ -60,6 +61,7 @@ export default function App() {
 
         <div data-dashboard-tab hidden={tab!=="run"}><CampaignProgressPanel snapshot={snapshot} setSnapshot={setSnapshot} /></div>
 
+        <div data-dashboard-tab hidden={tab!=="run"}><RollCallPanel snapshot={snapshot} /></div>
         <div data-dashboard-tab hidden={tab!=="run"}><AiDirectorPanel controller={aiDirector} pendingActionKey={pendingActionKey} /></div>
 
         <div data-dashboard-tab hidden={tab!=="system"}>{advancedMode ? <PresencePanel runtime={runtime} /> : null}</div>

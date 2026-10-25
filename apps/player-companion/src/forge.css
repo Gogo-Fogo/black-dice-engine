@@ -1,3 +1,115 @@
+/* --- Shared primitives for the forge and dice lab ----------------------------------- */
+/* The companion's global button style is a full-width gold gradient; forge and lab controls opt out. */
+
+:where(.forge, .lab) button {
+  width: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  touch-action: manipulation;
+}
+
+.muted { color: var(--text-2); }
+
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 18px;
+  border: 0;
+  border-radius: 12px;
+  background: none;
+  color: var(--text);
+  font-weight: 700;
+  font-size: 1rem;
+  transition: transform 0.12s ease, background 0.2s, opacity 0.2s;
+}
+.btn:active:not(:disabled) { transform: scale(0.98); }
+.btn:disabled { opacity: 0.55; }
+.btn.primary {
+  background: linear-gradient(180deg, #e3bc6c 0%, #a8823f 100%);
+  color: var(--gold-ink);
+  box-shadow: 0 8px 24px rgba(214, 173, 92, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+.btn.ghost {
+  margin-top: 12px;
+  border: 1px solid var(--line-strong);
+  color: var(--text-2);
+}
+
+.icon-btn {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: none;
+  color: var(--text-2);
+  font-size: 1.25rem;
+}
+.icon-btn:disabled { opacity: 0.3; }
+
+.spinner {
+  display: inline-block;
+  width: 28px;
+  height: 28px;
+  border: 2.5px solid var(--line-strong);
+  border-top-color: var(--gold);
+  border-radius: 50%;
+  animation: forge-spin 0.9s linear infinite;
+}
+@keyframes forge-spin { to { transform: rotate(360deg); } }
+
+.text-input {
+  width: 100%;
+  min-height: 52px;
+  padding: 14px 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 1.05rem; /* >= 16px avoids iOS zoom on focus */
+}
+.text-input::placeholder { color: var(--text-3); }
+.text-input:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 3px rgba(214, 173, 92, 0.18); }
+
+.chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--text-2);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.segmented {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.35);
+}
+.segmented button {
+  flex: 1;
+  min-height: 40px;
+  border-radius: 9px;
+  color: var(--text-3);
+  font-weight: 700;
+  font-size: 0.86rem;
+  transition: background 0.18s, color 0.18s;
+}
+.segmented button.active { background: var(--surface-3); color: var(--text); }
+
 /* --- Character forge ---------------------------------------------------------------- */
 
 .create-card {
@@ -123,6 +235,7 @@
   border: 1px solid var(--line);
   border-radius: 14px;
   background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  color: var(--text);
   text-align: left;
   transition: transform 0.12s, border-color 0.2s;
 }

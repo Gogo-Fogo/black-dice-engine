@@ -40,6 +40,29 @@ test('quick-start resources include higher spell tiers and match equipped hide a
  assert.equal(frontline.proposals[2].resources.some(r=>r.label.startsWith('Spell Slots')),false);
 });
 
+test('quick-start builds add validated attacks, spells, subclass, background and level-up improvements',async()=>{
+ const {isCharacterBuild}=await import('../packages/contracts/dist/index.js');
+ const options={level:5,round:0,usedNames:[],campaignTitle:'Demo',tone:[],avoid:[],useLlm:false};
+ const all=[];
+ for(const role of ['frontline','protector','shadows','arcane','support','talker'])for(const level of [1,3,5,11,20])
+  all.push(...(await buildProposals(sanitizeAnswers({role,ancestry:'human'}),{...options,level})).proposals);
+ for(const p of all){assert.ok(isCharacterBuild(p.build),p.classLabel);assert.ok(p.build.attacks.length>0);assert.ok(Object.values(p.stats).filter(Number.isFinite).every(score=>score<=20));}
+ const at=(classId,level)=>all.find(p=>p.classId===classId&&p.level===level);
+ const fighter=at('fighter',5);
+ assert.equal(fighter.stats.str,19);assert.equal(fighter.build.subclass,'Champion');assert.equal(fighter.build.proficiencyBonus,3);
+ assert.deepEqual(fighter.build.attacks[0],{name:'Longsword',bonus:'+7',damage:'1d8 + 6 slashing',notes:'two attacks per Attack action'});
+ assert.equal(at('fighter',1).build.subclass,null);assert.equal(at('fighter',1).build.abilityImprovements,null);
+ const wizard=at('wizard',5);
+ assert.equal(wizard.build.spellcasting.saveDc,15);assert.equal(wizard.build.spellcasting.spells.length,9);assert.ok(wizard.build.spellcasting.spells.includes('Fireball'));
+ assert.equal(wizard.build.spellcasting.cantrips.length,4);assert.deepEqual(wizard.build.attacks.at(-1),{name:'Fire Bolt',bonus:'+7',damage:'2d10 fire',notes:'cantrip'});
+ assert.equal(at('wizard',1).build.spellcasting.spells.every(spell=>!['Misty Step','Fireball'].includes(spell)),true);
+ const warlock=at('warlock',11);assert.match(warlock.build.attacks.find(a=>a.name==='Eldritch Blast').notes,/3 beams/);
+ assert.equal(at('ranger',1).build.spellcasting,undefined);assert.equal(at('ranger',5).build.attacks[0].bonus,'+9');
+ assert.equal(at('sorcerer',5).armorClass,14);assert.equal(at('bard',5).resources.find(r=>r.label==='Bardic Inspiration').max,4);
+ assert.ok(at('rogue',5).stats.skills.includes('deception'));assert.equal(new Set(at('rogue',5).stats.skills).size,at('rogue',5).stats.skills.length);
+ assert.equal(isCharacterBuild({...fighter.build,attacks:[{name:'x'.repeat(81),bonus:'+1',damage:'1'}]}),false);
+});
+
 test('forge isolates drafts, persists selection atomically and replays once across restart',async()=>{
  await withIsolatedServer(async server=>{
   const request=api(server),host=await server.hostToken(),initial=(await request('/api/session-snapshot',host)).body;
@@ -66,7 +89,7 @@ test('forge isolates drafts, persists selection atomically and replays once acro
    db.exec('DROP TRIGGER fail_forge');
    const chosen=await request(path+'/choose',owner.token,input);assert.equal(chosen.status,200,JSON.stringify(chosen.body));
    const saved=chosen.body.sessionSnapshot.party.find(c=>c.claimedByClientId===owner.actorId);
-   assert.equal(saved.name,session.proposals[0].name);assert.ok(saved.stats.str);assert.ok(saved.portrait.pendingId);assert.equal(chosen.body.command.requestId,input.requestId);
+   assert.equal(saved.name,session.proposals[0].name);assert.ok(saved.stats.str);assert.equal(saved.build.review,'quick_start');assert.ok(saved.build.attacks.length);assert.ok(saved.portrait.pendingId);assert.equal(chosen.body.command.requestId,input.requestId);
    await server.restart();
    assert.deepEqual(await request(path+'/choose',owner.token,input),chosen);
    assert.equal((await request(path+'/choose',owner.token,{...input,requestId:'new-request'})).status,409);

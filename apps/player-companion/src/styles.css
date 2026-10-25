@@ -1,3 +1,25 @@
+/* Design tokens used by forge.css and dice.css. Values match the palette below. */
+:root {
+  --gold: #d6ad5c;
+  --gold-ink: #140f07;
+  --text: #f8ecd5;
+  --text-2: #dccfb6;
+  --text-3: #a99c84;
+  --surface: #14110d;
+  --surface-2: #1d1913;
+  --surface-3: #2a241b;
+  --line: rgba(219, 187, 124, 0.18);
+  --line-strong: rgba(219, 187, 124, 0.38);
+  --good: #7fc48a;
+  --warn: #e0b45a;
+  --bad: #e07a6a;
+  --radius: 14px;
+  --gutter: 16px;
+  --font-display: Georgia, "Times New Roman", serif;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
 :root {
   color-scheme: dark;
   font-family: Georgia, "Times New Roman", serif;
@@ -598,6 +620,9 @@ button:disabled {
 .character-choice { margin-top: 10px; text-align: left; }
 .sheet-portrait { width: 100%; max-height: 200px; object-fit: cover; border-radius: 8px; }
 .character-vitals dd { margin: 6px 0; font-size: 1.3rem; }
+.build-review { font-size: .85rem; opacity: .8; }
+.build-attacks { padding-left: 1.1rem; }
+.build-attacks li { margin: 4px 0; overflow-wrap: anywhere; }
 .player-shell button:focus-visible, .player-shell input:focus-visible { outline: 3px solid #f8ecd5; outline-offset: 3px; }
 .player-shell button { min-height: 44px; }
 .player-shell form button { margin-top: 12px; }

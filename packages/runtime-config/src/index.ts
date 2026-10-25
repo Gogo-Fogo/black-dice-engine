@@ -121,6 +121,7 @@ export function readAiConfig(env: NodeJS.ProcessEnv = process.env, root = reposi
     ollamaBaseUrl, ollamaModel: text("OLLAMA_MODEL", "qwen2.5:7b"),
     openaiBaseUrl, openaiApiKey: profile === "party" ? "" : text("OPENAI_API_KEY"),
     openaiModel: text("OPENAI_MODEL", "gpt-4o-mini"), directorModeModel: text("BDE_DIRECTOR_MODE_MODEL"),
-    gmPromptPath: join(root, "prompts/gm-system-prompt.md"), directorPromptPath: join(root, "prompts/director-prompt.md")
+    gmPromptPath: join(root, "prompts/gm-system-prompt.md"), directorPromptPath: join(root, "prompts/director-prompt.md"),
+    directorGuidancePromptPath: join(root, "prompts/director-guidance-prompt.md")
   };
 }

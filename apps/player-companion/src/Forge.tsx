@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { abilities, abilityModifier, formatMod, getJson, getPendingRequestId, clearPendingRequestId, haptic, postJson } from "./forge-client";
-import { isPlayerSessionSnapshot, type PlayerSessionSnapshot as SessionSnapshot } from "../../../packages/contracts/dist/index.js";
+import { isPlayerSessionSnapshot, type CharacterBuild, type PlayerSessionSnapshot as SessionSnapshot } from "../../../packages/contracts/dist/index.js";
 import {ForgeImage, selectedPortrait, pendingChoice, saveChoice} from "./forge-client";
 
 // Quick character creation: four fast questions, three proposals with portraits, pick one.
@@ -32,6 +32,7 @@ type Proposal = {
   personality: string;
   hook: string;
   portraits: Portrait[];
+  build?: CharacterBuild;
 };
 
 type ForgeSession = { id: string; round: number; flavorSource: "llm" | "template"; proposals: Proposal[] };
@@ -465,6 +466,12 @@ function ProposalCard({ proposal, busy, onPick }: { proposal: Proposal; busy: st
           ))}
         </div>
         <p className="forge-gear">{proposal.inventory.map((i) => i.name).join(" · ")}</p>
+        {proposal.build && (
+          <p className="forge-gear">
+            {[proposal.build.subclass, ...proposal.build.attacks.slice(0, 2).map((a) => `${a.name} ${a.bonus}`),
+              proposal.build.spellcasting ? `${proposal.build.spellcasting.spells.length} spells` : ""].filter(Boolean).join(" · ")}
+          </p>
+        )}
       </div>
 
       <button type="button" className="btn primary forge-pick" disabled={!!busy} onClick={() => onPick(proposal, shown)}>

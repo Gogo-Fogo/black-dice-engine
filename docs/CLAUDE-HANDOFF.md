@@ -42,7 +42,7 @@ Only normalized, bounded PNG portraits can become approved references. GM approv
 
 Forge's choose endpoint now accepts a bounded 750 KB JSON envelope before Express's default parser; real portraits previously exceeded the default 100 KB body limit. Full-caster and half-caster slots, warlock pact slots, fighter Action Surge availability and hide armor AC were corrected. Existing characters are not rewritten.
 
-These are **quick-start characters**, not complete 5e builds. Spell selection, subclasses/backgrounds, attack entries and level-up ability choices still require work/GM review. The synthetic table was level five; its saved sheets correctly use that level even though the independent flavor proposal started at level three.
+These are **quick-start characters**, not complete 5e builds. Since the follow-up below, Forge also adds a deterministic `build`: subclass, SRD background, attacks, spellcasting picks, class features and Ability Score Improvements. Its picks are defaults for GM review. The synthetic table was level five; its saved sheets correctly use that level even though the independent flavor proposal started at level three.
 
 ### Local models and image pipeline
 
@@ -76,3 +76,24 @@ An explicit `BDE_DIRECTOR_MODE_MODEL` now actually selects loopback Ollama, with
 Use existing dependencies: `npm run lint`, `npm run build`, `npm test`. Build contracts/config before direct workspace commands. Never run the paid live harness as a normal test. Avoid default full-session startup during verification because it opens the configured/default persistent database.
 
 Do not commit `.env`, host/display keys, databases/backups, tunnel URLs, original attachments, private campaign sources, generated artwork, downloaded models or portable binaries. Preserve the existing local copies; they are not cleanup targets. A public tunnel URL changes on restart and is not part of the handoff. No pushes should include local access sheets or credentials.
+
+## Follow-up session — October 25, 2026 (Claude)
+
+Rehearsed in a browser on a disposable server (`--data-dir tmp/rehearsal --port 4410`, local ComfyUI only). Covered host, two 375 px phone views, Forge, real FLUX portraits, GM approval, sharing with the other phone and Stage, roll call, roll, reload and server restart. These are browser emulations, not physical devices.
+
+Fixed:
+- **Forge UI was unusable on phones.** `forge.css` and `dice.css` used design tokens and primitives (`--surface`, `--line`, `.btn`, `.segmented`, `.chip-row`, `.spinner`, …) that the adapted stylesheet never defined. The global full-width gold `button` style overrode the rest. Role cards rendered dark on dark, and Dice Lab chips were each full width. Tokens are now defined in `styles.css`; `forge.css` restores the primitives and opts `.forge`/`.lab` buttons out of the global style.
+- **No manual roll call.** PR #2's "Call for a roll" form was lost in the adaptation, so a DC could only be set by approving an AI proposal. `RollCallPanel` (Run tab) restores it on the existing `/api/set-action`.
+- **Phone modifiers ignored proficiency.** `abilityModifier` now adds the proficiency bonus when the called check names one of the character's skills. Example: a level 5 wizard rolling Arcana goes from +4 to +7.
+- **Character builds.** `services/game-server/src/character-builds.ts` adds a validated `Character.build` (contracts `isCharacterBuild`), visible only to the owning player. ASIs now raise the primary ability. Sorcerers get Draconic Resilience AC/HP, Bardic Inspiration equals the CHA modifier, and background skills merge into the skill list. Proposal cards show a one-line build summary.
+- **Director prompt contract.** Guidance has its own `prompts/director-guidance-prompt.md`. Proposal `action` text is now flagged as public once approved. See `deepseek-campaign-live-check.md` for the second paid authorization (33 calls, about $0.022 of $0.50).
+
+Verification: `npm run lint`, `npm run build`, and `npm test` (183/183) passed, plus forge/service-config against emitted modules.
+
+Still open or noticed:
+- A physical phone, TV and LAN rehearsal is still needed.
+- In TTRPG mode, a separate TV device needs a display key. Only Party host controls can mint one; the Stage tab's "Open on TV" works only in the same browser.
+- The local 3D dice GLBs are 10–32 MB each (ignored assets), so Dice Lab often reports "No model" and falls back to generated dice. Smaller models are needed for phones.
+- The seeded default party in `services/game-server/src/index.ts` uses names such as "J'Epstein" and "Shlomo Ahkim". Review them against the demo-safe content rule.
+- GPU scheduling (item 4 above) is unchanged. The director remains hosted, so there is no contention today.
+- `.claude/launch.json` defines the disposable `rehearsal` preview and is not committed.

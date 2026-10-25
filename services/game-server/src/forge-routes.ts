@@ -108,7 +108,7 @@ export function installForgeRoutes(app: express.Express, hooks: {
     const proposal=session.proposals.find(p=>p.id===request.body.proposalId);
     if(!proposal)throw new SessionError(400,'Choose one of your current proposals.');
     if(hooks.party.length>=30)throw new SessionError(409,'The table has reached its character limit.');
-    const character: Character={id:randomUUID(),name:proposal.name,classLabel:proposal.classLabel,hp:{current:proposal.hp,max:proposal.hp},armorClass:proposal.armorClass,initiative:null,conditions:[],resources:proposal.resources,inventory:proposal.inventory,stats:proposal.stats,
+    const character: Character={id:randomUUID(),name:proposal.name,classLabel:proposal.classLabel,hp:{current:proposal.hp,max:proposal.hp},armorClass:proposal.armorClass,initiative:null,conditions:[],resources:proposal.resources,inventory:proposal.inventory,stats:proposal.stats,...(proposal.build?{build:proposal.build}:{}),
       notes:[proposal.appearance,proposal.personality,proposal.hook],image:null,claimedByClientId:viewer.actorId,claimedByLabel:viewer.label};
     if(request.body.image){const reference=hooks.portraits.prepare(character,request.body.image,proposal.appearance);hooks.commands.persist(reference.save);character.portrait={pendingId:reference.id,description:proposal.appearance,seed:reference.seed,version:1};}
     for(const existing of hooks.party)if(existing.claimedByClientId===viewer.actorId){existing.claimedByClientId=null;existing.claimedByLabel=null;}

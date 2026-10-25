@@ -13,7 +13,7 @@ import { readAiConfig } from "../../../packages/runtime-config/dist/index.js";
 // ─── Configuration ───────────────────────────────────────────────────────────
 
 const { disabled, disabledReason, provider, ollamaBaseUrl, ollamaModel, openaiBaseUrl, openaiApiKey, openaiModel,
-  directorModeModel, gmPromptPath, directorPromptPath } = readAiConfig();
+  directorModeModel, gmPromptPath, directorGuidancePromptPath } = readAiConfig();
 
 let gmSystemPrompt = "";
 try {
@@ -22,11 +22,13 @@ try {
   gmSystemPrompt = "You are a helpful tabletop RPG game master assistant.";
 }
 
+// Live guidance only. prompts/director-prompt.md requests a full scene packet and
+// stays with the scene-packet preview; mixing both contracts confused the model.
 let directorPrompt = "";
 try {
-  directorPrompt = readFileSync(directorPromptPath, "utf8");
+  directorPrompt = readFileSync(directorGuidancePromptPath, "utf8");
 } catch {
-  directorPrompt = "You are a director for a tabletop RPG session.";
+  directorPrompt = "You advise the GM of a live tabletop RPG session. Reply with concise bullet points only.";
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -335,7 +337,7 @@ function buildActionPrompt(
   parts.push(
     ``,
     `Return a JSON object with exactly these fields:`,
-    `- "action": a short action description (1 sentence)`,
+    `- "action": a short action description (1 sentence). If approved it is shown to players and the table display, so it must not state or hint at GM-only facts; keep those in "consequences" for the GM`,
     `- "skill": exactly one of ${Object.keys(actionSkillAbilities).join(", ")}`,
     `- "difficulty": exactly one of ${Object.keys(actionDifficultyDcs).join(", ")}`,
     `- "description": 1-2 sentences describing what the players are attempting`,

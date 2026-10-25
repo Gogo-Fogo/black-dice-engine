@@ -992,7 +992,8 @@ body {
   text-transform: uppercase;
 }
 
-.character-form input {
+.character-form input,
+.character-form select {
   width: 100%;
   padding: 8px 10px;
   border: 1px solid rgba(219, 187, 124, 0.2);

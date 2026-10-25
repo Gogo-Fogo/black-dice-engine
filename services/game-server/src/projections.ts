@@ -17,6 +17,15 @@ export function projectRoll(value: unknown) {
   return pick(value, ["id", "actorId", "actorName", "dice", "modifier", "rolled", "total", "advantage", "note", "timestamp"]);
 }
 
+function projectBuild(value: unknown) {
+  const build = object(value);
+  return {
+    ...pick(build, ["review", "proficiencyBonus", "subclass", "background", "backgroundFeature", "features", "abilityImprovements"]),
+    attacks: list(build.attacks).map(attack => pick(attack, ["name", "bonus", "damage", "notes"])),
+    ...(build.spellcasting ? { spellcasting: pick(build.spellcasting, ["ability", "saveDc", "attackBonus", "style", "cantrips", "spells"]) } : {}),
+  };
+}
+
 /** Allowlist fields before serialization; unknown fields are private by default. */
 export function projectSnapshot(value: unknown, viewer: LocalIdentity): unknown {
   if (viewer.role === "gm") return value;
@@ -37,6 +46,7 @@ export function projectSnapshot(value: unknown, viewer: LocalIdentity): unknown 
           approvedId:object(character.portrait).approvedId, description:'', version:1, seed:0
         }} : {}),
         ...(own ? { stats: pick(character.stats, ["str", "dex", "con", "int", "wis", "cha", "skills"]) } : {}),
+        ...(own && character.build ? { build: projectBuild(character.build) } : {}),
       };
     }),
     rollLog: list(snapshot.rollLog).map(projectRoll),

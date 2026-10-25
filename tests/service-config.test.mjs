@@ -83,7 +83,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 const { readAiConfig } = await import(${JSON.stringify(config)});
 const paths = readAiConfig();
-const expected = [readFileSync(paths.gmPromptPath, 'utf8'), readFileSync(paths.directorPromptPath, 'utf8'), readFileSync(paths.gmPromptPath, 'utf8')];
+const expected = [readFileSync(paths.gmPromptPath, 'utf8'), readFileSync(paths.directorGuidancePromptPath, 'utf8'), readFileSync(paths.gmPromptPath, 'utf8')];
 let calls = 0;
 globalThis.fetch = async (url, init) => {
   assert.equal(url, 'http://127.0.0.1:1/api/chat');

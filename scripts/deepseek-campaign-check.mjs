@@ -1,12 +1,14 @@
 // Explicit paid opt-in only. Never imported by npm test or a launcher.
-import {readFileSync,writeFileSync,mkdirSync,existsSync} from 'node:fs';
+import {readFileSync,writeFileSync,mkdirSync,existsSync,rmSync} from 'node:fs';
 import {parseEnv} from 'node:util';
-import {resolve,dirname} from 'node:path';
+import {resolve,dirname,relative} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import assert from 'node:assert/strict';
 
 const root=fileURLToPath(new URL('../',import.meta.url));
-if(!process.argv.includes('--live'))throw Error('Paid check requires --live. Only original synthetic campaign content is sent.');
+// --dry-run exercises the scenario script with canned replies and never sends a request.
+const dryRun=process.argv.includes('--dry-run');
+if(!dryRun&&!process.argv.includes('--live'))throw Error('Paid check requires --live. Only original synthetic campaign content is sent.');
 const env=parseEnv(readFileSync(resolve(root,'.env'),'utf8'));
 for(const name of ['BDE_LLM_PROVIDER','OPENAI_BASE_URL','OPENAI_MODEL','OPENAI_API_KEY','BDE_ALLOW_REMOTE_AI'])if(env[name])process.env[name]=env[name];
 process.env.BDE_RUNTIME_PROFILE='full';
@@ -14,13 +16,22 @@ assert.equal(process.env.OPENAI_BASE_URL,'https://api.deepseek.com','This check 
 assert.equal(process.env.OPENAI_MODEL,'deepseek-flash','This budget is for DeepSeek Flash only.');
 assert.equal(process.env.BDE_ALLOW_REMOTE_AI,'1','Existing remote AI consent is required.');
 assert.ok(process.env.OPENAI_API_KEY,'Configure the existing key locally; never pass it on the command line.');
-const reportPath=resolve(root,'tmp/deepseek-campaign-live.json');
+// Each new spending authorization gets its own ledger; the original one stays exhausted.
+const ledger=process.argv.find(arg=>arg.startsWith('--ledger='))?.slice(9);
+if(ledger!==undefined&&!/^[a-z0-9-]{1,40}$/.test(ledger))throw Error('Ledger names use lowercase letters, digits and dashes.');
+const reportPath=resolve(root,dryRun?'tmp/deepseek-dry-run.json':ledger?`tmp/deepseek-${ledger}.json`:'tmp/deepseek-campaign-live.json');
+if(dryRun)rmSync(reportPath,{force:true});
+const maxCalls=ledger?60:16;
 mkdirSync(dirname(reportPath),{recursive:true});
 const report=existsSync(reportPath)?JSON.parse(readFileSync(reportPath,'utf8')):{budgetUsd:0.50,rateBasis:'Peak, uncached: input $0.30/M; output $1.20/M. Verified official pricing 2026-10-25.',calls:[],scenarios:[]};
 assert.equal(report.budgetUsd,0.50);
 const persist=()=>writeFileSync(reportPath,JSON.stringify(report,null,2)+'\n');
 let label='';
-const realFetch=globalThis.fetch;
+const cannedProposal=JSON.stringify({action:'Dry-run action',skill:'Investigation',difficulty:'medium',description:'Dry-run description.',consequences:'Dry-run consequences.'});
+const canned=({messages})=>messages[0].content.includes('Output audience: public_demo')?'Mara and Rook dry-run narration.'
+  :messages.at(-1).content.includes('Provide director guidance')?'- Dry-run bullet':cannedProposal;
+const realFetch=dryRun?async(_url,init)=>Response.json({model:'dry-run',choices:[{finish_reason:'stop',message:{content:canned(JSON.parse(init.body))}}],
+  usage:{prompt_tokens:0,completion_tokens:0}}):globalThis.fetch;
 const metered=async(url,init)=>{
   assert.equal(String(url),'https://api.deepseek.com/chat/completions');
   assert.equal(init.method,'POST');
@@ -33,7 +44,7 @@ const metered=async(url,init)=>{
   // the whole request before sending, including requests that time out ambiguously.
   const reservedUsd=((bytes+2048)*0.30+body.max_tokens*1.20)/1e6;
   const spent=report.calls.reduce((sum,call)=>sum+call.reservedUsd,0);
-  assert.ok(report.calls.length<16&&spent+reservedUsd<0.45,'Paid check budget exhausted; no request sent.');
+  assert.ok(report.calls.length<maxCalls&&spent+reservedUsd<0.45,'Paid check budget exhausted; no request sent.');
   const call={label,reservedUsd,startedAt:new Date().toISOString(),maxTokens:body.max_tokens,thinking:body.thinking?.type??'provider-default'};
   report.calls.push(call);persist();
   const start=performance.now();
@@ -91,6 +102,69 @@ if(process.argv.includes('--forge-demo')){
  writeFileSync(resolve(root,'tmp/character-forge-live-proposals.json'),JSON.stringify(result,null,2)+'\n');
  assert.equal(result.flavorSource,'llm','Live flavor failed validation; templates were saved for inspection.');
  console.log(JSON.stringify({scenario:label,flavorSource:result.flavorSource,characters:result.proposals.map(p=>({name:p.name,class:p.classLabel,hp:p.hp,ac:p.armorClass}))}));
+}else if(process.argv.includes('--long')){
+ // A twelve-beat synthetic session: two competing objectives, a failed check that
+ // needs another route, a reward that must be delivered, and two scene changes.
+ progress=loadCampaignProgress(null,'synthetic-clockwork-orchard');
+ Object.assign(snapshot,{campaignId:progress.campaignId,campaignTitle:'Synthetic: The Clockwork Orchard',currentScene:'Orchard gate at dusk',campaignProgress:progress,
+  activeSceneContext:{location:null,tone:['whimsical fantasy','gentle peril'],facts:[]},
+  party:[{id:'ivy',name:'Ivy',classLabel:'Druid 4',hp:{current:27,max:27}},{id:'bram',name:'Bram',classLabel:'Fighter 4',hp:{current:36,max:36}},{id:'quill',name:'Quill',classLabel:'Bard 4',hp:{current:25,max:25}}],
+  memoryEntries:[{id:'orchard-secret',campaignId:progress.campaignId,kind:'campaign_fact',status:'confirmed',visibility:'gm_only',summary:'SYNTHETIC_SECRET_CANARY: The keeper Odalys started the frost engine by accident. Reveal only if she confesses.'}]});
+ const proposals=[];
+ // Resolve the existing active entry instead of adding a second, contradictory one.
+ const complete=(kind,title,resolution)=>{const entry=progress.entries.find(e=>e.kind===kind&&e.title===title&&e.status==='active');
+  applyProgressCommand(progress,{operation:'record',id:entry.id,kind,title,detail:entry.detail,status:'completed',resolution,visibility:'public_demo'},time);};
+ const proposeLong=(name,previous,resolved)=>scenario(name,()=>propose(previous),text=>{
+  const proposal=parseActionProposal(text);proposals.push(proposal.action);
+  const mentions=resolved.filter(word=>new RegExp(`\\b${word}\\b`,'i').test(`${proposal.action} ${proposal.description}`));
+  return {validSchema:true,proposal,mentionsResolvedWork:mentions};
+ });
+ const publicNarration=(name,roll)=>scenario(name,()=>generateNarration(pub(),roll,{request:metered,maxTokens:350,timeoutMs:10000}),text=>{
+  assert.doesNotMatch(text,/SYNTHETIC_SECRET_CANARY|by accident/i);return {privateCanaryAbsent:true,manualReview:true};
+ });
+ const guidance=name=>scenario(name,()=>generateDirectorGuidance(gm(),0,snapshot.memoryEntries.length,{request:metered,maxTokens:550,timeoutMs:15000}),text=>{
+  assert.doesNotMatch(text.trim(),/^[{[]/,'Guidance must be bullets, not a JSON scene packet.');
+  return {bulletLines:text.split('\n').filter(line=>/^\s*([-*•]|\d+[.)])/.test(line)).length,manualReview:true};
+ });
+ record('objective','Rescue the orchard keeper','active','','Odalys is trapped in the greenhouse as frost spreads.');
+ record('objective','Stop the frost engine','active','','The engine under the old mill freezes the orchard each night.');
+ record('scene','Orchard gate','active','','Closes when the party is inside the orchard walls.');
+ await proposeLong('long-01-opening','The party arrives at the orchard gate at dusk.',[]);
+ const gate={id:'gate',description:'Coax the clockwork gate open',type:'Persuasion',ability:'cha',dc:12};
+ recordActionResolution(progress,gate,[{id:'r-gate',actorId:'quill',actorName:'Quill',total:15}],time);
+ applyProgressCommand(progress,{operation:'consequence',actionId:gate.id,consequence:"The gate swings open for Quill's song. The party is inside the orchard.",visibility:'public_demo'},time);
+ record('obstacle','Orchard gate','completed','Open. No further gate check is needed.');
+ complete('scene','Orchard gate','Transition into the frozen orchard.');
+ progress.sceneId='orchard-rows';snapshot.currentScene='Frozen orchard rows';memory('The gate is open and the party walks the frozen orchard rows.');
+ await publicNarration('long-02-gate-success',{actorName:'Quill',actionDescription:gate.description,diceLabel:'d20',total:15,rawRoll:12,modifier:3,success:true,dc:12});
+ await proposeLong('long-03-competing-objectives','The party must choose between the greenhouse and the mill.',['gate']);
+ await guidance('long-04-guidance-competing');
+ const ice={id:'ice-bridge',description:'Cross the iced footbridge to the greenhouse',type:'Acrobatics',ability:'dex',dc:15};
+ recordActionResolution(progress,ice,[{id:'r-ice',actorId:'bram',actorName:'Bram',total:9}],time);
+ applyProgressCommand(progress,{operation:'consequence',actionId:ice.id,consequence:'Bram slips and the footbridge cracks; it cannot be crossed. Ivy notices a root tunnel that also leads to the greenhouse.',visibility:'public_demo'},time);
+ await publicNarration('long-05-failed-bridge',{actorName:'Bram',actionDescription:ice.description,diceLabel:'d20',total:9,rawRoll:6,modifier:3,success:false,dc:15});
+ memory('The footbridge is broken. A root tunnel offers another way to the greenhouse.');
+ await proposeLong('long-06-alternative-route','The party looks for another way after the bridge breaks.',['footbridge','bridge']);
+ record('obstacle','Reach the greenhouse','completed','The party used the root tunnel and is at the greenhouse door. No bridge crossing is needed.');
+ complete('objective','Rescue the orchard keeper','Odalys is free and safe. She thanks them and gives the brass mill key as the promised reward.');
+ snapshot.currentScene='Greenhouse';memory('Odalys is rescued. She gives the party the brass mill key as their reward.');
+ await guidance('long-07-guidance-after-rescue');
+ await proposeLong('long-08-reward-delivered','The party leaves the greenhouse with the brass mill key, heading for the mill.',['greenhouse','rescue','tunnel']);
+ record('scene','Greenhouse rescue','completed','Transition to the old mill.','Closes when Odalys is safe.');
+ progress.sceneId='old-mill';snapshot.currentScene='The old mill';memory('The party opens the mill with the brass key. The frost engine hums below.');
+ const engine={id:'engine',description:"Jam the frost engine's regulator",type:'Athletics',ability:'str',dc:14};
+ recordActionResolution(progress,engine,[{id:'r-engine',actorId:'bram',actorName:'Bram',total:18},{id:'r-engine-2',actorId:'ivy',actorName:'Ivy',total:11}],time);
+ applyProgressCommand(progress,{operation:'consequence',actionId:engine.id,consequence:'Bram jams the regulator and the engine stops. Ivy is splashed by freezing coolant but unhurt.',visibility:'public_demo'},time);
+ complete('objective','Stop the frost engine','The engine is stopped and the orchard thaws.');
+ const bram={actorName:'Bram',actionDescription:engine.description,diceLabel:'d20',total:18,modifier:4,rawRoll:14,success:true,dc:14};
+ await publicNarration('long-09-engine-group',{...bram,participants:[bram,{actorName:'Ivy',actionDescription:engine.description,diceLabel:'d20',total:11,modifier:2,rawRoll:9,success:false,dc:14}]});
+ record('milestone','Orchard saved','completed','Both objectives are complete. Deliver a thaw celebration and the milestone.');
+ record('scene','The old mill','completed','Close the adventure with its reward.','Closes when the engine stops.');
+ memory('Both objectives are complete; the orchard is saved and the adventure is finished.');
+ await guidance('long-10-guidance-ending');
+ await proposeLong('long-11-no-new-gate','The party returns to the thawing orchard as heroes.',['regulator','engine','bridge','gate']);
+ await publicNarration('long-12-ending-unknown-dc',{actorName:'Quill',actionDescription:'Play a victory song for the orchard folk',diceLabel:'d20',total:13,rawRoll:10,modifier:3,success:null,dc:null});
+ report.longSessionDistinctProposals=`${new Set(proposals.map(text=>text.toLowerCase().replace(/[^a-z ]/g,'').trim())).size}/${proposals.length}`;
 }else if(process.argv.includes('--baseline')){
  await scenario('baseline-production-action',()=>propose('The party uses its already-earned key to enter the archive.'),proposalCheck);
 }else{
@@ -137,5 +211,5 @@ if(process.argv.includes('--forge-demo')){
 const latest=[...new Map(report.scenarios.map(s=>[s.name,s])).values()];
 report.summary={calls:report.calls.length,scenariosPassed:latest.filter(s=>s.status==='passed').length,scenariosFailed:latest.filter(s=>s.status==='failed').length,
  estimatedPeakUsd:report.calls.reduce((sum,c)=>sum+(c.estimatedPeakUsd??c.reservedUsd),0),conservativeReservedUsd:report.calls.reduce((sum,c)=>sum+c.reservedUsd,0)};
-persist();console.log(JSON.stringify({report:'tmp/deepseek-campaign-live.json',...report.summary}));
+persist();console.log(JSON.stringify({report:relative(root,reportPath).replaceAll('\\','/'),...report.summary}));
 if(report.summary.scenariosFailed)process.exitCode=1;

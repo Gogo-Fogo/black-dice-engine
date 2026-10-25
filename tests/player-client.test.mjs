@@ -25,6 +25,10 @@ test('companion model uses current ownership, ignores stale snapshots and dedupl
   assert.ok(model.receive({ type: 'connected', payload: { sessionSnapshot: snapshot() } }));
   assert.equal(abilityModifier(character, snapshot().currentAction), 2);
   assert.equal(abilityModifier(null, null), 0);
+  const skilled = { ...character, classLabel: 'Wizard 5', stats: { int: 19, skills: ['arcana', 'sleight_of_hand'] } };
+  assert.equal(abilityModifier(skilled, { type: 'Arcana', description: '', ability: 'int', dc: 13 }), 7);
+  assert.equal(abilityModifier(skilled, { type: 'History', description: '', ability: 'int', dc: 13 }), 4);
+  assert.equal(abilityModifier({ ...skilled, build: { proficiencyBonus: 4 } }, { type: 'Sleight of Hand', description: '', ability: 'int', dc: 13 }), 8);
   assert.ok(model.receive({ type: 'roll_recorded', payload: roll() }));
   model.acceptRoll(roll(), 4);
   assert.equal(presented.length, 1); assert.equal(model.current().rollLog.length, 1);
