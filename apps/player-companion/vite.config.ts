@@ -5,7 +5,9 @@ export default defineConfig({
   base: "./",
   plugins: [react()],
   build: {
-    target: "es2018"
+    target: "es2018",
+    // Keep CSS readable by older phone browsers (e.g. no `inset` shorthand).
+    cssTarget: ["chrome61", "safari12"]
   },
   server: {
     host: true,

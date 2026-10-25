@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { DiceHandle, renderDiceOverlay } from "./dice3d";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { DiceAnimation } from "./dice/DiceAnimation";
+import { DiceStyleId, parseDice, readStylePref, resolveStyle } from "./dice/common";
 import { playDiceRollSound } from "./diceSound";
 import { formatMod, haptic, naturalRolls } from "./lib";
 import type { RollRecord } from "./types";
@@ -9,6 +10,8 @@ type Props = {
   dc: number | null;
   soundOn: boolean;
   onClose: () => void;
+  /** Override the phone's saved dice style (the Dice Lab uses this). */
+  styleId?: DiceStyleId;
 };
 
 // iOS gates motion events behind a permission prompt that must come from a tap.
@@ -20,9 +23,9 @@ const motionNeedsPermission = () => typeof motionApi()?.requestPermission === "f
 const prefersReducedMotion = () =>
   typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-export function DiceOverlay({ roll, dc, soundOn, onClose }: Props) {
-  const sceneRef = useRef<HTMLDivElement | null>(null);
-  const handleRef = useRef<DiceHandle | null>(null);
+export function DiceOverlay({ roll, dc, soundOn, onClose, styleId }: Props) {
+  const diceStyle = useMemo(() => styleId ?? resolveStyle(readStylePref()), [styleId]);
+  const faces = useMemo(() => parseDice(roll.dice, roll.rolled), [roll]);
   const thrownRef = useRef(false);
   const [thrown, setThrown] = useState(false);
   const [showResult, setShowResult] = useState(false);
@@ -35,24 +38,11 @@ export function DiceOverlay({ roll, dc, soundOn, onClose }: Props) {
   }, [roll]);
 
   useEffect(() => {
-    const el = sceneRef.current;
-    if (!el || prefersReducedMotion()) {
-      thrownRef.current = true;
-      setThrown(true);
-      reveal();
-      return;
-    }
-    try {
-      handleRef.current = renderDiceOverlay(el, roll.dice, reveal);
-    } catch {
+    if (prefersReducedMotion()) {
       thrownRef.current = true;
       setThrown(true);
       reveal();
     }
-    return () => {
-      handleRef.current?.dispose();
-      handleRef.current = null;
-    };
   }, []);
 
   const doThrow = useCallback(() => {
@@ -61,7 +51,6 @@ export function DiceOverlay({ roll, dc, soundOn, onClose }: Props) {
     setThrown(true);
     haptic(15);
     if (soundOn) playDiceRollSound();
-    handleRef.current?.throwDice();
   }, [soundOn]);
 
   // Shake to throw (permission is requested on the first tap on iOS)
@@ -132,7 +121,9 @@ export function DiceOverlay({ roll, dc, soundOn, onClose }: Props) {
       onClick={handleTap}
     >
       <div className="dice-overlay-bg" />
-      <div className="dice-3d-container" ref={sceneRef} aria-hidden="true" />
+      <div className="dice-3d-container" aria-hidden="true">
+        {!prefersReducedMotion() ? <DiceAnimation styleId={diceStyle} faces={faces} thrown={thrown} onSettled={reveal} /> : null}
+      </div>
 
       <div className="dice-overlay-top">
         <span className="dice-overlay-label">{roll.note}</span>

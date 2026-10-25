@@ -1,6 +1,6 @@
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { preloadDice } from "./dice3d";
 import { DiceOverlay } from "./DiceOverlay";
+import { diceStyles, readStylePref, resolveStyle } from "./dice/common";
 import {
   abilities,
   abilityName,
@@ -32,7 +32,12 @@ import type {
   SessionSnapshot
 } from "./types";
 
-preloadDice();
+// three.js is ~800 KB; only fetch it (and warm the dice models) when this phone uses the 3D dice.
+if (resolveStyle(readStylePref()) === "classic3d") {
+  void import("./dice3d").then((m) => m.preloadDice()).catch(() => {});
+} else if (resolveStyle(readStylePref()) === "throw3d") {
+  void import("./dice/throw3d-engine").catch(() => {});
+}
 
 type Tab = "play" | "sheet" | "table" | "lore";
 
@@ -991,6 +996,14 @@ function SheetTab({
               <span>Dice sound</span>
               <span className={`switch ${soundOn ? "on" : ""}`} aria-hidden="true" />
             </button>
+          </li>
+          <li>
+            <a className="list-row tappable" href="?lab=dice">
+              <span>Dice animation</span>
+              <span className="muted small">
+                {readStylePref() === "auto" ? "Auto" : diceStyles.find((d) => d.id === readStylePref())?.name} ›
+              </span>
+            </a>
           </li>
         </ul>
         <button

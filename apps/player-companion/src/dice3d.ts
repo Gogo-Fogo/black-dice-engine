@@ -51,12 +51,14 @@ export interface DiceHandle {
 export function renderDiceOverlay(
   container: HTMLElement,
   notation: string,
-  onDone: () => void
+  onDone: () => void,
+  onLoadError?: () => void
 ): DiceHandle {
   const { count, sides } = parseDiceNotation(notation);
   const modelPath = getModelPath(sides);
-  const w = window.innerWidth;
-  const h = window.innerHeight;
+  // Size to the container (it may be a half-screen comparison pane), not the window.
+  const w = container.clientWidth || window.innerWidth;
+  const h = container.clientHeight || window.innerHeight;
   const scene = new THREE.Scene();
 
   const camera = new THREE.PerspectiveCamera(45, w / h, 0.1, 1000);
@@ -97,7 +99,7 @@ export function renderDiceOverlay(
       spinSpeeds.push(1 + Math.random() * 3);
     }
     loaded = true;
-  }).catch(() => { loaded = true; onDone(); });
+  }).catch(() => { loaded = true; onLoadError?.(); onDone(); });
 
   function throwDice() {
     if (thrown) return;
