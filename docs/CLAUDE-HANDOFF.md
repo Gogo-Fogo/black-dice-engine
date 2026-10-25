@@ -24,6 +24,8 @@ The phone tab redesign (`629722f`, PR #1), dashboard/TV redesign (`40d5b64`, PR 
 
 Phone tabs are Play/Sheet/Table/Lore. Dashboard tabs are Stage/Run/Media/Audio/System. Forge has bounded authenticated drafts, three proposals, rerolls, optional flavor and portraits, transactional selection and automatic claim. Six cosmetic dice styles and a practice/calibration lab do not change authoritative server totals. Browser-only imports remain lazy.
 
+Archive tags on GitHub use `archive/feature/<branch-name>-2026-10-25` for `character-forge`, `dice-styles`, `gm-dashboard-tv-scene` and `player-companion-ux-overhaul`. The retired feature branch pointers can be removed after those tags and main are published; all original commits remain reachable. The old `backup/pre-description-rewrite` pointer was preserved separately as the **local-only** tag `archive/local/pre-description-rewrite-2026-10-25`; its historical rewritten lineage was not added to the publication push. No runtime, model, generated output or campaign data was removed during cleanup.
+
 ### Campaign continuity and DeepSeek
 
 Actual roll outcomes use the real DC; unknown difficulty stays unresolved. Group context includes all participants. Audience-filtered memory, attempted actions and GM-approved consequences reach AI context. A deterministic progress ledger records objectives, clues, obstacles, milestones and scene completion; completed work is retained across restart. The GM approves authoritative effects; the model cannot freely mutate state.
@@ -54,7 +56,7 @@ An explicit `BDE_DIRECTOR_MODE_MODEL` now actually selects loopback Ollama, with
 
 ## Verification and rollout limits
 
-- Latest implementation checks: 182/182 source tests; 33 affected tests against emitted modules; game-server and Comfy-router lint/build. The publication checkpoint also runs root workspace lint/build/test after history reconciliation; record any different result below.
+- Publication checkpoint: root `npm run lint` and `npm run build` passed all eight workspaces; `npm test` passed **182/182** after history reconciliation. Vite retains the documented >500 KB chunk warnings. The restricted sandbox could not connect to isolated localhost servers or create a test symlink; rerunning the same suite outside those restrictions passed in 24.3 seconds. No implementation changes were needed for that environment failure. Earlier, 33 affected checks passed against emitted modules. `git diff --check` also passed after whitespace-only cleanup in newly tracked files.
 - Real generation was performed locally with original synthetic characters. Their flavor used one real DeepSeek call and was then replayed for authenticated HTTP/persistence checks. Three images were saved, approved, fetched through spectator credentials and preserved across restart.
 - Local-only outputs: ignored `tmp/character-creation-results/sheets.html`, `sheets.json`, three portraits and `reference-scene.png`. HTML renders the actual sheet component statically; it is not an interactive browser test. These artifacts will not appear on GitHub.
 - Browser automation is disabled in this Work environment. Actual phone gestures, PNG canvas normalization, responsive layouts, WebGL dice, cellular access and TV/HDMI still need a physical-device smoke test. Earlier Party layout/network checks do not establish the new campaign UI.
